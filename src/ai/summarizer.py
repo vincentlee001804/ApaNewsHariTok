@@ -21,11 +21,18 @@ def summarize(text: str, max_words: int = 40) -> Optional[str]:
 
     prompt = textwrap.dedent(
         f"""
-        Summarize the following news article in at most {max_words} words.
-        Focus on the key facts (who, what, where, when).
-        Provide only the summary text, no instructions or labels.
+        You are summarizing a local news article from Sarawak, Malaysia.
+        Read the full article below and create a concise summary in at most {max_words} words.
+        
+        Focus on:
+        - Key facts: who, what, where, when, why
+        - Important details and numbers mentioned
+        - Main points and outcomes
+        
+        Provide only the summary text, no instructions, labels, or quotes around the summary.
+        Write in clear, natural language.
 
-        Article:
+        Full Article:
         \"\"\"{text.strip()}\"\"\"
         """
     ).strip()

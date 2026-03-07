@@ -244,9 +244,18 @@ def get_latest_news_text(max_items: int = 3) -> str:
         # Extract category
         category = _extract_category(item.title, item.summary)
 
-        # Get AI summary
-        source_text = item.summary or item.title
-        ai_summary = summarize(source_text, max_words=40)
+        # Get AI summary - try to fetch full article content first
+        from src.scrapers.article_scraper import extract_article_content
+        
+        article_text = extract_article_content(item.link)
+        if article_text:
+            # Use full article content for better summary
+            source_text = article_text
+        else:
+            # Fallback to RSS summary or title if article scraping fails
+            source_text = item.summary or item.title
+        
+        ai_summary = summarize(source_text, max_words=50)  # Increased to 50 words for more detailed summary
 
         if not ai_summary:
             ai_summary = "(No AI summary available right now.)"
@@ -255,10 +264,10 @@ def get_latest_news_text(max_items: int = 3) -> str:
         source_name = _get_source_name(item.source)
 
         # Format according to specification:
-        # [Category][Short title]
-        # [Summary]
-        # [Source name]([link])
-        lines.append(f"[{category}] {item.title}")
+        # [Category] *Title* (title in bold to distinguish from summary)
+        # Summary
+        # [Source name](link)
+        lines.append(f"[{category}] *{item.title}*")
         lines.append(ai_summary)
         lines.append(f"[{source_name}]({item.link})")
         lines.append("")  # Empty line between items
@@ -352,9 +361,18 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
         # Extract category
         category = _extract_category(item.title, item.summary)
 
-        # Get AI summary
-        source_text = item.summary or item.title
-        ai_summary = summarize(source_text, max_words=40)
+        # Get AI summary - try to fetch full article content first
+        from src.scrapers.article_scraper import extract_article_content
+        
+        article_text = extract_article_content(item.link)
+        if article_text:
+            # Use full article content for better summary
+            source_text = article_text
+        else:
+            # Fallback to RSS summary or title if article scraping fails
+            source_text = item.summary or item.title
+        
+        ai_summary = summarize(source_text, max_words=50)  # Increased to 50 words for more detailed summary
 
         if not ai_summary:
             ai_summary = "(No AI summary available right now.)"
@@ -363,10 +381,10 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
         source_name = _get_source_name(item.source)
 
         # Format according to specification:
-        # [Category][Short title]
-        # [Summary]
-        # [Source name]([link])
-        lines.append(f"[{category}] {item.title}")
+        # [Category] *Title* (title in bold to distinguish from summary)
+        # Summary
+        # [Source name](link)
+        lines.append(f"[{category}] *{item.title}*")
         lines.append(ai_summary)
         lines.append(f"[{source_name}]({item.link})")
         lines.append("")  # Empty line between items

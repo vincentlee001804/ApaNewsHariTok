@@ -21,9 +21,9 @@ def summarize(text: str, max_words: int = 40) -> Optional[str]:
 
     prompt = textwrap.dedent(
         f"""
-        You are a concise local news summarizer.
         Summarize the following news article in at most {max_words} words.
         Focus on the key facts (who, what, where, when).
+        Provide only the summary text, no instructions or labels.
 
         Article:
         \"\"\"{text.strip()}\"\"\"
@@ -43,6 +43,22 @@ def summarize(text: str, max_words: int = 40) -> Optional[str]:
         response.raise_for_status()
         data = response.json()
         summary = data.get("response", "").strip()
+        
+        # Clean up any instruction text that might be included
+        # Remove common prefixes like "Here is a summary...", "Summary:", etc.
+        summary = summary.replace("Here is a summary of the news article in 40 words or less:", "")
+        summary = summary.replace("Here is a summary:", "")
+        summary = summary.replace("Summary:", "")
+        summary = summary.replace("Here is the summary:", "")
+        summary = summary.replace("Here's a summary:", "")
+        summary = summary.strip()
+        
+        # Remove quotes if the entire summary is wrapped in quotes
+        if summary.startswith('"') and summary.endswith('"'):
+            summary = summary[1:-1].strip()
+        if summary.startswith("'") and summary.endswith("'"):
+            summary = summary[1:-1].strip()
+        
         return summary or None
     except Exception:
         # For now, fail quietly and let the caller decide how to handle None.

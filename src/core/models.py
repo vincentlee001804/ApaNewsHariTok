@@ -2,9 +2,59 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import relationship
 
 from src.storage.database import Base
+
+
+class User(Base):
+    """
+    Stores basic information about Telegram users who interact with the bot.
+    """
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    telegram_id = Column(Integer, unique=True, nullable=False, index=True)
+    username = Column(String(255), nullable=True)
+    first_seen_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    # Relationship to preferences
+    preference = relationship("UserPreference", back_populates="user", uselist=False)
+
+
+class UserPreference(Base):
+    """
+    Stores user preferences for news filtering and delivery frequency.
+    """
+
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
+    # Categories: comma-separated list like "sarawak,sports,politics" or empty for all
+    categories = Column(String(500), nullable=True, default="")
+    # Locations: comma-separated list like "kuching,miri,sibu" or empty for all Sarawak
+    locations = Column(String(500), nullable=True, default="")
+    # Frequency: "instant" (send immediately) or "daily" (once per day digest)
+    frequency = Column(String(50), nullable=False, default="instant")
+    wants_urgent_alerts = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    # Relationship to user
+    user = relationship("User", back_populates="preference")
 
 
 class NewsArticle(Base):

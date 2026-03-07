@@ -27,4 +27,14 @@ def init_db() -> None:
     from src.core import models  # noqa: F401  # ensure models are registered
 
     Base.metadata.create_all(bind=engine)
+    
+    # Run migration to add locations column if needed
+    try:
+        from src.storage.migrate import migrate_add_locations_column
+        migrate_add_locations_column()
+    except Exception as e:
+        # If migration fails, it's okay - might be first run or column already exists
+        print(f"Migration check: {e}")
+
+
 

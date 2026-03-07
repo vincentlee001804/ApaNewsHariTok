@@ -1,8 +1,14 @@
 from __future__ import annotations
 
-from telegram.ext import ApplicationBuilder, CommandHandler
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler
 
-from src.bot.handlers import help_command, latest_demo, start
+from src.bot.handlers import (
+    help_command,
+    latest_demo,
+    settings_callback,
+    settings_command,
+    start,
+)
 from src.core.config import require_bot_token
 from src.storage.database import init_db
 
@@ -23,6 +29,8 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("latest", latest_demo))
+    application.add_handler(CommandHandler("settings", settings_command))
+    application.add_handler(CallbackQueryHandler(settings_callback, pattern="^settings_|^cat_|^freq_|^loc_"))
 
     print("Bot is starting... Press Ctrl+C to stop.")
     application.run_polling()

@@ -72,7 +72,7 @@ async def latest_demo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     from src.core.services import get_latest_news_text_for_user
 
     text = get_latest_news_text_for_user(telegram_id)
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
 async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

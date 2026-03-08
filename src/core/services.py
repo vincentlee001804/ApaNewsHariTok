@@ -13,6 +13,10 @@ from src.storage.database import SessionLocal
 
 
 def _deduplicate_items(items: List[RssItem], max_items: int) -> List[RssItem]:
+    """
+    Deduplicate items by link, keeping the first occurrence.
+    Items should be pre-sorted by date (newest first) to ensure latest news is prioritized.
+    """
     seen_links = set()
     unique_items: List[RssItem] = []
     for item in items:
@@ -23,6 +27,23 @@ def _deduplicate_items(items: List[RssItem], max_items: int) -> List[RssItem]:
         if len(unique_items) >= max_items:
             break
     return unique_items
+
+
+def _sort_items_by_date(items: List[RssItem]) -> List[RssItem]:
+    """
+    Sort RSS items by published date, newest first.
+    Items without a published date are placed at the end.
+    """
+    def get_sort_key(item: RssItem) -> tuple:
+        # Use a large timestamp for items without dates so they sort to the end
+        if item.published:
+            # Negate timestamp to sort descending (newest first)
+            return (-item.published.timestamp(),)
+        else:
+            # Items without dates go to the end
+            return (float('inf'),)
+    
+    return sorted(items, key=get_sort_key)
 
 
 def _matches_category_filter(title: str, summary: str, categories: str) -> bool:
@@ -140,26 +161,75 @@ def _extract_category(title: str, summary: str | None) -> str:
     """
     Extract a category tag from the news title/summary.
     Returns a category like "Local", "Sports", "Politics", "Business", etc.
+    Note: "Local" is checked last since most Sarawak news contains location names.
     """
     text = (title + " " + (summary or "")).lower()
 
-    # Simple keyword-based categorization
-    if any(word in text for word in ["sport", "football", "badminton", "tennis", "olympic"]):
-        return "Sports"
-    elif any(word in text for word in ["politic", "minister", "government", "parliament", "election"]):
-        return "Politics"
-    elif any(word in text for word in ["business", "economy", "trade", "market", "stock"]):
-        return "Business"
-    elif any(word in text for word in ["sarawak", "kuching", "miri", "sibu", "borneo"]):
-        return "Local"
-    elif any(word in text for word in ["flood", "accident", "fire", "emergency", "disaster"]):
+    # Check more specific categories first (before "Local" which matches too broadly)
+    
+    # Emergency/Disaster - highest priority for urgent news
+    if any(word in text for word in ["flood", "accident", "fire", "emergency", "disaster", "crash", "collision", "explosion", "evacuation"]):
         return "Emergency"
-    elif any(word in text for word in ["health", "hospital", "medical", "covid", "disease"]):
+    
+    # Health - medical, public health, hospitals
+    if any(word in text for word in ["health", "hospital", "medical", "covid", "disease", "clinic", "doctor", "patient", "treatment", "vaccine", "rabies"]):
         return "Health"
-    elif any(word in text for word in ["education", "school", "university", "student"]):
+    
+    # Sports - various sports keywords
+    if any(word in text for word in ["sport", "football", "soccer", "badminton", "tennis", "olympic", "athlete", "championship", "tournament", "match", "game", "team"]):
+        return "Sports"
+    
+    # Politics - government, elections, ministers
+    if any(word in text for word in ["politic", "minister", "government", "parliament", "election", "minister", "chief minister", "assembly", "cabinet", "policy", "bill", "law"]):
+        return "Politics"
+    
+    # Education - schools, universities, students
+    if any(word in text for word in ["education", "school", "university", "student", "teacher", "college", "campus", "exam", "graduation", "scholarship"]):
         return "Education"
-    else:
-        return "General"
+    
+    # Business/Economy - trade, markets, companies
+    if any(word in text for word in ["business", "economy", "trade", "market", "stock", "company", "investment", "bank", "financial", "revenue", "profit", "commercial"]):
+        return "Business"
+    
+    # Technology - tech news, digital, IT
+    if any(word in text for word in ["technology", "tech", "digital", "internet", "software", "app", "online", "cyber", "computer", "ai", "artificial intelligence"]):
+        return "Technology"
+    
+    # Entertainment/Culture - festivals, events, arts, culture
+    if any(word in text for word in ["festival", "event", "concert", "art", "culture", "entertainment", "music", "dance", "performance", "exhibition", "celebration", "creative"]):
+        return "Entertainment"
+    
+    # Environment - nature, climate, conservation
+    if any(word in text for word in ["environment", "climate", "nature", "conservation", "forest", "wildlife", "pollution", "recycling", "green", "sustainable"]):
+        return "Environment"
+    
+    # Infrastructure - roads, buildings, construction, utilities
+    if any(word in text for word in ["infrastructure", "road", "bridge", "construction", "building", "project", "development", "utility", "water", "electricity", "power"]):
+        return "Infrastructure"
+    
+    # Crime/Safety - crime, police, security
+    if any(word in text for word in ["crime", "police", "arrest", "theft", "robbery", "murder", "suspect", "investigation", "court", "trial", "safety", "security"]):
+        return "Crime"
+    
+    # Social/Community - community events, social issues
+    if any(word in text for word in ["community", "social", "welfare", "charity", "donation", "volunteer", "ngo", "organization", "society"]):
+        return "Social"
+    
+    # Tourism - travel, tourism, hotels
+    if any(word in text for word in ["tourism", "tourist", "travel", "hotel", "resort", "visitor", "attraction", "destination"]):
+        return "Tourism"
+    
+    # Food - restaurants, food, dining
+    if any(word in text for word in ["food", "restaurant", "cuisine", "dining", "cafe", "culinary", "gastronomy", "recipe"]):
+        return "Food"
+    
+    # Default to "Local" for general Sarawak news (checked last since location names appear in most news)
+    # Only use "Local" if no other category matched
+    if any(word in text for word in ["sarawak", "kuching", "miri", "sibu", "borneo", "bintulu", "samarahan"]):
+        return "Local"
+    
+    # Fallback to "General" if nothing matches
+    return "General"
 
 
 def _get_source_name(source_url: str) -> str:
@@ -193,12 +263,17 @@ def get_latest_news_text(max_items: int = 3) -> str:
     a short AI-generated summary for each item where possible.
     """
     items: List[RssItem] = fetch_latest_items(RSS_FEEDS, limit_per_feed=3)
-    unique_items = _deduplicate_items(items, max_items=max_items)
+    
+    # Sort by date (newest first) across all sources to mix news from different feeds
+    sorted_items = _sort_items_by_date(items)
+    
+    # Deduplicate after sorting to ensure we get latest news from any source
+    unique_items = _deduplicate_items(sorted_items, max_items=max_items)
 
     if not unique_items:
         return (
             "I couldn't fetch any news items right now.\n"
-            "_This might be a temporary network issue or the sources are unavailable._"
+            "<i>This might be a temporary network issue or the sources are unavailable.</i>"
         )
 
     # Use the database to skip headlines that were already sent before.
@@ -235,10 +310,10 @@ def get_latest_news_text(max_items: int = 3) -> str:
     if not to_display:
         return (
             "No new headlines since your last request.\n"
-            "_You are up to date with the latest news from these sources._"
+            "<i>You are up to date with the latest news from these sources.</i>"
         )
 
-    lines: List[str] = ["*Latest local news with AI summaries:*"]
+    lines: List[str] = ["<b>Latest local news with AI summaries:</b>"]
 
     for item in to_display:
         # Extract category
@@ -263,20 +338,28 @@ def get_latest_news_text(max_items: int = 3) -> str:
         # Get source name
         source_name = _get_source_name(item.source)
 
+        # Escape HTML special characters in title and summary
+        def escape_html(text: str) -> str:
+            return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        escaped_title = escape_html(item.title)
+        escaped_summary = escape_html(ai_summary)
+        escaped_source = escape_html(source_name)
+
         # Format according to specification:
-        # [Category] *Title* (title in bold to distinguish from summary)
-        # Summary
-        # [Source name](link)
-        lines.append(f"[{category}] *{item.title}*")
-        lines.append(ai_summary)
-        lines.append(f"[{source_name}]({item.link})")
+        # [Category] <b>Title</b> (title in bold to distinguish from summary)
+        # <blockquote>Summary</blockquote> (summary in blockquote for visual distinction)
+        # <a href="link">Source name</a>
+        lines.append(f"[{category}] <b>{escaped_title}</b>")
+        lines.append(f"<blockquote>{escaped_summary}</blockquote>")
+        lines.append(f'<a href="{item.link}">{escaped_source}</a>')
         lines.append("")  # Empty line between items
 
     # Remove the last empty line and add footer
     if lines and lines[-1] == "":
         lines.pop()
 
-    lines.append("\n_Summaries generated locally by the LLM (no external AI APIs used)._")
+    lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")
     return "\n".join(lines)
 
 
@@ -293,12 +376,17 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
 
     # Fetch more items to get articles from the past 24 hours
     items: List[RssItem] = fetch_latest_items(RSS_FEEDS, limit_per_feed=15, max_age_hours=24)
-    unique_items = _deduplicate_items(items, max_items=max_items * 3)  # Fetch more to filter
+    
+    # Sort by date (newest first) across all sources to mix news from different feeds
+    sorted_items = _sort_items_by_date(items)
+    
+    # Deduplicate after sorting to ensure we get latest news from any source
+    unique_items = _deduplicate_items(sorted_items, max_items=max_items * 3)  # Fetch more to filter
 
     if not unique_items:
         return (
             "I couldn't fetch any news items right now.\n"
-            "_This might be a temporary network issue or the sources are unavailable._"
+            "<i>This might be a temporary network issue or the sources are unavailable.</i>"
         )
 
     # Apply category and location filters
@@ -315,7 +403,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
     if not filtered_items:
         return (
             "No news items match your current filters (categories/locations).\n"
-            "_Try adjusting your settings with /settings to see more news._"
+            "<i>Try adjusting your settings with /settings to see more news.</i>"
         )
 
     # Use the database to skip headlines that were already sent before.
@@ -352,10 +440,10 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
     if not to_display:
         return (
             "No new headlines since your last request.\n"
-            "_You are up to date with the latest news from these sources._"
+            "<i>You are up to date with the latest news from these sources.</i>"
         )
 
-    lines: List[str] = ["*Latest local news with AI summaries:*"]
+    lines: List[str] = ["<b>Latest local news with AI summaries:</b>"]
 
     for item in to_display:
         # Extract category
@@ -380,19 +468,27 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
         # Get source name
         source_name = _get_source_name(item.source)
 
+        # Escape HTML special characters in title and summary
+        def escape_html(text: str) -> str:
+            return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        escaped_title = escape_html(item.title)
+        escaped_summary = escape_html(ai_summary)
+        escaped_source = escape_html(source_name)
+
         # Format according to specification:
-        # [Category] *Title* (title in bold to distinguish from summary)
-        # Summary
-        # [Source name](link)
-        lines.append(f"[{category}] *{item.title}*")
-        lines.append(ai_summary)
-        lines.append(f"[{source_name}]({item.link})")
+        # [Category] <b>Title</b> (title in bold to distinguish from summary)
+        # <blockquote>Summary</blockquote> (summary in blockquote for visual distinction)
+        # <a href="link">Source name</a>
+        lines.append(f"[{category}] <b>{escaped_title}</b>")
+        lines.append(f"<blockquote>{escaped_summary}</blockquote>")
+        lines.append(f'<a href="{item.link}">{escaped_source}</a>')
         lines.append("")  # Empty line between items
 
     # Remove the last empty line and add footer
     if lines and lines[-1] == "":
         lines.pop()
 
-    lines.append("\n_Summaries generated locally by the LLM (no external AI APIs used)._")
+    lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")
     return "\n".join(lines)
 

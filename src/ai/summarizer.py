@@ -9,6 +9,83 @@ import requests
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "llama3.1"
 
+ALLOWED_CATEGORIES = [
+    "Emergency",
+    "Health",
+    "Sports",
+    "Politics",
+    "Education",
+    "Business",
+    "Technology",
+    "Entertainment",
+    "Environment",
+    "Infrastructure",
+    "Crime",
+    "Social",
+    "Tourism",
+    "Food",
+    "Local",
+    "General",
+]
+
+
+def classify_category(text: str) -> Optional[str]:
+    """
+    Use the local Ollama model to classify a news item into exactly ONE category.
+
+    Returns one of ALLOWED_CATEGORIES, or None if classification fails.
+    """
+    if not text or not text.strip():
+        return None
+
+    categories = ", ".join(ALLOWED_CATEGORIES)
+    prompt = textwrap.dedent(
+        f"""
+        You are classifying a Sarawak (Malaysia) local news item into exactly ONE category.
+        Choose only from this list:
+        {categories}
+
+        Rules:
+        - Output EXACTLY one category word from the list above.
+        - No extra words, no punctuation, no quotes.
+        - If unsure, output "General".
+
+        News text:
+        \"\"\"{text.strip()}\"\"\"
+        """
+    ).strip()
+
+    try:
+        response = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = response.json()
+        raw = (data.get("response", "") or "").strip()
+
+        # Normalize common mistakes
+        raw = raw.strip().strip('"').strip("'")
+        raw = raw.splitlines()[0].strip()
+
+        # Exact match preferred
+        if raw in ALLOWED_CATEGORIES:
+            return raw
+
+        # Case-insensitive match
+        for cat in ALLOWED_CATEGORIES:
+            if raw.lower() == cat.lower():
+                return cat
+
+        return None
+    except Exception:
+        return None
+
 
 def summarize(text: str, max_words: int = 40) -> Optional[str]:
     """

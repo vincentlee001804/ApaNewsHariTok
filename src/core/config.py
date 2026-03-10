@@ -60,6 +60,17 @@ DEDUPLICATION_ENABLED: Final[bool] = os.getenv("DEDUPLICATION_ENABLED", "true").
     "on",
 }
 
+# Background RSS prefetch (store to DB while bot is running)
+PREFETCH_ENABLED: Final[bool] = os.getenv("PREFETCH_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+
+PREFETCH_INTERVAL_MINUTES: Final[int] = int(os.getenv("PREFETCH_INTERVAL_MINUTES", "10").strip() or "10")
+
 
 def require_bot_token() -> str:
     """

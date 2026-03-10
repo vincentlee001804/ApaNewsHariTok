@@ -428,19 +428,31 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
             stmt = stmt.where(NewsArticle.last_sent_at.is_(None))
 
         candidates: List[NewsArticle] = list(session.execute(stmt).scalars().all())
-        chosen: List[NewsArticle] = []
 
-        for art in candidates:
-            text_for_filters = f"{art.title}\n{art.ai_summary or art.raw_summary or ''}"
-            if not _matches_category_filter(art.title, art.raw_summary or "", categories_filter):
-                continue
-            if not _matches_location_filter(art.title, art.raw_summary or "", locations_filter):
-                continue
-            if not _matches_area_keywords_filter(text_for_filters, area_keywords_filter):
-                continue
-            chosen.append(art)
-            if len(chosen) >= max_items:
-                break
+        def _filter_articles(use_area_keywords: bool) -> List[NewsArticle]:
+            picked: List[NewsArticle] = []
+            for art in candidates:
+                text_for_filters = f"{art.title}\n{art.ai_summary or art.raw_summary or ''}"
+                if not _matches_category_filter(art.title, art.raw_summary or "", categories_filter):
+                    continue
+                if not _matches_location_filter(art.title, art.raw_summary or "", locations_filter):
+                    continue
+                if use_area_keywords and not _matches_area_keywords_filter(
+                    text_for_filters, area_keywords_filter
+                ):
+                    continue
+                picked.append(art)
+                if len(picked) >= max_items:
+                    break
+            return picked
+
+        # Try with area keywords first (if any), then fall back to location+category only.
+        if area_keywords_filter.strip():
+            chosen: List[NewsArticle] = _filter_articles(use_area_keywords=True)
+            if not chosen:
+                chosen = _filter_articles(use_area_keywords=False)
+        else:
+            chosen = _filter_articles(use_area_keywords=False)
 
         if not chosen:
             # Fallback: live RSS fetch if DB has nothing yet
@@ -456,19 +468,28 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                     "<i>This might be a temporary network issue or the sources are unavailable.</i>"
                 )
 
-            filtered_items: List[RssItem] = []
-            for item in unique_items:
-                if not _matches_category_filter(item.title, item.summary or "", categories_filter):
-                    continue
-                if not _matches_location_filter(item.title, item.summary or "", locations_filter):
-                    continue
-                if not _matches_area_keywords_filter(
-                    f"{item.title}\n{item.summary or ''}", area_keywords_filter
-                ):
-                    continue
-                filtered_items.append(item)
-                if len(filtered_items) >= max_items:
-                    break
+            def _filter_items(use_area_keywords: bool) -> List[RssItem]:
+                picked: List[RssItem] = []
+                for item in unique_items:
+                    if not _matches_category_filter(item.title, item.summary or "", categories_filter):
+                        continue
+                    if not _matches_location_filter(item.title, item.summary or "", locations_filter):
+                        continue
+                    if use_area_keywords and not _matches_area_keywords_filter(
+                        f"{item.title}\n{item.summary or ''}", area_keywords_filter
+                    ):
+                        continue
+                    picked.append(item)
+                    if len(picked) >= max_items:
+                        break
+                return picked
+
+            if area_keywords_filter.strip():
+                filtered_items: List[RssItem] = _filter_items(use_area_keywords=True)
+                if not filtered_items:
+                    filtered_items = _filter_items(use_area_keywords=False)
+            else:
+                filtered_items = _filter_items(use_area_keywords=False)
 
             if not filtered_items:
                 return (

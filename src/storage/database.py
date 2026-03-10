@@ -32,10 +32,12 @@ def init_db() -> None:
     try:
         from src.storage.migrate import (
             migrate_add_area_keywords_column,
+            migrate_add_ai_summary_column,
             migrate_add_locations_column,
         )
         migrate_add_locations_column()
         migrate_add_area_keywords_column()
+        migrate_add_ai_summary_column()
     except Exception as e:
         # If migration fails, it's okay - might be first run or column already exists
         print(f"Migration check: {e}")

@@ -73,6 +73,34 @@ def migrate_add_area_keywords_column() -> None:
         pass
 
 
+def migrate_add_ai_summary_column() -> None:
+    """
+    Add the 'ai_summary' column to news_articles table if it doesn't exist.
+    """
+    try:
+        with SessionLocal() as session:
+            result = session.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name='news_articles'")
+            ).fetchone()
+
+            if not result:
+                return
+
+            result = session.execute(text("PRAGMA table_info(news_articles)")).fetchall()
+            column_names = [row[1] for row in result]
+
+            if "ai_summary" not in column_names:
+                print("Adding 'ai_summary' column to news_articles table...")
+                session.execute(
+                    text("ALTER TABLE news_articles ADD COLUMN ai_summary TEXT")
+                )
+                session.commit()
+                print("✓ Migration completed successfully!")
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
     migrate_add_locations_column()
     migrate_add_area_keywords_column()
+    migrate_add_ai_summary_column()

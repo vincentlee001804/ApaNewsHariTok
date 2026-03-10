@@ -411,132 +411,165 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
     locations_filter = preference.locations if preference else ""
     area_keywords_filter = preference.area_keywords if preference else ""
 
-    # Fetch more items to get articles from the past 24 hours
-    items: List[RssItem] = fetch_latest_items(RSS_FEEDS, limit_per_feed=15, max_age_hours=24)
-    
-    # Sort by date (newest first) across all sources to mix news from different feeds
-    sorted_items = _sort_items_by_date(items)
-    
-    # Deduplicate after sorting to ensure we get latest news from any source
-    unique_items = _deduplicate_items(sorted_items, max_items=max_items * 3)  # Fetch more to filter
+    def escape_html(text: str) -> str:
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    if not unique_items:
-        return (
-            "I couldn't fetch any news items right now.\n"
-            "<i>This might be a temporary network issue or the sources are unavailable.</i>"
-        )
-
-    # Apply category and location filters
-    filtered_items: List[RssItem] = []
-    for item in unique_items:
-        matches_category = _matches_category_filter(item.title, item.summary or "", categories_filter)
-        matches_location = _matches_location_filter(item.title, item.summary or "", locations_filter)
-        matches_area_keywords = _matches_area_keywords_filter(
-            f"{item.title}\n{item.summary or ''}",
-            area_keywords_filter,
-        )
-
-        if matches_category and matches_location and matches_area_keywords:
-            filtered_items.append(item)
-        if len(filtered_items) >= max_items:
-            break
-
-    if not filtered_items:
-        return (
-            "No news items match your current filters (categories/locations).\n"
-            "<i>Try adjusting your settings with /settings to see more news.</i>"
-        )
-
-    # Deduplication toggle:
-    # - Enabled (default): once sent, never sent again (permanent duplicate prevention)
-    # - Disabled: always show items (useful for testing message formatting)
-    to_display: List[RssItem] = []
+    # DB-first: use prefetched articles (fast + cached) and only call LLM when needed.
     now = datetime.utcnow()
+    cutoff = now - timedelta(hours=24)
 
-    if not DEDUPLICATION_ENABLED:
-        to_display = filtered_items[:max_items]
-    else:
-        with SessionLocal() as session:
-            for item in filtered_items:
-                existing: NewsArticle | None = session.execute(
-                    select(NewsArticle).where(NewsArticle.link == item.link)
-                ).scalar_one_or_none()
+    with SessionLocal() as session:
+        stmt = (
+            select(NewsArticle)
+            .where(NewsArticle.created_at >= cutoff)
+            .order_by(NewsArticle.created_at.desc())
+        )
+        if DEDUPLICATION_ENABLED:
+            stmt = stmt.where(NewsArticle.last_sent_at.is_(None))
 
-                if existing and existing.last_sent_at is not None:
-                    # This article has already been sent at least once; skip it forever.
+        candidates: List[NewsArticle] = list(session.execute(stmt).scalars().all())
+        chosen: List[NewsArticle] = []
+
+        for art in candidates:
+            text_for_filters = f"{art.title}\n{art.ai_summary or art.raw_summary or ''}"
+            if not _matches_category_filter(art.title, art.raw_summary or "", categories_filter):
+                continue
+            if not _matches_location_filter(art.title, art.raw_summary or "", locations_filter):
+                continue
+            if not _matches_area_keywords_filter(text_for_filters, area_keywords_filter):
+                continue
+            chosen.append(art)
+            if len(chosen) >= max_items:
+                break
+
+        if not chosen:
+            # Fallback: live RSS fetch if DB has nothing yet
+            items: List[RssItem] = fetch_latest_items(
+                RSS_FEEDS, limit_per_feed=15, max_age_hours=24
+            )
+            sorted_items = _sort_items_by_date(items)
+            unique_items = _deduplicate_items(sorted_items, max_items=max_items * 3)
+
+            if not unique_items:
+                return (
+                    "I couldn't fetch any news items right now.\n"
+                    "<i>This might be a temporary network issue or the sources are unavailable.</i>"
+                )
+
+            filtered_items: List[RssItem] = []
+            for item in unique_items:
+                if not _matches_category_filter(item.title, item.summary or "", categories_filter):
                     continue
-
-                if not existing:
-                    existing = NewsArticle(
-                        title=item.title,
-                        link=item.link,
-                        source=item.source,
-                        raw_summary=item.summary,
-                        last_sent_at=now,
-                    )
-                    session.add(existing)
-                else:
-                    existing.last_sent_at = now
-
-                to_display.append(item)
-                if len(to_display) >= max_items:
+                if not _matches_location_filter(item.title, item.summary or "", locations_filter):
+                    continue
+                if not _matches_area_keywords_filter(
+                    f"{item.title}\n{item.summary or ''}", area_keywords_filter
+                ):
+                    continue
+                filtered_items.append(item)
+                if len(filtered_items) >= max_items:
                     break
 
-            session.commit()
+            if not filtered_items:
+                return (
+                    "No news items match your current filters (categories/locations).\n"
+                    "<i>Try adjusting your settings with /settings to see more news.</i>"
+                )
 
-    if not to_display:
-        return (
-            "No new headlines since your last request.\n"
-            "<i>You are up to date with the latest news from these sources.</i>"
-        )
+            # Deduplication behavior (unchanged for RSS fallback)
+            to_display: List[RssItem] = []
+            if not DEDUPLICATION_ENABLED:
+                to_display = filtered_items[:max_items]
+            else:
+                for item in filtered_items:
+                    existing: NewsArticle | None = session.execute(
+                        select(NewsArticle).where(NewsArticle.link == item.link)
+                    ).scalar_one_or_none()
+                    if existing and existing.last_sent_at is not None:
+                        continue
+                    if not existing:
+                        existing = NewsArticle(
+                            title=item.title,
+                            link=item.link,
+                            source=item.source,
+                            raw_summary=item.summary,
+                            last_sent_at=now,
+                        )
+                        session.add(existing)
+                    else:
+                        existing.last_sent_at = now
+                    to_display.append(item)
+                    if len(to_display) >= max_items:
+                        break
+                session.commit()
 
-    lines: List[str] = ["<b>Latest local news with AI summaries:</b>"]
+            if not to_display:
+                return (
+                    "No new headlines since your last request.\n"
+                    "<i>You are up to date with the latest news from these sources.</i>"
+                )
 
-    for item in to_display:
-        # Extract category (LLM first, fallback to keyword rules)
-        category = _get_category_with_llm_fallback(item.title, item.summary)
+            from src.scrapers.article_scraper import extract_article_content
 
-        # Get AI summary - try to fetch full article content first
+            lines: List[str] = ["<b>Latest local news with AI summaries:</b>"]
+            for item in to_display:
+                category = _get_category_with_llm_fallback(item.title, item.summary)
+                article_text = extract_article_content(item.link)
+                source_text = article_text or item.summary or item.title
+                ai_summary = summarize(source_text, max_words=50) or "(No AI summary available right now.)"
+                source_name = _get_source_name(item.source)
+
+                escaped_title = escape_html(item.title)
+                escaped_summary = escape_html(ai_summary)
+                escaped_source = escape_html(source_name)
+                escaped_category = escape_html(category)
+
+                lines.append(f"<blockquote>[{escaped_category}] <b>{escaped_title}</b></blockquote>")
+                lines.append(escaped_summary)
+                lines.append(f'<a href="{item.link}">{escaped_source}</a>')
+                lines.append("────────────")
+
+            if lines and lines[-1] == "────────────":
+                lines.pop()
+            lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")
+            return "\n".join(lines)
+
+        # Ensure ai_summary exists (cache)
         from src.scrapers.article_scraper import extract_article_content
-        
-        article_text = extract_article_content(item.link)
-        if article_text:
-            # Use full article content for better summary
-            source_text = article_text
-        else:
-            # Fallback to RSS summary or title if article scraping fails
-            source_text = item.summary or item.title
-        
-        ai_summary = summarize(source_text, max_words=50)  # Increased to 50 words for more detailed summary
 
-        if not ai_summary:
-            ai_summary = "(No AI summary available right now.)"
+        for art in chosen:
+            if art.ai_summary:
+                continue
+            article_text = extract_article_content(art.link)
+            source_text = article_text or art.raw_summary or art.title
+            art.ai_summary = summarize(source_text, max_words=50) or "(No AI summary available right now.)"
 
-        # Get source name
-        source_name = _get_source_name(item.source)
+        if DEDUPLICATION_ENABLED:
+            for art in chosen:
+                art.last_sent_at = now
 
-        # Escape HTML special characters in title and summary
-        def escape_html(text: str) -> str:
-            return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        session.commit()
 
-        escaped_title = escape_html(item.title)
-        escaped_summary = escape_html(ai_summary)
-        escaped_source = escape_html(source_name)
+        lines: List[str] = ["<b>Latest local news with AI summaries:</b>"]
+        for art in chosen:
+            category = _get_category_with_llm_fallback(art.title, art.ai_summary or art.raw_summary)
 
-        # Format according to specification:
-        # <blockquote>[Category] <b>Title</b></blockquote> (headline in blockquote for visual distinction)
-        # Summary (plain text)
-        # <a href="link">Source name</a>
-        escaped_category = escape_html(category)
-        lines.append(f"<blockquote>[{escaped_category}] <b>{escaped_title}</b></blockquote>")
-        lines.append(escaped_summary)
-        lines.append(f'<a href="{item.link}">{escaped_source}</a>')
-        lines.append("────────────")  # Visual separator between items
+            source_name = art.source
+            if source_name.lower().startswith("http"):
+                source_name = _get_source_name(source_name)
 
-    # Remove the last empty line and add footer
-    if lines and lines[-1] == "────────────":
-        lines.pop()
+            escaped_title = escape_html(art.title)
+            escaped_summary = escape_html(art.ai_summary or "(No AI summary available right now.)")
+            escaped_source = escape_html(source_name)
+            escaped_category = escape_html(category)
 
-    lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")
-    return "\n".join(lines)
+            lines.append(f"<blockquote>[{escaped_category}] <b>{escaped_title}</b></blockquote>")
+            lines.append(escaped_summary)
+            lines.append(f'<a href="{art.link}">{escaped_source}</a>')
+            lines.append("────────────")
+
+        if lines and lines[-1] == "────────────":
+            lines.pop()
+        lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")
+        return "\n".join(lines)
 

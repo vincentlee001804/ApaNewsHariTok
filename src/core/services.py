@@ -175,6 +175,39 @@ def _matches_area_keywords_filter(text: str, area_keywords: str) -> bool:
     return any(k in haystack for k in keywords)
 
 
+def _geo_priority_rank(
+    *,
+    title: str,
+    summary: str,
+    locations_filter: str,
+    area_keywords_filter: str,
+) -> int:
+    """
+    Geographic relevance rank (lower is higher priority):
+
+    0: matches area keywords (very specific)
+    1: matches selected location(s) (cities)
+    2: mentions Sarawak
+    3: mentions Malaysia
+    4: world/other
+    """
+    combined = f"{title}\n{summary}".lower()
+
+    if area_keywords_filter.strip() and _matches_area_keywords_filter(combined, area_keywords_filter):
+        return 0
+
+    if locations_filter.strip() and _matches_location_filter(title, summary, locations_filter):
+        return 1
+
+    if "sarawak" in combined:
+        return 2
+
+    if "malaysia" in combined:
+        return 3
+
+    return 4
+
+
 def _extract_category(title: str, summary: str | None) -> str:
     """
     Extract a category tag from the news title/summary.
@@ -429,30 +462,24 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
 
         candidates: List[NewsArticle] = list(session.execute(stmt).scalars().all())
 
-        def _filter_articles(use_area_keywords: bool) -> List[NewsArticle]:
-            picked: List[NewsArticle] = []
-            for art in candidates:
-                text_for_filters = f"{art.title}\n{art.ai_summary or art.raw_summary or ''}"
-                if not _matches_category_filter(art.title, art.raw_summary or "", categories_filter):
-                    continue
-                if not _matches_location_filter(art.title, art.raw_summary or "", locations_filter):
-                    continue
-                if use_area_keywords and not _matches_area_keywords_filter(
-                    text_for_filters, area_keywords_filter
-                ):
-                    continue
-                picked.append(art)
-                if len(picked) >= max_items:
-                    break
-            return picked
+        # Rank by geographic priority (area keywords > location > Sarawak > Malaysia > world)
+        ranked: List[tuple[int, datetime, NewsArticle]] = []
+        for art in candidates:
+            summary_for_rank = art.ai_summary or art.raw_summary or ""
+            if not _matches_category_filter(art.title, art.raw_summary or "", categories_filter):
+                continue
+            rank = _geo_priority_rank(
+                title=art.title,
+                summary=summary_for_rank,
+                locations_filter=locations_filter,
+                area_keywords_filter=area_keywords_filter,
+            )
+            ranked.append((rank, art.created_at, art))
 
-        # Try with area keywords first (if any), then fall back to location+category only.
-        if area_keywords_filter.strip():
-            chosen: List[NewsArticle] = _filter_articles(use_area_keywords=True)
-            if not chosen:
-                chosen = _filter_articles(use_area_keywords=False)
-        else:
-            chosen = _filter_articles(use_area_keywords=False)
+        # Sort by rank (best first), then newest first
+        ranked.sort(key=lambda t: (t[0], -t[1].timestamp()))
+
+        chosen: List[NewsArticle] = [t[2] for t in ranked[:max_items]]
 
         if not chosen:
             # Fallback: live RSS fetch if DB has nothing yet
@@ -468,28 +495,21 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                     "<i>This might be a temporary network issue or the sources are unavailable.</i>"
                 )
 
-            def _filter_items(use_area_keywords: bool) -> List[RssItem]:
-                picked: List[RssItem] = []
-                for item in unique_items:
-                    if not _matches_category_filter(item.title, item.summary or "", categories_filter):
-                        continue
-                    if not _matches_location_filter(item.title, item.summary or "", locations_filter):
-                        continue
-                    if use_area_keywords and not _matches_area_keywords_filter(
-                        f"{item.title}\n{item.summary or ''}", area_keywords_filter
-                    ):
-                        continue
-                    picked.append(item)
-                    if len(picked) >= max_items:
-                        break
-                return picked
+            ranked_items: List[tuple[int, float, RssItem]] = []
+            for item in unique_items:
+                if not _matches_category_filter(item.title, item.summary or "", categories_filter):
+                    continue
+                rank = _geo_priority_rank(
+                    title=item.title,
+                    summary=item.summary or "",
+                    locations_filter=locations_filter,
+                    area_keywords_filter=area_keywords_filter,
+                )
+                published_ts = item.published.timestamp() if item.published else 0.0
+                ranked_items.append((rank, published_ts, item))
 
-            if area_keywords_filter.strip():
-                filtered_items: List[RssItem] = _filter_items(use_area_keywords=True)
-                if not filtered_items:
-                    filtered_items = _filter_items(use_area_keywords=False)
-            else:
-                filtered_items = _filter_items(use_area_keywords=False)
+            ranked_items.sort(key=lambda t: (t[0], -t[1]))
+            filtered_items: List[RssItem] = [t[2] for t in ranked_items[:max_items]]
 
             if not filtered_items:
                 return (

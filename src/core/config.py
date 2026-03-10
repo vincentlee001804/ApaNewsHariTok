@@ -16,6 +16,17 @@ RSS_FEEDS: Final[List[str]] = [
     "https://www.theborneopost.com/feed/",
 ]
 
+# Deduplication: when enabled, once an article has been sent, it will never be sent again.
+# For testing message formats, you may want to disable this temporarily.
+# Set in `.env` as: DEDUPLICATION_ENABLED=false
+DEDUPLICATION_ENABLED: Final[bool] = os.getenv("DEDUPLICATION_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+
 
 def require_bot_token() -> str:
     """

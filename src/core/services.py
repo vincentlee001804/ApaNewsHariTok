@@ -6,7 +6,7 @@ from typing import List
 from sqlalchemy import select
 
 from src.ai.summarizer import classify_category, summarize
-from src.core.config import RSS_FEEDS
+from src.core.config import DEDUPLICATION_ENABLED, RSS_FEEDS
 from src.core.models import NewsArticle
 from src.scrapers.rss_reader import RssItem, fetch_latest_items
 from src.storage.database import SessionLocal
@@ -287,36 +287,42 @@ def get_latest_news_text(max_items: int = 3) -> str:
             "<i>This might be a temporary network issue or the sources are unavailable.</i>"
         )
 
-    # Use the database to skip headlines that were already sent before.
-    # Once sent, articles are never sent again (permanent duplicate prevention).
+    # Deduplication toggle:
+    # - Enabled (default): once sent, never sent again (permanent duplicate prevention)
+    # - Disabled: always show items (useful for testing message formatting)
     to_display: List[RssItem] = []
     now = datetime.utcnow()
 
-    with SessionLocal() as session:
-        for item in unique_items:
-            existing: NewsArticle | None = session.execute(
-                select(NewsArticle).where(NewsArticle.link == item.link)
-            ).scalar_one_or_none()
+    if not DEDUPLICATION_ENABLED:
+        to_display = unique_items[:max_items]
+    else:
+        with SessionLocal() as session:
+            for item in unique_items:
+                existing: NewsArticle | None = session.execute(
+                    select(NewsArticle).where(NewsArticle.link == item.link)
+                ).scalar_one_or_none()
 
-            if existing and existing.last_sent_at is not None:
-                # This article has already been sent at least once; skip it forever.
-                continue
+                if existing and existing.last_sent_at is not None:
+                    # This article has already been sent at least once; skip it forever.
+                    continue
 
-            if not existing:
-                existing = NewsArticle(
-                    title=item.title,
-                    link=item.link,
-                    source=item.source,
-                    raw_summary=item.summary,
-                    last_sent_at=now,
-                )
-                session.add(existing)
-            else:
-                existing.last_sent_at = now
+                if not existing:
+                    existing = NewsArticle(
+                        title=item.title,
+                        link=item.link,
+                        source=item.source,
+                        raw_summary=item.summary,
+                        last_sent_at=now,
+                    )
+                    session.add(existing)
+                else:
+                    existing.last_sent_at = now
 
-            to_display.append(item)
+                to_display.append(item)
+                if len(to_display) >= max_items:
+                    break
 
-        session.commit()
+            session.commit()
 
     if not to_display:
         return (
@@ -418,36 +424,42 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
             "<i>Try adjusting your settings with /settings to see more news.</i>"
         )
 
-    # Use the database to skip headlines that were already sent before.
-    # Once sent, articles are never sent again (permanent duplicate prevention).
+    # Deduplication toggle:
+    # - Enabled (default): once sent, never sent again (permanent duplicate prevention)
+    # - Disabled: always show items (useful for testing message formatting)
     to_display: List[RssItem] = []
     now = datetime.utcnow()
 
-    with SessionLocal() as session:
-        for item in filtered_items:
-            existing: NewsArticle | None = session.execute(
-                select(NewsArticle).where(NewsArticle.link == item.link)
-            ).scalar_one_or_none()
+    if not DEDUPLICATION_ENABLED:
+        to_display = filtered_items[:max_items]
+    else:
+        with SessionLocal() as session:
+            for item in filtered_items:
+                existing: NewsArticle | None = session.execute(
+                    select(NewsArticle).where(NewsArticle.link == item.link)
+                ).scalar_one_or_none()
 
-            if existing and existing.last_sent_at is not None:
-                # This article has already been sent at least once; skip it forever.
-                continue
+                if existing and existing.last_sent_at is not None:
+                    # This article has already been sent at least once; skip it forever.
+                    continue
 
-            if not existing:
-                existing = NewsArticle(
-                    title=item.title,
-                    link=item.link,
-                    source=item.source,
-                    raw_summary=item.summary,
-                    last_sent_at=now,
-                )
-                session.add(existing)
-            else:
-                existing.last_sent_at = now
+                if not existing:
+                    existing = NewsArticle(
+                        title=item.title,
+                        link=item.link,
+                        source=item.source,
+                        raw_summary=item.summary,
+                        last_sent_at=now,
+                    )
+                    session.add(existing)
+                else:
+                    existing.last_sent_at = now
 
-            to_display.append(item)
+                to_display.append(item)
+                if len(to_display) >= max_items:
+                    break
 
-        session.commit()
+            session.commit()
 
     if not to_display:
         return (

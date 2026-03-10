@@ -5,7 +5,7 @@ from typing import List
 
 from sqlalchemy import select
 
-from src.ai.summarizer import summarize
+from src.ai.summarizer import classify_category, summarize
 from src.core.config import RSS_FEEDS
 from src.core.models import NewsArticle
 from src.scrapers.rss_reader import RssItem, fetch_latest_items
@@ -232,6 +232,17 @@ def _extract_category(title: str, summary: str | None) -> str:
     return "General"
 
 
+def _get_category_with_llm_fallback(title: str, summary: str | None) -> str:
+    """
+    Prefer LLM-based classification (more accurate), fallback to keyword rules.
+    """
+    llm_text = (title + "\n" + (summary or "")).strip()
+    llm_category = classify_category(llm_text)
+    if llm_category:
+        return llm_category
+    return _extract_category(title, summary)
+
+
 def _get_source_name(source_url: str) -> str:
     """
     Extract a friendly source name from the RSS feed URL.
@@ -316,8 +327,8 @@ def get_latest_news_text(max_items: int = 3) -> str:
     lines: List[str] = ["<b>Latest local news with AI summaries:</b>"]
 
     for item in to_display:
-        # Extract category
-        category = _extract_category(item.title, item.summary)
+        # Extract category (LLM first, fallback to keyword rules)
+        category = _get_category_with_llm_fallback(item.title, item.summary)
 
         # Get AI summary - try to fetch full article content first
         from src.scrapers.article_scraper import extract_article_content
@@ -350,13 +361,14 @@ def get_latest_news_text(max_items: int = 3) -> str:
         # [Category] <b>Title</b> (title in bold to distinguish from summary)
         # <blockquote>Summary</blockquote> (summary in blockquote for visual distinction)
         # <a href="link">Source name</a>
-        lines.append(f"[{category}] <b>{escaped_title}</b>")
+        escaped_category = escape_html(category)
+        lines.append(f"[{escaped_category}] <b>{escaped_title}</b>")
         lines.append(f"<blockquote>{escaped_summary}</blockquote>")
         lines.append(f'<a href="{item.link}">{escaped_source}</a>')
-        lines.append("")  # Empty line between items
+        lines.append("────────────")  # Visual separator between items
 
     # Remove the last empty line and add footer
-    if lines and lines[-1] == "":
+    if lines and lines[-1] == "────────────":
         lines.pop()
 
     lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")
@@ -446,8 +458,8 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
     lines: List[str] = ["<b>Latest local news with AI summaries:</b>"]
 
     for item in to_display:
-        # Extract category
-        category = _extract_category(item.title, item.summary)
+        # Extract category (LLM first, fallback to keyword rules)
+        category = _get_category_with_llm_fallback(item.title, item.summary)
 
         # Get AI summary - try to fetch full article content first
         from src.scrapers.article_scraper import extract_article_content
@@ -480,13 +492,14 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
         # [Category] <b>Title</b> (title in bold to distinguish from summary)
         # <blockquote>Summary</blockquote> (summary in blockquote for visual distinction)
         # <a href="link">Source name</a>
-        lines.append(f"[{category}] <b>{escaped_title}</b>")
+        escaped_category = escape_html(category)
+        lines.append(f"[{escaped_category}] <b>{escaped_title}</b>")
         lines.append(f"<blockquote>{escaped_summary}</blockquote>")
         lines.append(f'<a href="{item.link}">{escaped_source}</a>')
-        lines.append("")  # Empty line between items
+        lines.append("────────────")  # Visual separator between items
 
     # Remove the last empty line and add footer
-    if lines and lines[-1] == "":
+    if lines and lines[-1] == "────────────":
         lines.pop()
 
     lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")

@@ -157,6 +157,24 @@ def _matches_location_filter(title: str, summary: str, locations: str) -> bool:
     return False
 
 
+def _matches_area_keywords_filter(text: str, area_keywords: str) -> bool:
+    """
+    Free-text keyword match for very specific areas (roads, taman, kampung).
+
+    - If area_keywords is empty: match everything.
+    - Otherwise: match if ANY keyword appears in text (case-insensitive).
+    """
+    if not area_keywords or area_keywords.strip() == "":
+        return True
+
+    keywords = [k.strip().lower() for k in area_keywords.split(",") if k.strip()]
+    if not keywords:
+        return True
+
+    haystack = (text or "").lower()
+    return any(k in haystack for k in keywords)
+
+
 def _extract_category(title: str, summary: str | None) -> str:
     """
     Extract a category tag from the news title/summary.
@@ -391,6 +409,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
     preference = get_user_preference(telegram_id)
     categories_filter = preference.categories if preference else ""
     locations_filter = preference.locations if preference else ""
+    area_keywords_filter = preference.area_keywords if preference else ""
 
     # Fetch more items to get articles from the past 24 hours
     items: List[RssItem] = fetch_latest_items(RSS_FEEDS, limit_per_feed=15, max_age_hours=24)
@@ -412,8 +431,12 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
     for item in unique_items:
         matches_category = _matches_category_filter(item.title, item.summary or "", categories_filter)
         matches_location = _matches_location_filter(item.title, item.summary or "", locations_filter)
+        matches_area_keywords = _matches_area_keywords_filter(
+            f"{item.title}\n{item.summary or ''}",
+            area_keywords_filter,
+        )
 
-        if matches_category and matches_location:
+        if matches_category and matches_location and matches_area_keywords:
             filtered_items.append(item)
         if len(filtered_items) >= max_items:
             break

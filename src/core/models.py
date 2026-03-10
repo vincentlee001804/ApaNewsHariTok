@@ -47,6 +47,9 @@ class UserPreference(Base):
     categories = Column(String(500), nullable=True, default="")
     # Locations: comma-separated list like "kuching,miri,sibu" or empty for all Sarawak
     locations = Column(String(500), nullable=True, default="")
+    # Area keywords: comma-separated free-text phrases like "jalan wawasan,taman desa"
+    # If set, only articles containing these keywords will be shown (more specific than city-level locations).
+    area_keywords = Column(String(1000), nullable=True, default="")
     # Frequency: "instant" (send immediately) or "daily" (once per day digest)
     frequency = Column(String(50), nullable=False, default="instant")
     wants_urgent_alerts = Column(Boolean, default=True, nullable=False)

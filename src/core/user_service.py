@@ -71,6 +71,7 @@ def update_user_preference(
     telegram_id: int,
     categories: Optional[str] = None,
     locations: Optional[str] = None,
+    area_keywords: Optional[str] = None,
     frequency: Optional[str] = None,
     wants_urgent_alerts: Optional[bool] = None,
 ) -> Optional[UserPreference]:
@@ -104,6 +105,8 @@ def update_user_preference(
             preference.categories = categories
         if locations is not None:
             preference.locations = locations
+        if area_keywords is not None:
+            preference.area_keywords = area_keywords
         if frequency is not None:
             preference.frequency = frequency
         if wants_urgent_alerts is not None:

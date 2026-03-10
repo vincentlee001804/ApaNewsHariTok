@@ -75,6 +75,56 @@ async def latest_demo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
+async def setareas_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /setareas <comma separated keywords>
+    Example:
+      /setareas Jalan Wawasan, Taman Desa, Kampung Tabuan
+
+    Stores free-text area keywords used to match more specific local notices
+    (e.g., water supply interruption affecting a particular road/area).
+    """
+    if not update.message:
+        return
+
+    telegram_id = update.message.from_user.id
+    get_or_create_user(telegram_id, update.message.from_user.username)
+
+    raw = update.message.text or ""
+    parts = raw.split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        await update.message.reply_text(
+            "Usage:\n"
+            "`/setareas Jalan Wawasan, Taman Desa`\n\n"
+            "Tip: use commas to add multiple keywords.\n"
+            "Send `/setareas` with an empty value to clear.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    value = parts[1].strip()
+    if value.lower() in {"clear", "none", "off"}:
+        value = ""
+
+    # Normalize: store as comma-separated, lowercased for matching (display can be title-cased later)
+    keywords = [k.strip() for k in value.split(",") if k.strip()]
+    normalized = ",".join([k.lower() for k in keywords])
+
+    update_user_preference(telegram_id, area_keywords=normalized)
+
+    if normalized:
+        display = ", ".join([k.strip() for k in value.split(",") if k.strip()])
+        await update.message.reply_text(
+            f"✅ Area keywords updated:\n{display}\n\nNow /latest will prioritize news that mentions these areas.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    else:
+        await update.message.reply_text(
+            "✅ Area keywords cleared. You will no longer filter by specific roads/areas.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+
 async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /settings command. Show current preferences and options."""
     if not update.message:
@@ -104,11 +154,17 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     frequency_display = preference.frequency.capitalize()
     urgent_display = "Yes" if preference.wants_urgent_alerts else "No"
+    area_keywords_display = (
+        ", ".join([k.strip().title() for k in (preference.area_keywords or "").split(",") if k.strip()])
+        if (preference.area_keywords or "").strip()
+        else "None"
+    )
 
     settings_text = (
         "*Your Current Settings:*\n\n"
         f"📂 *Categories:* {categories_display}\n"
         f"📍 *Locations:* {locations_display}\n"
+        f"🗺️ *Area Keywords:* {area_keywords_display}\n"
         f"⏰ *Frequency:* {frequency_display}\n"
         f"🚨 *Urgent Alerts:* {urgent_display}\n\n"
         "Use the buttons below to change your preferences:"
@@ -119,6 +175,9 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         [
             InlineKeyboardButton("📂 Categories", callback_data="settings_categories"),
             InlineKeyboardButton("📍 Locations", callback_data="settings_locations"),
+        ],
+        [
+            InlineKeyboardButton("🗺️ Area Keywords", callback_data="settings_area_keywords"),
         ],
         [
             InlineKeyboardButton("⏰ Frequency", callback_data="settings_frequency"),
@@ -180,7 +239,28 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             reply_markup=reply_markup,
         )
 
+    elif data == "settings_area_keywords":
+        current = (
+            ", ".join([k.strip().title() for k in (preference.area_keywords or "").split(",") if k.strip()])
+            if (preference.area_keywords or "").strip()
+            else "None"
+        )
+        await query.edit_message_text(
+            "*Area Keywords (specific roads/areas):*\n\n"
+            "This is for very specific matching like:\n"
+            "- Jalan Wawasan\n"
+            "- Taman Desa\n"
+            "- Kampung Tabuan\n\n"
+            "Set it using:\n"
+            "`/setareas Jalan Wawasan, Taman Desa`\n\n"
+            f"Current: {current}",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Back", callback_data="settings_back")]]),
+        )
+        return
+
     elif data == "settings_locations":
+
         # Show location selection with checkmarks
         current_locations = [loc.strip().lower() for loc in (preference.locations or "").split(",") if loc.strip()]
         
@@ -421,11 +501,17 @@ async def settings_callback_refresh(query, telegram_id: int) -> None:
     
     frequency_display = preference.frequency.capitalize()
     urgent_display = "Yes" if preference.wants_urgent_alerts else "No"
+    area_keywords_display = (
+        ", ".join([k.strip().title() for k in (preference.area_keywords or "").split(",") if k.strip()])
+        if (preference.area_keywords or "").strip()
+        else "None"
+    )
 
     settings_text = (
         "*Your Current Settings:*\n\n"
         f"📂 *Categories:* {categories_display}\n"
         f"📍 *Locations:* {locations_display}\n"
+        f"🗺️ *Area Keywords:* {area_keywords_display}\n"
         f"⏰ *Frequency:* {frequency_display}\n"
         f"🚨 *Urgent Alerts:* {urgent_display}\n\n"
         "Use the buttons below to change your preferences:"
@@ -435,6 +521,9 @@ async def settings_callback_refresh(query, telegram_id: int) -> None:
         [
             InlineKeyboardButton("📂 Categories", callback_data="settings_categories"),
             InlineKeyboardButton("📍 Locations", callback_data="settings_locations"),
+        ],
+        [
+            InlineKeyboardButton("🗺️ Area Keywords", callback_data="settings_area_keywords"),
         ],
         [
             InlineKeyboardButton("⏰ Frequency", callback_data="settings_frequency"),

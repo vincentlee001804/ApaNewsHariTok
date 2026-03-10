@@ -28,10 +28,14 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     
-    # Run migration to add locations column if needed
+    # Run migrations to add missing columns if needed
     try:
-        from src.storage.migrate import migrate_add_locations_column
+        from src.storage.migrate import (
+            migrate_add_area_keywords_column,
+            migrate_add_locations_column,
+        )
         migrate_add_locations_column()
+        migrate_add_area_keywords_column()
     except Exception as e:
         # If migration fails, it's okay - might be first run or column already exists
         print(f"Migration check: {e}")

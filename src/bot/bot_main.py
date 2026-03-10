@@ -5,6 +5,7 @@ from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandle
 from src.bot.handlers import (
     help_command,
     latest_demo,
+    setareas_command,
     settings_callback,
     settings_command,
     start,
@@ -29,8 +30,13 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("latest", latest_demo))
+    application.add_handler(CommandHandler("setareas", setareas_command))
     application.add_handler(CommandHandler("settings", settings_command))
-    application.add_handler(CallbackQueryHandler(settings_callback, pattern="^settings_|^cat_|^freq_|^loc_"))
+    application.add_handler(
+        CallbackQueryHandler(
+            settings_callback, pattern="^settings_|^cat_|^freq_|^loc_"
+        )
+    )
 
     print("Bot is starting... Press Ctrl+C to stop.")
     application.run_polling()

@@ -29,3 +29,6 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local logs
+bot_*.log

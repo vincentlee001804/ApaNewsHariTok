@@ -364,12 +364,12 @@ def get_latest_news_text(max_items: int = 3) -> str:
         escaped_source = escape_html(source_name)
 
         # Format according to specification:
-        # [Category] <b>Title</b> (title in bold to distinguish from summary)
-        # <blockquote>Summary</blockquote> (summary in blockquote for visual distinction)
+        # <blockquote>[Category] <b>Title</b></blockquote> (headline in blockquote for visual distinction)
+        # Summary (plain text)
         # <a href="link">Source name</a>
         escaped_category = escape_html(category)
-        lines.append(f"[{escaped_category}] <b>{escaped_title}</b>")
-        lines.append(f"<blockquote>{escaped_summary}</blockquote>")
+        lines.append(f"<blockquote>[{escaped_category}] <b>{escaped_title}</b></blockquote>")
+        lines.append(escaped_summary)
         lines.append(f'<a href="{item.link}">{escaped_source}</a>')
         lines.append("────────────")  # Visual separator between items
 
@@ -501,12 +501,12 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
         escaped_source = escape_html(source_name)
 
         # Format according to specification:
-        # [Category] <b>Title</b> (title in bold to distinguish from summary)
-        # <blockquote>Summary</blockquote> (summary in blockquote for visual distinction)
+        # <blockquote>[Category] <b>Title</b></blockquote> (headline in blockquote for visual distinction)
+        # Summary (plain text)
         # <a href="link">Source name</a>
         escaped_category = escape_html(category)
-        lines.append(f"[{escaped_category}] <b>{escaped_title}</b>")
-        lines.append(f"<blockquote>{escaped_summary}</blockquote>")
+        lines.append(f"<blockquote>[{escaped_category}] <b>{escaped_title}</b></blockquote>")
+        lines.append(escaped_summary)
         lines.append(f'<a href="{item.link}">{escaped_source}</a>')
         lines.append("────────────")  # Visual separator between items
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -15,6 +16,12 @@ def extract_article_content(url: str, timeout: int = 10) -> Optional[str]:
     Returns the article text content, or None if extraction fails.
     """
     try:
+        # Some sources (e.g. Sarawak Tribune) already provide clean article bodies via RSS.
+        # For these, using the full HTML page can introduce unrelated text (sidebars, widgets).
+        # In such cases, return None so callers fall back to the RSS summary/content instead.
+        parsed = urlparse(url)
+        if "sarawaktribune.com" in (parsed.netloc or ""):
+            return None
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
@@ -33,6 +40,7 @@ def extract_article_content(url: str, timeout: int = 10) -> Optional[str]:
         # Common article container selectors for news sites
         selectors = [
             "article",
+            ".td-post-content",  # common WordPress newspaper theme (e.g. Sarawak Tribune)
             ".article-content",
             ".article-body",
             ".post-content",

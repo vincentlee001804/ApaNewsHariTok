@@ -5,12 +5,8 @@ https://www.malaysiakini.com/rss/en/news.rss
 https://www.malaymail.com/feed/rss/malaysia
 https://www.bernama.com/en/rssfeed.php
 https://www.lowyat.net/feed/
-https://www.bharian.com.my/
-https://www.bernama.com/en/
-https://www.freemalaysiatoday.com/
-https://www.hmetro.com.my/itmetro
-https://www.malaymail.com/
-https://www.nst.com.my/lifestyle/bots
-https://themalaysianreserve.com/
-https://www.thestar.com.my/
-https://www.utusan.com.my/
+https://www.freemalaysiatoday.com/category/nation/feed/
+https://www.thestar.com.my/rss/news/nation
+https://www.sinarharian.com.my/rss
+http://www.hmetro.com.my/utama.xml
+http://www.hmetro.com.my/mutakhir.xml

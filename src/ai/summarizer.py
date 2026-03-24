@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import textwrap
 from typing import Optional
 
@@ -87,7 +88,7 @@ def classify_category(text: str) -> Optional[str]:
         return None
 
 
-def summarize(text: str, max_words: int = 40) -> Optional[str]:
+def summarize(text: str, max_words: int = 40, title: str = "") -> Optional[str]:
     """
     Use a local Ollama model to summarize the given text.
 
@@ -96,15 +97,22 @@ def summarize(text: str, max_words: int = 40) -> Optional[str]:
     if not text:
         return None
 
+    title_line = f'Headline: "{title.strip()}"\n' if title and title.strip() else ""
     prompt = textwrap.dedent(
         f"""
         You are summarizing a local news article from Sarawak, Malaysia.
         Read the full article below and create a concise summary in at most {max_words} words.
+        {title_line}
         
         Focus on:
         - Key facts: who, what, where, when, why
         - Important details and numbers mentioned
         - Main points and outcomes
+
+        Strict relevance rules:
+        - The summary MUST match the provided headline/article only.
+        - Do NOT use information from other articles or prior context.
+        - If the text does not contain enough matching information for the headline, output exactly: NO_SUMMARY
         
         Provide only the summary text, no instructions, labels, or quotes around the summary.
         Write in clear, natural language.
@@ -142,6 +150,27 @@ def summarize(text: str, max_words: int = 40) -> Optional[str]:
             summary = summary[1:-1].strip()
         if summary.startswith("'") and summary.endswith("'"):
             summary = summary[1:-1].strip()
+
+        if not summary:
+            return None
+
+        # Hard reject model refusal/mismatch responses.
+        lowered = summary.lower()
+        rejection_markers = [
+            "no_summary",
+            "i don't have an article",
+            "i do not have an article",
+            "provided text is",
+            "if you'd like",
+            "i can help with",
+        ]
+        if any(marker in lowered for marker in rejection_markers):
+            return None
+
+        # Keep output concise even if model exceeds the requested limit.
+        words = re.findall(r"\S+", summary)
+        if len(words) > max_words:
+            summary = " ".join(words[:max_words]).strip()
         
         return summary or None
     except Exception:

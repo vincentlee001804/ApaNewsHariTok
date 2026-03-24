@@ -34,7 +34,7 @@ def get_or_create_user(telegram_id: int, username: Optional[str] = None) -> User
                 user_id=user.id,
                 categories="",  # Empty means all categories
                 locations="",  # Empty means all Sarawak locations
-                frequency="instant",
+                frequency="every_1h",
                 wants_urgent_alerts=True,
             )
             session.add(preference)
@@ -96,7 +96,7 @@ def update_user_preference(
                 user_id=user.id,
                 categories="",
                 locations="",
-                frequency="instant",
+                frequency="every_1h",
                 wants_urgent_alerts=True,
             )
             session.add(preference)
@@ -116,3 +116,17 @@ def update_user_preference(
         session.commit()
         session.refresh(preference)
         return preference
+
+
+def list_active_user_preferences() -> list[tuple[int, UserPreference]]:
+    """
+    Return active users with their preference records as:
+    [(telegram_id, preference), ...]
+    """
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(User.telegram_id, UserPreference)
+            .join(UserPreference, UserPreference.user_id == User.id)
+            .where(User.is_active.is_(True))
+        ).all()
+        return [(int(telegram_id), pref) for telegram_id, pref in rows]

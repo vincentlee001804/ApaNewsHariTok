@@ -50,8 +50,10 @@ class UserPreference(Base):
     # Area keywords: comma-separated free-text phrases like "jalan wawasan,taman desa"
     # If set, only articles containing these keywords will be shown (more specific than city-level locations).
     area_keywords = Column(String(1000), nullable=True, default="")
-    # Frequency: "instant" (send immediately) or "daily" (once per day digest)
-    frequency = Column(String(50), nullable=False, default="instant")
+    # Frequency values:
+    # - every_15m, every_30m, every_1h, every_3h, every_6h, every_12h
+    # Legacy values (instant/daily) are still accepted in runtime mapping.
+    frequency = Column(String(50), nullable=False, default="every_1h")
     wants_urgent_alerts = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

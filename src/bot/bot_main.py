@@ -17,7 +17,7 @@ from src.bot.handlers import (
 )
 from src.core.config import PREFETCH_ENABLED, PREFETCH_INTERVAL_MINUTES, require_bot_token
 from src.core.prefetch_service import prefetch_latest_articles_to_db
-from src.core.services import get_latest_news_text_for_user
+from src.core.services import get_latest_news_text_for_user, get_recent_urgent_alert_items
 from src.core.user_service import list_active_user_preferences
 from src.storage.database import init_db
 
@@ -47,6 +47,7 @@ def main() -> None:
     )
 
     last_push_tracker: dict[int, datetime] = {}
+    urgent_sent_links: dict[int, set[str]] = {}
 
     def _should_skip_push_message(text: str) -> bool:
         lowered = (text or "").lower()
@@ -71,6 +72,9 @@ def main() -> None:
         }
         key = (value or "").strip().lower()
         return mapping.get(key, 1)
+
+    def _escape_html(text: str) -> str:
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     async def _prefetch_job(context) -> None:
         # Run blocking RSS/network + DB writes in a thread to avoid blocking the bot event loop.
@@ -105,6 +109,49 @@ def main() -> None:
                 last_push_tracker[telegram_id] = now
         except Exception as e:
             print(f"[push] error: {e}")
+
+        # Urgent alert push path:
+        # send only to users with wants_urgent_alerts ON, and avoid repeating
+        # the same article link while this process is running.
+        if inserted > 0:
+            try:
+                urgent_items = await asyncio.to_thread(
+                    get_recent_urgent_alert_items,
+                    within_minutes=max(PREFETCH_INTERVAL_MINUTES * 2, 30),
+                    max_items=5,
+                )
+                if urgent_items:
+                    users = await asyncio.to_thread(list_active_user_preferences)
+                    for telegram_id, preference in users:
+                        if not preference.wants_urgent_alerts:
+                            continue
+
+                        sent_links = urgent_sent_links.setdefault(telegram_id, set())
+                        for item in urgent_items:
+                            link = item.get("link", "").strip()
+                            if not link or link in sent_links:
+                                continue
+
+                            title = _escape_html(item.get("title", "Urgent utility alert"))
+                            summary = _escape_html(item.get("summary", "")).strip()
+                            source = _escape_html(item.get("source", "Source"))
+
+                            lines = [
+                                "<b>🚨 Urgent Alert</b>",
+                                f"<blockquote><b>{title}</b></blockquote>",
+                            ]
+                            if summary:
+                                lines.append(summary[:500] + ("..." if len(summary) > 500 else ""))
+                            lines.append(f'<a href="{link}">{source}</a>')
+
+                            await application.bot.send_message(
+                                chat_id=telegram_id,
+                                text="\n".join(lines),
+                                parse_mode=ParseMode.HTML,
+                            )
+                            sent_links.add(link)
+            except Exception as e:
+                print(f"[urgent] error: {e}")
 
     if PREFETCH_ENABLED:
         # Prefetch immediately on startup, then repeat.

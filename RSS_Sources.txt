@@ -10,3 +10,4 @@ https://www.thestar.com.my/rss/news/nation
 https://www.sinarharian.com.my/rss
 http://www.hmetro.com.my/utama.xml
 http://www.hmetro.com.my/mutakhir.xml
+https://dayakdaily.com/feed/

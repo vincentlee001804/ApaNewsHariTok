@@ -351,6 +351,95 @@ def _get_source_name(source_url: str) -> str:
         return "Unknown Source"
 
 
+def _is_urgent_utility_alert(title: str, summary: str | None) -> bool:
+    """
+    Detect urgent utility/service disruption style alerts.
+    Prioritizes water/electric disruptions and emergency interruption notices.
+    """
+    text = f"{title}\n{summary or ''}".lower()
+
+    utility_terms = [
+        "water",
+        "water supply",
+        "water disruption",
+        "water supply interruption",
+        "pipe burst",
+        "kwb",
+        "jbalb",
+        "laku",
+        "electric",
+        "electricity",
+        "power",
+        "blackout",
+        "power outage",
+        "seb",
+        "sarawak energy",
+    ]
+    disruption_terms = [
+        "disruption",
+        "interruption",
+        "outage",
+        "shutdown",
+        "breakdown",
+        "cut off",
+        "cut-off",
+        "scheduled maintenance",
+        "urgent repair",
+        "repair works",
+        "emergency",
+        "alert",
+        "notice",
+        "advisory",
+    ]
+
+    has_utility = any(term in text for term in utility_terms)
+    has_disruption = any(term in text for term in disruption_terms)
+    return has_utility and has_disruption
+
+
+def get_recent_urgent_alert_items(
+    *,
+    within_minutes: int = 30,
+    max_items: int = 5,
+) -> list[dict[str, str]]:
+    """
+    Return recent urgent utility alert candidates from DB.
+    """
+    cutoff = datetime.utcnow() - timedelta(minutes=within_minutes)
+    with SessionLocal() as session:
+        rows: List[NewsArticle] = list(
+            session.execute(
+                select(NewsArticle)
+                .where(NewsArticle.created_at >= cutoff)
+                .order_by(NewsArticle.created_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+
+    results: list[dict[str, str]] = []
+    for art in rows:
+        if not _is_urgent_utility_alert(art.title, art.raw_summary):
+            continue
+
+        source_name = art.source
+        if source_name.lower().startswith("http"):
+            source_name = _get_source_name(source_name)
+
+        results.append(
+            {
+                "title": art.title,
+                "link": art.link,
+                "summary": art.raw_summary or "",
+                "source": source_name,
+            }
+        )
+        if len(results) >= max_items:
+            break
+
+    return results
+
+
 def get_latest_news_text(max_items: int = 3) -> str:
     """
     Fetch latest items from configured RSS feeds and format them

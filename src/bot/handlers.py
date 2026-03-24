@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 
 from src.core.config import TELEGRAM_SOURCE_CHANNELS
 from src.core.models import NewsArticle
-from src.core.services import _is_urgent_utility_alert
+from src.core.services import _is_urgent_utility_alert, build_urgent_preview
 from src.core.user_service import (
     get_or_create_user,
     get_user_preference,
@@ -148,13 +148,14 @@ async def ingest_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Urgent alerts bypass frequency and are pushed immediately on receive.
     if inserted and _is_urgent_utility_alert(title, text):
         safe_title = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        safe_summary = text[:500].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        preview = build_urgent_preview(title, text, max_words=45)
+        safe_summary = preview.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         safe_source = source.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
         lines = [
             "<b>🚨 Urgent Alert</b>",
             f"<blockquote><b>{safe_title}</b></blockquote>",
-            safe_summary + ("..." if len(text) > 500 else ""),
+            safe_summary,
             f'<a href="{link}">{safe_source}</a>',
         ]
         message_text = "\n".join(lines)

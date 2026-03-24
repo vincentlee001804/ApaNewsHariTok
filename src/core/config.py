@@ -49,6 +49,16 @@ def _load_rss_feeds_from_file() -> List[str]:
 # otherwise we fall back to a small default list.
 RSS_FEEDS: Final[List[str]] = _load_rss_feeds_from_file() or DEFAULT_RSS_FEEDS
 
+# Optional Telegram channel sources for ingesting channel posts into DB.
+# Comma-separated values in .env, each can be:
+# - channel username without @, e.g. swbnews
+# - numeric chat id, e.g. -1001234567890
+TELEGRAM_SOURCE_CHANNELS: Final[List[str]] = [
+    x.strip().lower()
+    for x in os.getenv("TELEGRAM_SOURCE_CHANNELS", "").split(",")
+    if x.strip()
+]
+
 # Deduplication: when enabled, once an article has been sent, it will never be sent again.
 # For testing message formats, you may want to disable this temporarily.
 # Set in `.env` as: DEDUPLICATION_ENABLED=false

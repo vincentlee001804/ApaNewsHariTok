@@ -5,12 +5,18 @@ from typing import Final
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
+from sqlalchemy.exc import IntegrityError
 
+from src.core.config import TELEGRAM_SOURCE_CHANNELS
+from src.core.models import NewsArticle
+from src.core.services import _is_urgent_utility_alert
 from src.core.user_service import (
     get_or_create_user,
     get_user_preference,
+    list_active_user_preferences,
     update_user_preference,
 )
+from src.storage.database import SessionLocal
 
 
 WELCOME_TEXT: Final[str] = (
@@ -88,6 +94,89 @@ async def latest_demo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     text = get_latest_news_text_for_user(telegram_id)
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
+async def ingest_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Store approved Telegram channel posts as NewsArticle rows.
+    The bot must be added to channels and allowed to receive channel posts.
+    """
+    message = update.channel_post
+    if not message or not message.chat:
+        return
+
+    text = (message.text or message.caption or "").strip()
+    if not text:
+        return
+
+    chat = message.chat
+    username = (chat.username or "").strip().lower()
+    chat_id_str = str(chat.id).strip().lower()
+
+    # Safety: require allowlist; ignore channel posts if not configured.
+    if not TELEGRAM_SOURCE_CHANNELS:
+        return
+
+    # Match either username (without @) or numeric chat id.
+    if username not in TELEGRAM_SOURCE_CHANNELS and chat_id_str not in TELEGRAM_SOURCE_CHANNELS:
+        return
+
+    title_line = text.splitlines()[0].strip() if text.splitlines() else ""
+    title = (title_line or f"Channel post {message.message_id}")[:500]
+    source = f"Telegram: {chat.title or chat.username or chat.id}"
+
+    if username:
+        link = f"https://t.me/{username}/{message.message_id}"
+    else:
+        link = f"telegram://channel/{chat.id}/{message.message_id}"
+
+    with SessionLocal() as session:
+        row = NewsArticle(
+            title=title,
+            link=link,
+            source=source,
+            raw_summary=text[:8000],
+        )
+        session.add(row)
+        inserted = False
+        try:
+            session.commit()
+            inserted = True
+        except IntegrityError:
+            session.rollback()
+
+    # Urgent alerts bypass frequency and are pushed immediately on receive.
+    if inserted and _is_urgent_utility_alert(title, text):
+        safe_title = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        safe_summary = text[:500].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        safe_source = source.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        lines = [
+            "<b>🚨 Urgent Alert</b>",
+            f"<blockquote><b>{safe_title}</b></blockquote>",
+            safe_summary + ("..." if len(text) > 500 else ""),
+            f'<a href="{link}">{safe_source}</a>',
+        ]
+        message_text = "\n".join(lines)
+
+        users = list_active_user_preferences()
+        shared_sent = context.application.bot_data.setdefault("urgent_sent_links", {})
+        for telegram_id, preference in users:
+            if not preference.wants_urgent_alerts:
+                continue
+            sent_links = shared_sent.setdefault(telegram_id, set())
+            if link in sent_links:
+                continue
+            try:
+                await context.bot.send_message(
+                    chat_id=telegram_id,
+                    text=message_text,
+                    parse_mode=ParseMode.HTML,
+                )
+                sent_links.add(link)
+            except Exception:
+                # Best-effort push per user; ignore failures and continue.
+                pass
 
 
 async def setareas_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

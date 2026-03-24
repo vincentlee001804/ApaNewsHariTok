@@ -248,12 +248,17 @@ You can adjust folder names as the project grows, but this structure separates c
    pip install -r requirements.txt
    ```
 
-4. **Configure environment variables**
+4. **Pull the Ollama model**
+   ```bash
+   ollama pull llama3.1
+   ```
+
+5. **Configure environment variables**
    - `TELEGRAM_BOT_TOKEN` – token from BotFather.  
    - `DATABASE_URL` – e.g. `sqlite:///mvp.db`.  
    - Any additional config related to Ollama (e.g. host/port if not default).
 
-5. **Run the bot (development mode)**
+6. **Run the bot (development mode)**
    ```bash
    python -m src.bot.bot_main
    ```

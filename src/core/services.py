@@ -175,6 +175,20 @@ def _matches_area_keywords_filter(text: str, area_keywords: str) -> bool:
     return any(k in haystack for k in keywords)
 
 
+def _fallback_summary_from_text(text: str, max_words: int = 50) -> str:
+    """
+    Deterministic fallback summary when LLM output is unavailable/unreliable.
+    """
+    cleaned = " ".join((text or "").split())
+    if not cleaned:
+        return "(No summary available right now.)"
+
+    words = cleaned.split()
+    if len(words) <= max_words:
+        return cleaned
+    return " ".join(words[:max_words]).rstrip(" ,;:.") + "..."
+
+
 def _geo_priority_rank(
     *,
     title: str,
@@ -206,6 +220,25 @@ def _geo_priority_rank(
         return 3
 
     return 4
+
+
+def _should_apply_area_priority(
+    *,
+    records: list[tuple[str, str]],
+    area_keywords_filter: str,
+) -> bool:
+    """
+    Apply area-keyword priority only when at least one candidate matches.
+    If no candidate matches, caller should fall back to broader geo priority.
+    """
+    if not area_keywords_filter.strip():
+        return False
+
+    for title, summary in records:
+        combined = f"{title}\n{summary}"
+        if _matches_area_keywords_filter(combined, area_keywords_filter):
+            return True
+    return False
 
 
 def _extract_category(title: str, summary: str | None) -> str:
@@ -398,10 +431,9 @@ def get_latest_news_text(max_items: int = 3) -> str:
             # Fallback to RSS summary or title if article scraping fails
             source_text = item.summary or item.title
         
-        ai_summary = summarize(source_text, max_words=50)  # Increased to 50 words for more detailed summary
-
+        ai_summary = summarize(source_text, max_words=50, title=item.title)
         if not ai_summary:
-            ai_summary = "(No AI summary available right now.)"
+            ai_summary = _fallback_summary_from_text(item.summary or item.title, max_words=50)
 
         # Get source name
         source_name = _get_source_name(item.source)
@@ -461,6 +493,11 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
             stmt = stmt.where(NewsArticle.last_sent_at.is_(None))
 
         candidates: List[NewsArticle] = list(session.execute(stmt).scalars().all())
+        use_area_priority = _should_apply_area_priority(
+            records=[(art.title or "", art.ai_summary or art.raw_summary or "") for art in candidates],
+            area_keywords_filter=area_keywords_filter,
+        )
+        effective_area_keywords_filter = area_keywords_filter if use_area_priority else ""
 
         # Rank by geographic priority (area keywords > location > Sarawak > Malaysia > world)
         ranked: List[tuple[int, datetime, NewsArticle]] = []
@@ -472,7 +509,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 title=art.title,
                 summary=summary_for_rank,
                 locations_filter=locations_filter,
-                area_keywords_filter=area_keywords_filter,
+                area_keywords_filter=effective_area_keywords_filter,
             )
             ranked.append((rank, art.created_at, art))
 
@@ -496,6 +533,13 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 )
 
             ranked_items: List[tuple[int, float, RssItem]] = []
+            use_area_priority_rss = _should_apply_area_priority(
+                records=[(item.title or "", item.summary or "") for item in unique_items],
+                area_keywords_filter=area_keywords_filter,
+            )
+            effective_area_keywords_filter_rss = (
+                area_keywords_filter if use_area_priority_rss else ""
+            )
             for item in unique_items:
                 if not _matches_category_filter(item.title, item.summary or "", categories_filter):
                     continue
@@ -503,7 +547,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                     title=item.title,
                     summary=item.summary or "",
                     locations_filter=locations_filter,
-                    area_keywords_filter=area_keywords_filter,
+                    area_keywords_filter=effective_area_keywords_filter_rss,
                 )
                 published_ts = item.published.timestamp() if item.published else 0.0
                 ranked_items.append((rank, published_ts, item))
@@ -557,7 +601,9 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 category = _get_category_with_llm_fallback(item.title, item.summary)
                 article_text = extract_article_content(item.link)
                 source_text = article_text or item.summary or item.title
-                ai_summary = summarize(source_text, max_words=50) or "(No AI summary available right now.)"
+                ai_summary = summarize(source_text, max_words=50, title=item.title)
+                if not ai_summary:
+                    ai_summary = _fallback_summary_from_text(item.summary or item.title, max_words=50)
                 source_name = _get_source_name(item.source)
 
                 escaped_title = escape_html(item.title)
@@ -583,7 +629,11 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 continue
             article_text = extract_article_content(art.link)
             source_text = article_text or art.raw_summary or art.title
-            art.ai_summary = summarize(source_text, max_words=50) or "(No AI summary available right now.)"
+            art.ai_summary = summarize(source_text, max_words=50, title=art.title)
+            if not art.ai_summary:
+                art.ai_summary = _fallback_summary_from_text(
+                    art.raw_summary or art.title, max_words=50
+                )
 
         if DEDUPLICATION_ENABLED:
             for art in chosen:
@@ -600,7 +650,10 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 source_name = _get_source_name(source_name)
 
             escaped_title = escape_html(art.title)
-            escaped_summary = escape_html(art.ai_summary or "(No AI summary available right now.)")
+            escaped_summary = escape_html(
+                art.ai_summary
+                or _fallback_summary_from_text(art.raw_summary or art.title, max_words=50)
+            )
             escaped_source = escape_html(source_name)
             escaped_category = escape_html(category)
 

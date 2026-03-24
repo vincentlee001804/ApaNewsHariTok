@@ -5,10 +5,11 @@ from datetime import datetime, timedelta
 
 from telegram.constants import ParseMode
 
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from src.bot.handlers import (
     help_command,
+    ingest_channel_post,
     latest_demo,
     setareas_command,
     settings_callback,
@@ -40,6 +41,7 @@ def main() -> None:
     application.add_handler(CommandHandler("latest", latest_demo))
     application.add_handler(CommandHandler("setareas", setareas_command))
     application.add_handler(CommandHandler("settings", settings_command))
+    application.add_handler(MessageHandler(filters.ChatType.CHANNEL, ingest_channel_post))
     application.add_handler(
         CallbackQueryHandler(
             settings_callback, pattern="^settings_|^cat_|^freq_|^loc_"
@@ -47,7 +49,9 @@ def main() -> None:
     )
 
     last_push_tracker: dict[int, datetime] = {}
-    urgent_sent_links: dict[int, set[str]] = {}
+    urgent_sent_links: dict[int, set[str]] = application.bot_data.setdefault(
+        "urgent_sent_links", {}
+    )
 
     def _should_skip_push_message(text: str) -> bool:
         lowered = (text or "").lower()
@@ -97,7 +101,13 @@ def main() -> None:
                 if last_sent and (now - last_sent) < timedelta(hours=interval_hours):
                     continue
 
-                text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id)
+                # Scheduled push sends a single top-priority article per run.
+                # /latest command remains multi-item (default handled in handlers/services).
+                text = await asyncio.to_thread(
+                    get_latest_news_text_for_user,
+                    telegram_id,
+                    1,
+                )
                 if _should_skip_push_message(text):
                     continue
 

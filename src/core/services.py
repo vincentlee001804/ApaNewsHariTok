@@ -189,6 +189,22 @@ def _fallback_summary_from_text(text: str, max_words: int = 50) -> str:
     return " ".join(words[:max_words]).rstrip(" ,;:.") + "..."
 
 
+def build_urgent_preview(title: str, summary: str | None, max_words: int = 45) -> str:
+    """
+    Build a non-empty, concise preview line for urgent alert messages.
+    Prefers summary body; falls back to title when summary is missing.
+    """
+    body = (summary or "").strip()
+    if body:
+        # Avoid repeating the title line when channel posts start with the headline.
+        first_line = body.splitlines()[0].strip() if body.splitlines() else ""
+        if first_line and first_line.lower() == (title or "").strip().lower():
+            body = "\n".join(body.splitlines()[1:]).strip()
+
+    source_text = body or title or ""
+    return _fallback_summary_from_text(source_text, max_words=max_words)
+
+
 def _geo_priority_rank(
     *,
     title: str,
@@ -430,7 +446,7 @@ def get_recent_urgent_alert_items(
             {
                 "title": art.title,
                 "link": art.link,
-                "summary": art.raw_summary or "",
+                "summary": build_urgent_preview(art.title, art.raw_summary, max_words=45),
                 "source": source_name,
             }
         )

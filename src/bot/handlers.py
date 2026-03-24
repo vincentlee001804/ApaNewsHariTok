@@ -33,8 +33,23 @@ HELP_TEXT: Final[str] = (
     "• /latest – get the latest news with AI summaries\n"
     "• /settings – configure your preferences\n\n"
     "Use /settings to choose categories (e.g., Sarawak-only, sports, politics) "
-    "and delivery frequency (instant or daily digest)."
+    "and delivery frequency (every 1h/3h/6h/12h)."
 )
+
+def _format_frequency(value: str | None) -> str:
+    mapping = {
+        "every_15m": "Every 15 mins",
+        "every_30m": "Every 30 mins",
+        "every_1h": "Every 1 hour",
+        "every_3h": "Every 3 hours",
+        "every_6h": "Every 6 hours",
+        "every_12h": "Every 12 hours",
+        # Backward compatibility for older stored values:
+        "instant": "Every 1 hour",
+        "daily": "Every 12 hours",
+    }
+    key = (value or "").strip().lower()
+    return mapping.get(key, "Every 1 hour")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -152,7 +167,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     else:
         locations_display = "All Sarawak"
     
-    frequency_display = preference.frequency.capitalize()
+    frequency_display = _format_frequency(preference.frequency)
     urgent_display = "Yes" if preference.wants_urgent_alerts else "No"
     area_keywords_display = (
         ", ".join([k.strip().title() for k in (preference.area_keywords or "").split(",") if k.strip()])
@@ -412,17 +427,47 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     elif data == "settings_frequency":
         # Show frequency selection
+        current_freq = (preference.frequency or "").strip().lower()
+        if current_freq == "instant":
+            current_freq = "every_1h"
+        elif current_freq == "daily":
+            current_freq = "every_12h"
+
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "⚡ Instant" + (" ✓" if preference.frequency == "instant" else ""),
-                    callback_data="freq_instant",
+                    "⏱️ Every 15 mins" + (" ✓" if current_freq == "every_15m" else ""),
+                    callback_data="freq_every_15m",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    "📅 Daily Digest" + (" ✓" if preference.frequency == "daily" else ""),
-                    callback_data="freq_daily",
+                    "⏱️ Every 30 mins" + (" ✓" if current_freq == "every_30m" else ""),
+                    callback_data="freq_every_30m",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "⏱️ Every 1 hour" + (" ✓" if current_freq == "every_1h" else ""),
+                    callback_data="freq_every_1h",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "⏱️ Every 3 hours" + (" ✓" if current_freq == "every_3h" else ""),
+                    callback_data="freq_every_3h",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "⏱️ Every 6 hours" + (" ✓" if current_freq == "every_6h" else ""),
+                    callback_data="freq_every_6h",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "⏱️ Every 12 hours" + (" ✓" if current_freq == "every_12h" else ""),
+                    callback_data="freq_every_12h",
                 ),
             ],
             [InlineKeyboardButton("◀️ Back", callback_data="settings_back")],
@@ -430,9 +475,8 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
             "*Select Frequency:*\n\n"
-            "• *Instant:* Get news immediately when you use /latest\n"
-            "• *Daily Digest:* Receive a summary once per day (coming soon)\n\n"
-            f"Current: {preference.frequency.capitalize()}",
+            "Choose how often you want push notifications while the bot is running.\n\n"
+            f"Current: {_format_frequency(preference.frequency)}",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup,
         )
@@ -471,12 +515,24 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     elif data.startswith("freq_"):
         # Frequency selection
-        if data == "freq_instant":
-            update_user_preference(telegram_id, frequency="instant")
-            await query.answer("Frequency set to: Instant")
-        elif data == "freq_daily":
-            update_user_preference(telegram_id, frequency="daily")
-            await query.answer("Frequency set to: Daily Digest")
+        if data == "freq_every_15m":
+            update_user_preference(telegram_id, frequency="every_15m")
+            await query.answer("Frequency set to: Every 15 mins")
+        elif data == "freq_every_30m":
+            update_user_preference(telegram_id, frequency="every_30m")
+            await query.answer("Frequency set to: Every 30 mins")
+        elif data == "freq_every_1h":
+            update_user_preference(telegram_id, frequency="every_1h")
+            await query.answer("Frequency set to: Every 1 hour")
+        elif data == "freq_every_3h":
+            update_user_preference(telegram_id, frequency="every_3h")
+            await query.answer("Frequency set to: Every 3 hours")
+        elif data == "freq_every_6h":
+            update_user_preference(telegram_id, frequency="every_6h")
+            await query.answer("Frequency set to: Every 6 hours")
+        elif data == "freq_every_12h":
+            update_user_preference(telegram_id, frequency="every_12h")
+            await query.answer("Frequency set to: Every 12 hours")
         await settings_callback_refresh(query, telegram_id)
 
     elif data == "settings_back":
@@ -499,7 +555,7 @@ async def settings_callback_refresh(query, telegram_id: int) -> None:
     else:
         locations_display = "All Sarawak"
     
-    frequency_display = preference.frequency.capitalize()
+    frequency_display = _format_frequency(preference.frequency)
     urgent_display = "Yes" if preference.wants_urgent_alerts else "No"
     area_keywords_display = (
         ", ".join([k.strip().title() for k in (preference.area_keywords or "").split(",") if k.strip()])

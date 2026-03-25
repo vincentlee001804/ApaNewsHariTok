@@ -734,29 +734,48 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
     get_or_create_user(telegram_id, username)
 
     message_text = update.message.text
-    if not _looks_like_todays_summary_request(message_text):
+    lowered = (message_text or "").strip().lower()
+
+    # Friendly shortcuts.
+    if any(greet in lowered for greet in ["hi", "hello", "hey", "good morning", "good night"]):
         await update.message.reply_text(
-            "To get a summary, ask like:\n"
-            "- `summary today`\n"
-            "- `ringkasan berita hari ini`\n\n"
-            "Tip: You can also use `/latest` or `/settings`.",
+            "Ask me for:\n"
+            "- `today summary` (or `ringkasan berita hari ini`)\n"
+            "- `latest`\n"
+            "- or ask a question like: 'What happened with water supply today?'\n",
             parse_mode=ParseMode.MARKDOWN,
         )
         return
 
-    from src.core.services import get_todays_news_digest_for_user
+    if "latest" in lowered:
+        from src.core.services import get_latest_news_text_for_user
 
-    digest = await asyncio.to_thread(get_todays_news_digest_for_user, telegram_id, 6)
-    if not digest:
+        text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id, 3)
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+        return
+
+    if _looks_like_todays_summary_request(message_text):
+        from src.core.services import get_todays_news_digest_for_user
+
+        digest = await asyncio.to_thread(get_todays_news_digest_for_user, telegram_id, 6)
+        if not digest:
+            await update.message.reply_text(
+                "I couldn't generate today's summary yet. Try `/latest`.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
         await update.message.reply_text(
-            "I couldn’t find today’s news in the database yet.\n"
-            "Try `/latest` first, then ask again.",
+            digest,
             parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
         )
         return
 
-    await update.message.reply_text(
-        digest,
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
+    # Default: "news agent" Q&A mode.
+    from src.core.services import get_news_agent_response_for_user
+
+    response = await asyncio.to_thread(
+        get_news_agent_response_for_user, telegram_id, message_text
     )
+    await update.message.reply_text(response, parse_mode=ParseMode.HTML)

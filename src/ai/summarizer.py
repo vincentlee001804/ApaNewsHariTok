@@ -241,3 +241,76 @@ def summarize_digest(items_text: str, max_words: int = 160) -> Optional[str]:
     except Exception:
         return None
 
+
+def answer_news_question(question: str, items_text: str, max_words: int = 220) -> Optional[str]:
+    """
+    Answer a user question using only the provided news items.
+    items_text should be a compact list of "- title\\n  snippet" blocks.
+    """
+    if not question or not question.strip():
+        return None
+    if not items_text or not items_text.strip():
+        return None
+
+    prompt = textwrap.dedent(
+        f"""
+        You are a local news agent for Sarawak (Malaysia).
+        You will be given a user question and a set of news items (titles + short snippets).
+
+        Rules:
+        - Answer the user's question ONLY using the provided items.
+        - If the provided items do not contain enough relevant information, say:
+          "I couldn't find relevant information in the news items I have."
+        - Keep the answer concise (<= {max_words} words).
+        - Use plain text only (no HTML, no Markdown).
+        - Prefer bullet points when there are multiple facts.
+        - Optionally end with a short "Related headlines:" line listing 2-4 titles.
+
+        User question:
+        {question.strip()}
+
+        News items:
+        \"\"\"{items_text.strip()}\"\"\"
+        """
+    ).strip()
+
+    try:
+        response = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = response.json()
+        answer = (data.get("response", "") or "").strip()
+        if not answer:
+            return None
+
+        lowered = answer.lower()
+        rejection_markers = [
+            "no_summary",
+            "i don't have",
+            "i do not have",
+            "unable",
+            "can't",
+        ]
+        if any(marker in lowered for marker in rejection_markers):
+            # Still allow the specific "couldn't find relevant info..." phrasing.
+            if "couldn't find relevant information" in lowered:
+                return answer
+            # Otherwise treat as failure so caller can fallback.
+            return None
+
+        # Keep answer within max_words if the model overshoots.
+        words = re.findall(r"\S+", answer)
+        if len(words) > max_words:
+            answer = " ".join(words[:max_words]).strip()
+
+        return answer or None
+    except Exception:
+        return None
+

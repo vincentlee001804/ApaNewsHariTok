@@ -236,6 +236,33 @@ def _geo_priority_rank(
     3: mentions Malaysia
     4: world/other
     """
+    def _is_sarawak_related_text(text: str) -> bool:
+        t = (text or "").lower()
+        sarawak_terms = [
+            "sarawak",
+            # Major cities / regions (covers most Sarawak headlines)
+            "kuching",
+            "miri",
+            "sibu",
+            "bintulu",
+            "serian",
+            "sarikei",
+            "sri aman",
+            "sriaman",
+            "kota samarahan",
+            "samarahan",
+            # Other towns/areas from your location mapping
+            "mukah",
+            "limbang",
+            "lawas",
+            "betong",
+            "saratok",
+            "kapit",
+            "marudi",
+            "belaga",
+        ]
+        return any(term in t for term in sarawak_terms)
+
     combined = f"{title}\n{summary}".lower()
 
     if area_keywords_filter.strip() and _matches_area_keywords_filter(combined, area_keywords_filter):
@@ -244,7 +271,7 @@ def _geo_priority_rank(
     if locations_filter.strip() and _matches_location_filter(title, summary, locations_filter):
         return 1
 
-    if "sarawak" in combined:
+    if _is_sarawak_related_text(combined):
         return 2
 
     if "malaysia" in combined:

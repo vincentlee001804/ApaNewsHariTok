@@ -4,7 +4,7 @@ Run this once to update your existing database.
 """
 from __future__ import annotations
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from src.storage.database import engine, SessionLocal
 
@@ -100,7 +100,74 @@ def migrate_add_ai_summary_column() -> None:
         pass
 
 
+def migrate_add_news_article_location_and_state_columns() -> None:
+    """
+    Add `location` + `state` columns to `news_articles` if they don't exist.
+    """
+    try:
+        with SessionLocal() as session:
+            result = session.execute(
+                text(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='news_articles'"
+                )
+            ).fetchone()
+
+            if not result:
+                return
+
+            result = session.execute(text("PRAGMA table_info(news_articles)")).fetchall()
+            column_names = [row[1] for row in result]
+
+            if "location" not in column_names:
+                print("Adding 'location' column to news_articles table...")
+                session.execute(
+                    text("ALTER TABLE news_articles ADD COLUMN location VARCHAR(255)")
+                )
+                session.commit()
+
+            if "state" not in column_names:
+                print("Adding 'state' column to news_articles table...")
+                session.execute(
+                    text("ALTER TABLE news_articles ADD COLUMN state VARCHAR(20)")
+                )
+                session.commit()
+    except Exception:
+        pass
+
+
+def backfill_news_article_location_and_state() -> None:
+    """
+    Backfill `location` + `state` for existing rows (best-effort).
+    """
+    try:
+        from src.core.location_extractor import extract_location_and_state
+        from src.core.models import NewsArticle
+
+        with SessionLocal() as session:
+            rows = session.execute(
+                select(NewsArticle).where(NewsArticle.state.is_(None))
+            ).scalars().all()
+
+            if not rows:
+                return
+
+            for art in rows:
+                loc, state = extract_location_and_state(
+                    art.title or "",
+                    art.raw_summary,
+                )
+                art.location = loc
+                art.state = state
+
+            session.commit()
+    except Exception:
+        # Best-effort only.
+        pass
+
+
 if __name__ == "__main__":
     migrate_add_locations_column()
     migrate_add_area_keywords_column()
     migrate_add_ai_summary_column()
+    migrate_add_news_article_location_and_state_columns()
+    backfill_news_article_location_and_state()

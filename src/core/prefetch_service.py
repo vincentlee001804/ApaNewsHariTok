@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from src.core.services import _get_source_name  # reuse existing mapping
 from src.core.config import RSS_FEEDS
 from src.core.models import NewsArticle
+from src.core.location_extractor import extract_location_and_state
 from src.scrapers.rss_reader import RssItem, fetch_latest_items
 from src.storage.database import SessionLocal
 
@@ -34,11 +35,14 @@ def prefetch_latest_articles_to_db(
     inserted = 0
     with SessionLocal() as session:
         for item in items:
+            location, state = extract_location_and_state(item.title, item.summary)
             article = NewsArticle(
                 title=item.title,
                 link=item.link,
                 source=_get_source_name(item.source),
                 raw_summary=item.summary,
+                location=location,
+                state=state,
             )
             session.add(article)
             try:

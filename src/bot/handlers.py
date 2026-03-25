@@ -9,6 +9,7 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 from sqlalchemy.exc import IntegrityError
 
 from src.core.config import TELEGRAM_SOURCE_CHANNELS
+from src.core.location_extractor import extract_location_and_state
 from src.core.models import NewsArticle
 from src.core.services import _is_urgent_utility_alert, build_urgent_preview
 from src.core.user_service import (
@@ -132,11 +133,14 @@ async def ingest_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         link = f"telegram://channel/{chat.id}/{message.message_id}"
 
     with SessionLocal() as session:
+        location, state = extract_location_and_state(title, text)
         row = NewsArticle(
             title=title,
             link=link,
             source=source,
             raw_summary=text[:8000],
+            location=location,
+            state=state,
         )
         session.add(row)
         inserted = False

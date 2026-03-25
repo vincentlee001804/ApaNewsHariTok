@@ -226,6 +226,8 @@ def _geo_priority_rank(
     summary: str,
     locations_filter: str,
     area_keywords_filter: str,
+    state: str | None = None,
+    location: str | None = None,
 ) -> int:
     """
     Geographic relevance rank (lower is higher priority):
@@ -268,8 +270,27 @@ def _geo_priority_rank(
     if area_keywords_filter.strip() and _matches_area_keywords_filter(combined, area_keywords_filter):
         return 0
 
-    if locations_filter.strip() and _matches_location_filter(title, summary, locations_filter):
-        return 1
+    # If we have extracted location/state, prefer it over heuristic matching.
+    if locations_filter.strip():
+        user_locations = {
+            loc.strip().lower() for loc in (locations_filter or "").split(",") if loc.strip()
+        }
+
+        if (state or "").lower() == "sarawak":
+            if location and location.strip().lower() in user_locations:
+                return 1
+            # Sarawak article, but not in the exact user-selected location.
+            return 2
+
+        # Fallback to old heuristic matching when state/location are missing.
+        if _matches_location_filter(title, summary, locations_filter):
+            return 1
+
+    if (state or "").lower() == "sarawak":
+        return 2
+
+    if (state or "").lower() == "other":
+        return 3
 
     if _is_sarawak_related_text(combined):
         return 2
@@ -538,12 +559,17 @@ def get_latest_news_text(max_items: int = 3) -> str:
                     continue
 
                 if not existing:
+                    from src.core.location_extractor import extract_location_and_state
+
+                    location, state = extract_location_and_state(item.title, item.summary)
                     existing = NewsArticle(
                         title=item.title,
                         link=item.link,
                         source=item.source,
                         raw_summary=item.summary,
                         last_sent_at=now,
+                        location=location,
+                        state=state,
                     )
                     session.add(existing)
                 else:
@@ -657,6 +683,8 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 summary=summary_for_rank,
                 locations_filter=locations_filter,
                 area_keywords_filter=effective_area_keywords_filter,
+                state=getattr(art, "state", None),
+                location=getattr(art, "location", None),
             )
             ranked.append((rank, art.created_at, art))
 
@@ -720,12 +748,19 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                     if existing and existing.last_sent_at is not None:
                         continue
                     if not existing:
+                        from src.core.location_extractor import extract_location_and_state
+
+                        location, state = extract_location_and_state(
+                            item.title, item.summary
+                        )
                         existing = NewsArticle(
                             title=item.title,
                             link=item.link,
                             source=item.source,
                             raw_summary=item.summary,
                             last_sent_at=now,
+                            location=location,
+                            state=state,
                         )
                         session.add(existing)
                     else:
@@ -930,6 +965,8 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
             summary=summary_for_rank or "",
             locations_filter=locations_filter,
             area_keywords_filter=area_keywords_filter,
+            state=getattr(art, "state", None),
+            location=getattr(art, "location", None),
         )
         ranked.append((rank, art.created_at, art))
 
@@ -1036,6 +1073,8 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
             summary=summary_for_rank or "",
             locations_filter=locations_filter,
             area_keywords_filter=area_keywords_filter,
+            state=getattr(art, "state", None),
+            location=getattr(art, "location", None),
         )
         ranked.append((rank, art.created_at, art))
 

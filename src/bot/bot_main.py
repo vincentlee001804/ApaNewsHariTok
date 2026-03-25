@@ -9,6 +9,7 @@ from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandle
 
 from src.bot.handlers import (
     help_command,
+    conversational_message,
     ingest_channel_post,
     latest_demo,
     setareas_command,
@@ -42,6 +43,12 @@ def main() -> None:
     application.add_handler(CommandHandler("setareas", setareas_command))
     application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, ingest_channel_post))
+    application.add_handler(
+        MessageHandler(
+            filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND,
+            conversational_message,
+        )
+    )
     application.add_handler(
         CallbackQueryHandler(
             settings_callback, pattern="^settings_|^cat_|^freq_|^loc_"

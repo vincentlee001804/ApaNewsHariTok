@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Final
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -155,29 +156,45 @@ async def ingest_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         lines = [
             "<b>🚨 Urgent Alert</b>",
             f"<blockquote><b>{safe_title}</b></blockquote>",
-            safe_summary,
+            f"<i>Summary</i>: {safe_summary}",
             f'<a href="{link}">{safe_source}</a>',
         ]
         message_text = "\n".join(lines)
 
-        users = list_active_user_preferences()
+        # Avoid blocking the asyncio event loop with synchronous DB access.
+        users = await asyncio.to_thread(list_active_user_preferences)
         shared_sent = context.application.bot_data.setdefault("urgent_sent_links", {})
+
+        semaphore = asyncio.Semaphore(5)
+
+        async def _send_to_user(telegram_id: int, sent_links: set[str]) -> None:
+            async with semaphore:
+                if link in sent_links:
+                    return
+                try:
+                    await context.bot.send_message(
+                        chat_id=telegram_id,
+                        text=message_text,
+                        parse_mode=ParseMode.HTML,
+                    )
+                    sent_links.add(link)
+                except Exception:
+                    # Best-effort push per user; ignore failures.
+                    pass
+
+        send_tasks: list[asyncio.Task[None]] = []
         for telegram_id, preference in users:
             if not preference.wants_urgent_alerts:
                 continue
             sent_links = shared_sent.setdefault(telegram_id, set())
             if link in sent_links:
                 continue
-            try:
-                await context.bot.send_message(
-                    chat_id=telegram_id,
-                    text=message_text,
-                    parse_mode=ParseMode.HTML,
-                )
-                sent_links.add(link)
-            except Exception:
-                # Best-effort push per user; ignore failures and continue.
-                pass
+            send_tasks.append(
+                asyncio.create_task(_send_to_user(telegram_id, sent_links))
+            )
+
+        if send_tasks:
+            await asyncio.gather(*send_tasks)
 
 
 async def setareas_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -685,4 +702,61 @@ async def settings_callback_refresh(query, telegram_id: int) -> None:
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
         settings_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
+    )
+
+
+def _looks_like_todays_summary_request(message_text: str) -> bool:
+    lowered = (message_text or "").strip().lower()
+    if not lowered:
+        return False
+
+    has_summary = any(
+        kw in lowered for kw in ["summary", "summarise", "summarize", "ringkasan", "ringkasan berita"]
+    )
+    has_today = any(kw in lowered for kw in ["today", "todays", "hari ini", "tadi"])
+    has_news = any(kw in lowered for kw in ["news", "berita", "headlines"])
+
+    # Require summary + today, or summary + news + "today-ish".
+    return (has_summary and has_today) or (has_summary and has_news and has_today)
+
+
+async def conversational_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Option B: conversational mode.
+    User can type a question like: "summary for today's news",
+    and the bot replies with one digest generated from local DB + Ollama.
+    """
+    if not update.message or not update.message.text:
+        return
+
+    telegram_id = update.message.from_user.id
+    username = update.message.from_user.username
+    get_or_create_user(telegram_id, username)
+
+    message_text = update.message.text
+    if not _looks_like_todays_summary_request(message_text):
+        await update.message.reply_text(
+            "To get a summary, ask like:\n"
+            "- `summary today`\n"
+            "- `ringkasan berita hari ini`\n\n"
+            "Tip: You can also use `/latest` or `/settings`.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    from src.core.services import get_todays_news_digest_for_user
+
+    digest = await asyncio.to_thread(get_todays_news_digest_for_user, telegram_id, 6)
+    if not digest:
+        await update.message.reply_text(
+            "I couldn’t find today’s news in the database yet.\n"
+            "Try `/latest` first, then ask again.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    await update.message.reply_text(
+        digest,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
     )

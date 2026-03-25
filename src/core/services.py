@@ -194,12 +194,27 @@ def build_urgent_preview(title: str, summary: str | None, max_words: int = 45) -
     Build a non-empty, concise preview line for urgent alert messages.
     Prefers summary body; falls back to title when summary is missing.
     """
+    def _normalize_for_title_match(s: str) -> str:
+        # Keep it intentionally simple: whitespace + lowercase + trim common punctuation.
+        norm = " ".join((s or "").split()).strip().lower()
+        # Trim leading/trailing punctuation so minor formatting differences still match.
+        return norm.strip("\"'()[]{}<>.,;:!?")
+
     body = (summary or "").strip()
-    if body:
+    if body and (title or "").strip():
         # Avoid repeating the title line when channel posts start with the headline.
         first_line = body.splitlines()[0].strip() if body.splitlines() else ""
-        if first_line and first_line.lower() == (title or "").strip().lower():
-            body = "\n".join(body.splitlines()[1:]).strip()
+        if first_line:
+            norm_title = _normalize_for_title_match(title)
+            norm_first = _normalize_for_title_match(first_line)
+
+            if norm_first and norm_title:
+                # Exact match first, then a safe "contains" match (only when title is long enough).
+                contains_ok = len(norm_title) >= 8 and (
+                    norm_first == norm_title or norm_first in norm_title or norm_title in norm_first
+                )
+                if norm_first == norm_title or contains_ok:
+                    body = "\n".join(body.splitlines()[1:]).strip()
 
     source_text = body or title or ""
     return _fallback_summary_from_text(source_text, max_words=max_words)
@@ -771,4 +786,95 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
             lines.pop()
         lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")
         return "\n".join(lines)
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    cleaned = " ".join((text or "").split())
+    if not cleaned:
+        return ""
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return cleaned[:max_chars].rstrip(" ,.;:!?") + "..."
+
+
+def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> str:
+    """
+    Conversational mode: generate ONE digest for "today's news" from local DB (SQLite).
+    Uses Ollama to create a bullet-point digest from per-article snippets.
+    """
+    from src.core.user_service import get_user_preference
+    from src.ai.summarizer import summarize_digest
+
+    preference = get_user_preference(telegram_id)
+    categories_filter = preference.categories if preference else ""
+    locations_filter = preference.locations if preference else ""
+    area_keywords_filter = preference.area_keywords if preference else ""
+
+    now = datetime.utcnow()
+    start_of_today = datetime(now.year, now.month, now.day)
+
+    with SessionLocal() as session:
+        candidates: List[NewsArticle] = list(
+            session.execute(
+                select(NewsArticle)
+                .where(NewsArticle.created_at >= start_of_today)
+                .order_by(NewsArticle.created_at.desc())
+            ).scalars().all()
+        )
+
+    if not candidates:
+        return ""
+
+    ranked: List[tuple[int, datetime, NewsArticle]] = []
+    for art in candidates:
+        raw_summary = art.raw_summary or ""
+        summary_for_rank = raw_summary or art.ai_summary or art.title or ""
+
+        if not _matches_category_filter(
+            art.title or "",
+            summary_for_rank or "",
+            categories_filter,
+        ):
+            continue
+
+        rank = _geo_priority_rank(
+            title=art.title or "",
+            summary=summary_for_rank or "",
+            locations_filter=locations_filter,
+            area_keywords_filter=area_keywords_filter,
+        )
+        ranked.append((rank, art.created_at, art))
+
+    ranked.sort(key=lambda t: (t[0], -t[1].timestamp()))
+    chosen: List[NewsArticle] = [t[2] for t in ranked[:max_articles]]
+
+    if not chosen:
+        return ""
+
+    # Build compact input for the LLM (titles + already-stored snippets).
+    items_text_lines: List[str] = []
+    for art in chosen:
+        title = (art.title or "").replace("\n", " ").strip()[:220]
+        snippet = (art.ai_summary or art.raw_summary or art.title or "")
+        snippet = _truncate_text(snippet, max_chars=550)
+        if not title:
+            continue
+        items_text_lines.append(f"- {title}\n  {snippet}")
+
+    items_text = "\n".join(items_text_lines).strip()
+
+    digest = summarize_digest(items_text, max_words=160)
+    if not digest:
+        # Fallback: use the compact item list.
+        digest = items_text
+
+    def escape_html(text: str) -> str:
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    safe_digest = escape_html(digest)
+    return (
+        "<b>🗞️ Today&apos;s news summary</b>\n"
+        f"{safe_digest}\n\n"
+        "<i>Generated from your local database using Ollama.</i>"
+    )
 

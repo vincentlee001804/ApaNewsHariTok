@@ -177,3 +177,67 @@ def summarize(text: str, max_words: int = 40, title: str = "") -> Optional[str]:
         # For now, fail quietly and let the caller decide how to handle None.
         return None
 
+
+def summarize_digest(items_text: str, max_words: int = 160) -> Optional[str]:
+    """
+    Summarize a set of "today" news items into one digest.
+    The input should already be reduced (titles + short summaries) to keep prompts small.
+    """
+    if not items_text or not items_text.strip():
+        return None
+
+    prompt = textwrap.dedent(
+        f"""
+        You are summarizing Sarawak (Malaysia) local news for today.
+
+        You will receive multiple items. Create ONE concise digest for Telegram:
+        - Output 4 to 7 bullet points.
+        - Each bullet must start with "- ".
+        - Focus on key themes, outcomes, and important numbers mentioned.
+        - Do NOT include headings or numbering.
+        - Total output must be within {max_words} words.
+        - Use plain text only (no HTML, no Markdown).
+
+        Items (titles + item summaries):
+        \"\"\"{items_text.strip()}\"\"\"
+        """
+    ).strip()
+
+    try:
+        response = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = response.json()
+        summary = (data.get("response", "") or "").strip()
+
+        if not summary:
+            return None
+
+        lowered = summary.lower()
+        rejection_markers = [
+            "no_summary",
+            "i don't have enough",
+            "i do not have enough",
+            "i can't",
+            "i cannot",
+            "unable to",
+        ]
+        if any(marker in lowered for marker in rejection_markers):
+            return None
+
+        # Keep total output within max_words
+        words = re.findall(r"\S+", summary)
+        if len(words) > max_words:
+            summary = " ".join(words[:max_words]).strip()
+
+        return summary or None
+    except Exception:
+        return None
+

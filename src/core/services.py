@@ -823,7 +823,68 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
         )
 
     if not candidates:
-        return ""
+        # DB might not be warmed up yet; fall back to RSS for a "today" digest.
+        from src.core.config import RSS_FEEDS
+        from src.scrapers.rss_reader import fetch_latest_items
+
+        from src.scrapers.rss_reader import RssItem
+
+        items = fetch_latest_items(RSS_FEEDS, limit_per_feed=10, max_age_hours=24)
+        # Prefer items published today (UTC). If published is missing, keep them as fallback.
+        todays: list[RssItem] = []
+        start_next_day = start_of_today + timedelta(days=1)
+        for it in items:
+            if it.published and (it.published < start_of_today or it.published >= start_next_day):
+                continue
+            todays.append(it)
+
+        if not todays:
+            todays = items[: max_articles * 2]
+
+        if not todays:
+            return ""
+
+        # Apply same category/location filtering and ranking.
+        ranked: List[tuple[int, datetime, RssItem]] = []
+        for it in todays:
+            snippet_for_rank = it.summary or it.title or ""
+            if not _matches_category_filter(it.title or "", it.summary or "", categories_filter):
+                continue
+            rank = _geo_priority_rank(
+                title=it.title or "",
+                summary=snippet_for_rank,
+                locations_filter=locations_filter,
+                area_keywords_filter=area_keywords_filter,
+            )
+            published_ts = it.published or start_of_today
+            ranked.append((rank, published_ts, it))
+
+        ranked.sort(key=lambda t: (t[0], -t[1].timestamp()))
+        chosen_items = [t[2] for t in ranked[:max_articles]]
+        if not chosen_items:
+            return ""
+
+        items_text_lines: List[str] = []
+        for it in chosen_items:
+            title = (it.title or "").replace("\n", " ").strip()[:220]
+            snippet = _truncate_text(it.summary or it.title or "", max_chars=550)
+            if title:
+                items_text_lines.append(f"- {title}\n  {snippet}")
+
+        items_text = "\n".join(items_text_lines).strip()
+        digest = summarize_digest(items_text, max_words=160) if items_text else None
+        if not digest:
+            digest = items_text
+
+        def escape_html(text: str) -> str:
+            return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        safe_digest = escape_html(digest)
+        return (
+            "<b>🗞️ Today&apos;s news summary</b>\n"
+            f"{safe_digest}\n\n"
+            "<i>Generated using Ollama (DB fallback from RSS).</i>"
+        )
 
     ranked: List[tuple[int, datetime, NewsArticle]] = []
     for art in candidates:
@@ -877,4 +938,100 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
         f"{safe_digest}\n\n"
         "<i>Generated from your local database using Ollama.</i>"
     )
+
+
+def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
+    """
+    "News agent" mode:
+    - Uses DB (today/last 24h) to build a small evidence set.
+    - Uses Ollama to answer the user's question strictly from those items.
+    """
+    from src.core.user_service import get_user_preference
+    from src.ai.summarizer import answer_news_question
+    from src.scrapers.rss_reader import fetch_latest_items
+    from src.core.config import RSS_FEEDS
+
+    preference = get_user_preference(telegram_id)
+    categories_filter = preference.categories if preference else ""
+    locations_filter = preference.locations if preference else ""
+    area_keywords_filter = preference.area_keywords if preference else ""
+
+    now = datetime.utcnow()
+    cutoff = now - timedelta(hours=24)
+
+    with SessionLocal() as session:
+        candidates: List[NewsArticle] = list(
+            session.execute(
+                select(NewsArticle)
+                .where(NewsArticle.created_at >= cutoff)
+                .order_by(NewsArticle.created_at.desc())
+            ).scalars().all()
+        )
+
+    # If the DB isn't warmed up, fetch RSS as evidence.
+    if not candidates:
+        items = fetch_latest_items(RSS_FEEDS, limit_per_feed=12, max_age_hours=24)
+        # Use title+snippet for evidence set.
+        evidence_lines: List[str] = []
+        for it in items[:12]:
+            title = it.title or ""
+            snippet = it.summary or it.title or ""
+            if not title:
+                continue
+            if not _matches_category_filter(title, it.summary or "", categories_filter):
+                continue
+            rank = _geo_priority_rank(
+                title=title,
+                summary=snippet,
+                locations_filter=locations_filter,
+                area_keywords_filter=area_keywords_filter,
+            )
+            # rank is only used to choose order; we don't need full ranking here.
+            evidence_lines.append(f"- {title}\n  {_truncate_text(snippet, max_chars=450)}")
+
+        items_text = "\n".join(evidence_lines).strip()
+        answer = answer_news_question(user_text, items_text)
+        if not answer:
+            return "<b>News agent</b>\nI couldn't find relevant information in the news items I have."
+
+        def escape_html(text: str) -> str:
+            return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        return f"<b>🗞️ News agent</b>\n{escape_html(answer)}"
+
+    ranked: List[tuple[int, datetime, NewsArticle]] = []
+    for art in candidates:
+        summary_for_rank = art.raw_summary or art.ai_summary or art.title or ""
+        if not _matches_category_filter(art.title or "", art.raw_summary or "", categories_filter):
+            continue
+        rank = _geo_priority_rank(
+            title=art.title or "",
+            summary=summary_for_rank or "",
+            locations_filter=locations_filter,
+            area_keywords_filter=area_keywords_filter,
+        )
+        ranked.append((rank, art.created_at, art))
+
+    ranked.sort(key=lambda t: (t[0], -t[1].timestamp()))
+    chosen = [t[2] for t in ranked[:10]]
+    if not chosen:
+        return "<b>🗞️ News agent</b>\nI couldn't find relevant information in the news items I have."
+
+    evidence_lines: List[str] = []
+    for art in chosen:
+        title = (art.title or "").replace("\n", " ").strip()[:220]
+        snippet = (art.ai_summary or art.raw_summary or art.title or "").strip()
+        snippet = _truncate_text(snippet, max_chars=450)
+        if title and snippet:
+            evidence_lines.append(f"- {title}\n  {snippet}")
+
+    items_text = "\n".join(evidence_lines).strip()
+    answer = answer_news_question(user_text, items_text)
+    if not answer:
+        return "<b>🗞️ News agent</b>\nI couldn't find relevant information in the news items I have."
+
+    def escape_html(text: str) -> str:
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    return f"<b>🗞️ News agent</b>\n{escape_html(answer)}"
 

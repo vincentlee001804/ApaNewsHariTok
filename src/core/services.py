@@ -626,7 +626,8 @@ def get_latest_news_text(max_items: int = 3) -> str:
         escaped_category = escape_html(category)
         lines.append(f"<blockquote>[{escaped_category}] <b>{escaped_title}</b></blockquote>")
         lines.append(escaped_summary)
-        lines.append(f'<a href="{item.link}">{escaped_source}</a>')
+        lines.append("")
+        lines.append(f'Source: <a href="{item.link}">{escaped_source}</a>')
         lines.append("────────────")  # Visual separator between items
 
     # Remove the last empty line and add footer
@@ -943,7 +944,7 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
 
         safe_digest = escape_html(digest)
         return (
-            "<b>🗞️ Today&apos;s news summary</b>\n"
+            "<b>🗞️ Today's news summary</b>\n"
             f"{safe_digest}\n\n"
             "<i>Generated using Ollama (DB fallback from RSS).</i>"
         )
@@ -998,7 +999,7 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
 
     safe_digest = escape_html(digest)
     return (
-        "<b>🗞️ Today&apos;s news summary</b>\n"
+        "<b>🗞️ Today's news summary</b>\n"
         f"{safe_digest}\n\n"
         "<i>Generated from your local database using Ollama.</i>"
     )

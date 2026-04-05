@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import List
+from typing import Any, List
 
 from sqlalchemy import select
 
-from src.ai.summarizer import classify_category, summarize
-from src.core.config import DEDUPLICATION_ENABLED, RSS_FEEDS
+from src.ai.summarizer import classify_category, summarize, waze_alerts_to_news_sentences
+from src.core.config import (
+    DEDUPLICATION_ENABLED,
+    RSS_FEEDS,
+    WAZE_BBOX_BOTTOM,
+    WAZE_BBOX_LEFT,
+    WAZE_BBOX_RIGHT,
+    WAZE_BBOX_TOP,
+    WAZE_ENV,
+    waze_allowed_type_set,
+)
 from src.core.models import NewsArticle
 from src.scrapers.rss_reader import RssItem, fetch_latest_items
+from src.scrapers.waze_client import WazeGeoRssError, list_alerts_in_bbox
 from src.storage.database import SessionLocal
 
 
@@ -173,6 +183,99 @@ def _matches_area_keywords_filter(text: str, area_keywords: str) -> bool:
 
     haystack = (text or "").lower()
     return any(k in haystack for k in keywords)
+
+
+def _waze_alert_text_for_area_match(alert: dict[str, Any]) -> str:
+    """Concatenate Waze fields so area-keyword rules match roads/neighbourhoods."""
+    parts = [
+        str(alert.get("street") or ""),
+        str(alert.get("city") or ""),
+        str(alert.get("reportDescription") or ""),
+        str(alert.get("subtype") or ""),
+        str(alert.get("type") or ""),
+    ]
+    return " ".join(parts)
+
+
+def build_waze_section_for_area_keywords(
+    area_keywords: str,
+    *,
+    max_show: int = 6,
+    fetch_pool: int = 150,
+) -> str | None:
+    """
+    When the user has Area Keywords set, fetch Waze alerts for the configured bbox
+    and keep only alerts whose street/city/description match those keywords
+    (same substring rules as news). Returns None if area_keywords is empty.
+    """
+    if not (area_keywords or "").strip():
+        return None
+
+    if max_show < 1:
+        max_show = 1
+    if fetch_pool < max_show:
+        fetch_pool = max_show
+
+    def escape_html(text: str) -> str:
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    kw = area_keywords.strip()
+    try:
+        pool = list_alerts_in_bbox(
+            top=WAZE_BBOX_TOP,
+            bottom=WAZE_BBOX_BOTTOM,
+            left=WAZE_BBOX_LEFT,
+            right=WAZE_BBOX_RIGHT,
+            env=WAZE_ENV,
+            allowed_types=waze_allowed_type_set(),
+            max_alerts=fetch_pool,
+        )
+    except WazeGeoRssError as e:
+        return (
+            "<b>Road alerts (Waze)</b>\n"
+            f"{escape_html(str(e))}\n"
+            "<i>Filtered by your Area Keywords from /settings. If you see 403, set WAZE_COOKIE.</i>"
+        )
+
+    filtered = [
+        a
+        for a in pool
+        if _matches_area_keywords_filter(_waze_alert_text_for_area_match(a), kw)
+    ]
+    filtered = filtered[:max_show]
+
+    if not filtered:
+        return (
+            "<b>Road alerts (Waze)</b>\n"
+            "<i>No Waze reports match your area keywords right now.</i>"
+        )
+
+    sentences = waze_alerts_to_news_sentences(filtered)
+    lines: List[str] = [
+        "<b>Road alerts (Waze)</b>",
+        "<i>Reports on roads/areas matching your Area Keywords (live map JSON + Ollama)</i>",
+        "",
+    ]
+    waze_map_url = "https://www.waze.com/live-map"
+    for alert, sentence in zip(filtered, sentences):
+        lat, lon = alert.get("latitude"), alert.get("longitude")
+        if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+            loc_url = f"https://www.waze.com/live-map?latlng={lat}%2C{lon}"
+        else:
+            loc_url = waze_map_url
+        lines.append(f"• {escape_html(sentence)}")
+        lines.append(f'  <a href="{loc_url}">Open in Waze map</a>')
+        lines.append("")
+
+    lines.append(f'<a href="{waze_map_url}">Waze Live Map</a>')
+    return "\n".join(lines).strip()
+
+
+def _append_waze_section_if_keywords_set(body: str, area_keywords: str) -> str:
+    extra = build_waze_section_for_area_keywords(area_keywords)
+    if not extra:
+        return body
+    return f"{body.rstrip()}\n\n{extra}"
 
 
 def _fallback_summary_from_text(text: str, max_words: int = 50) -> str:
@@ -641,7 +744,10 @@ def get_latest_news_text(max_items: int = 3) -> str:
 def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
     """
     Fetch latest items from configured RSS feeds, filtered by user preferences,
-    and format them into a Markdown string suitable for Telegram.
+    and format them into HTML suitable for Telegram.
+
+    If the user has Area Keywords set, appends a Waze section: alerts from the
+    configured map bbox whose street/city/description match those keywords.
     """
     from src.core.user_service import get_user_preference
 
@@ -703,9 +809,10 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
             unique_items = _deduplicate_items(sorted_items, max_items=max_items * 3)
 
             if not unique_items:
-                return (
+                return _append_waze_section_if_keywords_set(
                     "I couldn't fetch any news items right now.\n"
-                    "<i>This might be a temporary network issue or the sources are unavailable.</i>"
+                    "<i>This might be a temporary network issue or the sources are unavailable.</i>",
+                    area_keywords_filter,
                 )
 
             ranked_items: List[tuple[int, float, RssItem]] = []
@@ -732,9 +839,10 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
             filtered_items: List[RssItem] = [t[2] for t in ranked_items[:max_items]]
 
             if not filtered_items:
-                return (
+                return _append_waze_section_if_keywords_set(
                     "No news items match your current filters (categories/locations).\n"
-                    "<i>Try adjusting your settings with /settings to see more news.</i>"
+                    "<i>Try adjusting your settings with /settings to see more news.</i>",
+                    area_keywords_filter,
                 )
 
             # Deduplication behavior (unchanged for RSS fallback)
@@ -772,9 +880,10 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 session.commit()
 
             if not to_display:
-                return (
+                return _append_waze_section_if_keywords_set(
                     "No new headlines since your last request.\n"
-                    "<i>You are up to date with the latest news from these sources.</i>"
+                    "<i>You are up to date with the latest news from these sources.</i>",
+                    area_keywords_filter,
                 )
 
             from src.scrapers.article_scraper import extract_article_content
@@ -802,7 +911,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
             if lines and lines[-1] == "────────────":
                 lines.pop()
             lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")
-            return "\n".join(lines)
+            return _append_waze_section_if_keywords_set("\n".join(lines), area_keywords_filter)
 
         # Ensure ai_summary exists (cache)
         from src.scrapers.article_scraper import extract_article_content
@@ -848,7 +957,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
         if lines and lines[-1] == "────────────":
             lines.pop()
         lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")
-        return "\n".join(lines)
+        return _append_waze_section_if_keywords_set("\n".join(lines), area_keywords_filter)
 
 
 def _truncate_text(text: str, max_chars: int) -> str:
@@ -1101,4 +1210,3 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     return f"<b>🗞️ News agent</b>\n{escape_html(answer)}"
-

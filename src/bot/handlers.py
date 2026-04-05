@@ -28,7 +28,8 @@ WELCOME_TEXT: Final[str] = (
     "*Available commands:*\n"
     "• /start – show this welcome message\n"
     "• /help – show available commands\n"
-    "• /latest – get the latest news with AI summaries\n"
+    "• /latest – get the latest news with AI summaries "
+    "(plus Waze road alerts when you set Area Keywords)\n"
     "• /settings – configure your preferences (categories, frequency)\n\n"
     "Use /settings to customize which news you want to see!"
 )
@@ -38,7 +39,8 @@ HELP_TEXT: Final[str] = (
     "*Available commands:*\n"
     "• /start – introduction and project description\n"
     "• /help – this help message\n"
-    "• /latest – get the latest news with AI summaries\n"
+    "• /latest – latest news with AI summaries; Waze traffic lines appear here "
+    "when Area Keywords are set in /settings\n"
     "• /settings – configure your preferences\n\n"
     "Use /settings to choose categories (e.g., Sarawak-only, sports, politics) "
     "and delivery frequency (every 1h/3h/6h/12h)."
@@ -208,7 +210,8 @@ async def setareas_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
       /setareas Jalan Wawasan, Taman Desa, Kampung Tabuan
 
     Stores free-text area keywords used to match more specific local notices
-    (e.g., water supply interruption affecting a particular road/area).
+    (e.g., water supply interruption affecting a particular road/area), and to
+    filter Waze road alerts appended to /latest.
     """
     if not update.message:
         return
@@ -222,7 +225,8 @@ async def setareas_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text(
             "Usage:\n"
             "`/setareas Jalan Wawasan, Taman Desa`\n\n"
-            "Tip: use commas to add multiple keywords.\n"
+            "Tip: use commas to add multiple keywords. Same keywords filter "
+            "Waze traffic lines on `/latest`.\n"
             "Send `/setareas` with an empty value to clear.",
             parse_mode=ParseMode.MARKDOWN,
         )
@@ -377,6 +381,8 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             "- Jalan Wawasan\n"
             "- Taman Desa\n"
             "- Kampung Tabuan\n\n"
+            "They also filter *Waze* road reports shown at the bottom of `/latest` "
+            "(only alerts whose street/city text contains one of your keywords).\n\n"
             "Set it using:\n"
             "`/setareas Jalan Wawasan, Taman Desa`\n\n"
             f"Current: {current}",

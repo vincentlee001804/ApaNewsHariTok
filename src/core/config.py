@@ -139,6 +139,43 @@ def waze_allowed_type_set() -> set[str]:
     return set() if not types else {t.upper() for t in types}
 
 
+# /testpush and /devwaze: developer commands (scheduled preview + Waze-only preview). Disable in production if desired.
+TEST_PUSH_ENABLED: Final[bool] = os.getenv("TEST_PUSH_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+
+
+def _parse_telegram_id_list(raw: str) -> List[int]:
+    ids: List[int] = []
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            ids.append(int(part))
+        except ValueError:
+            continue
+    return ids
+
+
+# If non-empty, only these numeric user IDs may use /testpush and /devwaze. If empty, any private-chat user may use them.
+TEST_PUSH_ALLOWED_TELEGRAM_IDS: Final[List[int]] = _parse_telegram_id_list(
+    os.getenv("TEST_PUSH_ALLOWED_TELEGRAM_IDS", "")
+)
+
+
+def is_test_push_allowed(telegram_id: int) -> bool:
+    if not TEST_PUSH_ENABLED:
+        return False
+    if not TEST_PUSH_ALLOWED_TELEGRAM_IDS:
+        return True
+    return telegram_id in TEST_PUSH_ALLOWED_TELEGRAM_IDS
+
+
 def require_bot_token() -> str:
     """
     Retrieve the Telegram bot token or raise a clear error message.

@@ -169,10 +169,12 @@ def _matches_location_filter(title: str, summary: str, locations: str) -> bool:
 
 def _matches_area_keywords_filter(text: str, area_keywords: str) -> bool:
     """
-    Free-text keyword match for very specific areas (roads, taman, kampung).
+    Substring match for roads/areas (roads, taman, kampung).
 
-    - If area_keywords is empty: match everything.
-    - Otherwise: match if ANY keyword appears in text (case-insensitive).
+    - News: combined with _geo_priority_rank so matches get higher priority (not exclusion).
+
+    If area_keywords is empty: match everything (for the boolean check in isolation).
+    Otherwise: true if ANY keyword appears in text (case-insensitive).
     """
     if not area_keywords or area_keywords.strip() == "":
         return True
@@ -204,9 +206,9 @@ def build_waze_section_for_area_keywords(
     fetch_pool: int = 150,
 ) -> str | None:
     """
-    When the user has Area Keywords set, fetch Waze alerts for the configured bbox
-    and keep only alerts whose street/city/description match those keywords
-    (same substring rules as news). Returns None if area_keywords is empty.
+    Developer-only Waze preview: live-map alerts in the env bbox, filtered by the
+    same Area Keywords substring rules as news ranking. Not appended to user /latest
+    or scheduled pushes — use /devwaze (see handlers). Returns None if keywords empty.
     """
     if not (area_keywords or "").strip():
         return None
@@ -234,7 +236,7 @@ def build_waze_section_for_area_keywords(
         return (
             "<b>Road alerts (Waze)</b>\n"
             f"{escape_html(str(e))}\n"
-            "<i>Filtered by your Area Keywords from /settings. If you see 403, set WAZE_COOKIE.</i>"
+            "<i>Second source: alerts matching your Area Keywords. If you see 403, set WAZE_COOKIE.</i>"
         )
 
     filtered = [
@@ -253,7 +255,7 @@ def build_waze_section_for_area_keywords(
     sentences = waze_alerts_to_news_sentences(filtered)
     lines: List[str] = [
         "<b>Road alerts (Waze)</b>",
-        "<i>Reports on roads/areas matching your Area Keywords (live map JSON + Ollama)</i>",
+        "<i>Second source (crowd map): reports matching your Area Keywords — live JSON + Ollama</i>",
         "",
     ]
     waze_map_url = "https://www.waze.com/live-map"
@@ -269,13 +271,6 @@ def build_waze_section_for_area_keywords(
 
     lines.append(f'<a href="{waze_map_url}">Waze Live Map</a>')
     return "\n".join(lines).strip()
-
-
-def _append_waze_section_if_keywords_set(body: str, area_keywords: str) -> str:
-    extra = build_waze_section_for_area_keywords(area_keywords)
-    if not extra:
-        return body
-    return f"{body.rstrip()}\n\n{extra}"
 
 
 def _fallback_summary_from_text(text: str, max_words: int = 50) -> str:
@@ -333,7 +328,8 @@ def _geo_priority_rank(
     location: str | None = None,
 ) -> int:
     """
-    Geographic relevance rank (lower is higher priority):
+    Geographic relevance rank (lower is higher priority). Used for ordering only:
+    articles that do not match area keywords are still eligible; matches rank higher.
 
     0: matches area keywords (very specific)
     1: matches selected location(s) (cities)
@@ -622,6 +618,15 @@ def get_recent_urgent_alert_items(
     return results
 
 
+def _latest_news_heading_lines(max_items: int) -> List[str]:
+    """
+    Multi-item /latest keeps a section title; single-item scheduled/test push does not.
+    """
+    if max_items <= 1:
+        return []
+    return ["<b>Latest local news with AI summaries:</b>"]
+
+
 def get_latest_news_text(max_items: int = 3) -> str:
     """
     Fetch latest items from configured RSS feeds and format them
@@ -690,7 +695,7 @@ def get_latest_news_text(max_items: int = 3) -> str:
             "<i>You are up to date with the latest news from these sources.</i>"
         )
 
-    lines: List[str] = ["<b>Latest local news with AI summaries:</b>"]
+    lines: List[str] = list(_latest_news_heading_lines(max_items))
 
     for item in to_display:
         # Extract category (LLM first, fallback to keyword rules)
@@ -698,7 +703,7 @@ def get_latest_news_text(max_items: int = 3) -> str:
 
         # Get AI summary - try to fetch full article content first
         from src.scrapers.article_scraper import extract_article_content
-        
+
         article_text = extract_article_content(item.link)
         if article_text:
             # Use full article content for better summary
@@ -746,8 +751,11 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
     Fetch latest items from configured RSS feeds, filtered by user preferences,
     and format them into HTML suitable for Telegram.
 
-    If the user has Area Keywords set, appends a Waze section: alerts from the
-    configured map bbox whose street/city/description match those keywords.
+    Area Keywords boost *priority* for news whose text mentions those roads/areas
+    (other articles still appear). Waze is not included here — use /devwaze (developer).
+
+    When max_items is 1 (scheduled push, /testpush), the outer heading
+    "Latest local news with AI summaries:" is omitted for a tighter message.
     """
     from src.core.user_service import get_user_preference
 
@@ -809,10 +817,9 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
             unique_items = _deduplicate_items(sorted_items, max_items=max_items * 3)
 
             if not unique_items:
-                return _append_waze_section_if_keywords_set(
+                return (
                     "I couldn't fetch any news items right now.\n"
-                    "<i>This might be a temporary network issue or the sources are unavailable.</i>",
-                    area_keywords_filter,
+                    "<i>This might be a temporary network issue or the sources are unavailable.</i>"
                 )
 
             ranked_items: List[tuple[int, float, RssItem]] = []
@@ -839,10 +846,9 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
             filtered_items: List[RssItem] = [t[2] for t in ranked_items[:max_items]]
 
             if not filtered_items:
-                return _append_waze_section_if_keywords_set(
+                return (
                     "No news items match your current filters (categories/locations).\n"
-                    "<i>Try adjusting your settings with /settings to see more news.</i>",
-                    area_keywords_filter,
+                    "<i>Try adjusting your settings with /settings to see more news.</i>"
                 )
 
             # Deduplication behavior (unchanged for RSS fallback)
@@ -880,15 +886,14 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 session.commit()
 
             if not to_display:
-                return _append_waze_section_if_keywords_set(
+                return (
                     "No new headlines since your last request.\n"
-                    "<i>You are up to date with the latest news from these sources.</i>",
-                    area_keywords_filter,
+                    "<i>You are up to date with the latest news from these sources.</i>"
                 )
 
             from src.scrapers.article_scraper import extract_article_content
 
-            lines: List[str] = ["<b>Latest local news with AI summaries:</b>"]
+            lines: List[str] = list(_latest_news_heading_lines(max_items))
             for item in to_display:
                 category = _get_category_with_llm_fallback(item.title, item.summary)
                 article_text = extract_article_content(item.link)
@@ -911,7 +916,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
             if lines and lines[-1] == "────────────":
                 lines.pop()
             lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")
-            return _append_waze_section_if_keywords_set("\n".join(lines), area_keywords_filter)
+            return "\n".join(lines)
 
         # Ensure ai_summary exists (cache)
         from src.scrapers.article_scraper import extract_article_content
@@ -933,7 +938,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
 
         session.commit()
 
-        lines: List[str] = ["<b>Latest local news with AI summaries:</b>"]
+        lines: List[str] = list(_latest_news_heading_lines(max_items))
         for art in chosen:
             category = _get_category_with_llm_fallback(art.title, art.ai_summary or art.raw_summary)
 
@@ -957,7 +962,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
         if lines and lines[-1] == "────────────":
             lines.pop()
         lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")
-        return _append_waze_section_if_keywords_set("\n".join(lines), area_keywords_filter)
+        return "\n".join(lines)
 
 
 def _truncate_text(text: str, max_chars: int) -> str:

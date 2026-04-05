@@ -16,6 +16,8 @@ from src.bot.handlers import (
     settings_callback,
     settings_command,
     start,
+    test_push_command,
+    dev_waze_command,
 )
 from src.core.config import PREFETCH_ENABLED, PREFETCH_INTERVAL_MINUTES, require_bot_token
 from src.core.prefetch_service import prefetch_latest_articles_to_db
@@ -40,6 +42,8 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("latest", latest_demo))
+    application.add_handler(CommandHandler("testpush", test_push_command))
+    application.add_handler(CommandHandler("devwaze", dev_waze_command))
     application.add_handler(CommandHandler("setareas", setareas_command))
     application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, ingest_channel_post))
@@ -64,17 +68,7 @@ def main() -> None:
             "no news items match your current filters",
             "i couldn't fetch any news items right now",
         ]
-        news_empty = any(marker in lowered for marker in skip_markers)
-        if not news_empty:
-            return False
-        # Still deliver scheduled push if Waze has matching road alerts (not just empty/error).
-        if "road alerts (waze)" in lowered:
-            if "no waze reports match your area keywords right now." in lowered:
-                return True
-            if "403 forbidden" in lowered or "waze request failed" in lowered:
-                return True
-            return False
-        return True
+        return any(marker in lowered for marker in skip_markers)
 
     def _frequency_interval_hours(value: str | None) -> float:
         mapping = {

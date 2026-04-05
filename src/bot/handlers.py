@@ -4,11 +4,11 @@ import asyncio
 from typing import Final
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.constants import ParseMode
+from telegram.constants import ChatType, ParseMode
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 from sqlalchemy.exc import IntegrityError
 
-from src.core.config import TELEGRAM_SOURCE_CHANNELS
+from src.core.config import TELEGRAM_SOURCE_CHANNELS, is_test_push_allowed
 from src.core.location_extractor import extract_location_and_state
 from src.core.models import NewsArticle
 from src.core.services import _is_urgent_utility_alert, build_urgent_preview
@@ -28,9 +28,9 @@ WELCOME_TEXT: Final[str] = (
     "*Available commands:*\n"
     "• /start – show this welcome message\n"
     "• /help – show available commands\n"
-    "• /latest – get the latest news with AI summaries "
-    "(plus Waze road alerts when you set Area Keywords)\n"
-    "• /settings – configure your preferences (categories, frequency)\n\n"
+    "• /latest – news with AI summaries (Area Keywords boost matching headlines)\n"
+    "• /settings – configure your preferences (categories, frequency)\n"
+    "• /testpush – one-off scheduled-style push (1 item; private; dev/testing)\n\n"
     "Use /settings to customize which news you want to see!"
 )
 
@@ -39,9 +39,10 @@ HELP_TEXT: Final[str] = (
     "*Available commands:*\n"
     "• /start – introduction and project description\n"
     "• /help – this help message\n"
-    "• /latest – latest news with AI summaries; Waze traffic lines appear here "
-    "when Area Keywords are set in /settings\n"
-    "• /settings – configure your preferences\n\n"
+    "• /latest – news + summaries; Area Keywords rank matching roads/areas higher\n"
+    "• /settings – configure your preferences\n"
+    "• /testpush – same as scheduled push (1 headline). Private; optional allow list in `.env`\n"
+    "• /devwaze – developer-only Waze preview (needs Area Keywords; same gate as /testpush)\n\n"
     "Use /settings to choose categories (e.g., Sarawak-only, sports, politics) "
     "and delivery frequency (every 1h/3h/6h/12h)."
 )
@@ -98,6 +99,85 @@ async def latest_demo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     text = get_latest_news_text_for_user(telegram_id)
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
+async def test_push_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Send one message that matches the scheduled job: get_latest_news_text_for_user(..., 1).
+    Unlike the job, this always delivers the text (no skip when there is no news) so you can
+    inspect formatting and empty states.
+    """
+    if not update.message or not update.effective_user:
+        return
+
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await update.message.reply_text("Use /testpush in a private chat with the bot.")
+        return
+
+    telegram_id = update.effective_user.id
+    if not is_test_push_allowed(telegram_id):
+        await update.message.reply_text(
+            "Test push is turned off or your Telegram user ID is not on the allow list."
+        )
+        return
+
+    get_or_create_user(telegram_id, update.effective_user.username)
+
+    from src.core.services import get_latest_news_text_for_user
+
+    text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id, 1)
+    full = (
+        "<b>[Test push]</b> Same build as the scheduled job (1 item, your filters):\n\n" + text
+    )
+    await update.message.reply_text(
+        full,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+
+
+async def dev_waze_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Developer-only: show Waze block for the user's Area Keywords (403/errors allowed).
+    Same access control as /testpush — not part of /latest or scheduled pushes.
+    """
+    if not update.message or not update.effective_user:
+        return
+
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await update.message.reply_text("Use /devwaze in a private chat with the bot.")
+        return
+
+    telegram_id = update.effective_user.id
+    if not is_test_push_allowed(telegram_id):
+        await update.message.reply_text(
+            "Developer commands are disabled or your Telegram user ID is not on the allow list."
+        )
+        return
+
+    get_or_create_user(telegram_id, update.effective_user.username)
+    preference = get_user_preference(telegram_id)
+    area = (preference.area_keywords or "").strip() if preference else ""
+
+    from src.core.services import build_waze_section_for_area_keywords
+
+    block = build_waze_section_for_area_keywords(area)
+    if block is None:
+        await update.message.reply_text(
+            "Set Area Keywords first, e.g.:\n/setareas Jalan Example, Miri\n\n"
+            "Waze preview filters alerts with those keywords."
+        )
+        return
+
+    full = (
+        "<b>[Dev — Waze only]</b>\n"
+        "<i>Not included in /latest or scheduled pushes.</i>\n\n" + block
+    )
+    await update.message.reply_text(
+        full,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
 
 
 async def ingest_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -209,9 +289,9 @@ async def setareas_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     Example:
       /setareas Jalan Wawasan, Taman Desa, Kampung Tabuan
 
-    Stores free-text area keywords used to match more specific local notices
-    (e.g., water supply interruption affecting a particular road/area), and to
-    filter Waze road alerts appended to /latest.
+    Stores area keywords to boost news priority when a headline or body mentions
+    these roads/areas (other news still shown). Waze debugging uses the same
+    keywords via /devwaze only — not sent in normal notifications.
     """
     if not update.message:
         return
@@ -225,8 +305,8 @@ async def setareas_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text(
             "Usage:\n"
             "`/setareas Jalan Wawasan, Taman Desa`\n\n"
-            "Tip: use commas to add multiple keywords. Same keywords filter "
-            "Waze traffic lines on `/latest`.\n"
+            "Tip: commas separate keywords. They *boost* matching news in rankings. "
+            "For Waze, use `/devwaze` (developer only).\n"
             "Send `/setareas` with an empty value to clear.",
             parse_mode=ParseMode.MARKDOWN,
         )
@@ -245,12 +325,14 @@ async def setareas_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if normalized:
         display = ", ".join([k.strip() for k in value.split(",") if k.strip()])
         await update.message.reply_text(
-            f"✅ Area keywords updated:\n{display}\n\nNow /latest will prioritize news that mentions these areas.",
+            f"✅ Area keywords updated:\n{display}\n\n"
+            "News mentioning these areas ranks higher. Waze is not included in "
+            "normal messages — use `/devwaze` to preview map alerts (developer).",
             parse_mode=ParseMode.MARKDOWN,
         )
     else:
         await update.message.reply_text(
-            "✅ Area keywords cleared. You will no longer filter by specific roads/areas.",
+            "✅ Area keywords cleared. News ranking no longer uses them.",
             parse_mode=ParseMode.MARKDOWN,
         )
 
@@ -295,6 +377,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"📂 *Categories:* {categories_display}\n"
         f"📍 *Locations:* {locations_display}\n"
         f"🗺️ *Area Keywords:* {area_keywords_display}\n"
+        "   _(boosts matching news headlines)_\n"
         f"⏰ *Frequency:* {frequency_display}\n"
         f"🚨 *Urgent Alerts:* {urgent_display}\n\n"
         "Use the buttons below to change your preferences:"
@@ -377,13 +460,15 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         await query.edit_message_text(
             "*Area Keywords (specific roads/areas):*\n\n"
-            "This is for very specific matching like:\n"
+            "Examples:\n"
             "- Jalan Wawasan\n"
             "- Taman Desa\n"
             "- Kampung Tabuan\n\n"
-            "They also filter *Waze* road reports shown at the bottom of `/latest` "
-            "(only alerts whose street/city text contains one of your keywords).\n\n"
-            "Set it using:\n"
+            "*News:* matching articles get *higher priority* in rankings; "
+            "other news is still shown.\n"
+            "*Waze:* not sent in `/latest` or scheduled pushes. Developers can run "
+            "`/devwaze` (same allow list as /testpush) to preview filtered alerts.\n\n"
+            "Set with:\n"
             "`/setareas Jalan Wawasan, Taman Desa`\n\n"
             f"Current: {current}",
             parse_mode=ParseMode.MARKDOWN,
@@ -685,6 +770,7 @@ async def settings_callback_refresh(query, telegram_id: int) -> None:
         f"📂 *Categories:* {categories_display}\n"
         f"📍 *Locations:* {locations_display}\n"
         f"🗺️ *Area Keywords:* {area_keywords_display}\n"
+        "   _(boosts matching news headlines)_\n"
         f"⏰ *Frequency:* {frequency_display}\n"
         f"🚨 *Urgent Alerts:* {urgent_display}\n\n"
         "Use the buttons below to change your preferences:"

@@ -16,7 +16,9 @@ from src.core.config import (
     WAZE_ENV,
     waze_allowed_type_set,
 )
+from src.core.local_keywords import local_keyword_filter_enabled, matches_local_interest
 from src.core.models import NewsArticle, User, UserArticleDelivery
+from src.core.rss_limits import effective_rss_limit_per_feed
 from src.scrapers.rss_reader import RssItem, fetch_latest_items
 from src.scrapers.waze_client import WazeGeoRssError, list_alerts_in_bbox
 from src.storage.database import SessionLocal
@@ -543,7 +545,10 @@ def _extract_category(title: str, summary: str | None) -> str:
 def _get_category_with_llm_fallback(title: str, summary: str | None) -> str:
     """
     Prefer LLM-based classification (more accurate), fallback to keyword rules.
+    Skips Ollama when the item fails the local keyword pre-filter (if enabled).
     """
+    if not matches_local_interest(title, summary):
+        return _extract_category(title, summary)
     llm_text = (title + "\n" + (summary or "")).strip()
     llm_category = classify_category(llm_text)
     if llm_category:
@@ -681,15 +686,32 @@ def get_latest_news_text(max_items: int = 3) -> str:
     No Telegram user context: does not apply per-user delivery dedup.
     For production paths use get_latest_news_text_for_user.
     """
-    items: List[RssItem] = fetch_latest_items(RSS_FEEDS, limit_per_feed=3)
+    eff_limit = effective_rss_limit_per_feed(3)
+    items: List[RssItem] = fetch_latest_items(RSS_FEEDS, limit_per_feed=eff_limit)
 
     sorted_items = _sort_items_by_date(items)
-    unique_items = _deduplicate_items(sorted_items, max_items=max_items)
-
-    if not unique_items:
+    if not sorted_items:
         return (
             "I couldn't fetch any news items right now.\n"
             "<i>This might be a temporary network issue or the sources are unavailable.</i>"
+        )
+
+    keyworded = [i for i in sorted_items if matches_local_interest(i.title, i.summary)]
+    if not keyworded:
+        if local_keyword_filter_enabled():
+            return (
+                "No recent items matched your local keyword list "
+                "(<code>Sarawak_Local_Keywords.txt</code>).\n"
+                "<i>Broaden keywords or clear the file to disable this filter.</i>"
+            )
+        keyworded = sorted_items
+
+    unique_items = _deduplicate_items(keyworded, max_items=max_items)
+
+    if not unique_items:
+        return (
+            "No new headlines since your last request.\n"
+            "<i>You are up to date with the latest news from these sources.</i>"
         )
 
     to_display: List[RssItem] = unique_items[:max_items]
@@ -716,8 +738,12 @@ def get_latest_news_text(max_items: int = 3) -> str:
         else:
             # Fallback to RSS summary or title if article scraping fails
             source_text = item.summary or item.title
-        
-        ai_summary = summarize(source_text, max_words=50, title=item.title)
+
+        ai_summary = (
+            summarize(source_text, max_words=50, title=item.title)
+            if matches_local_interest(item.title, item.summary)
+            else None
+        )
         if not ai_summary:
             ai_summary = _fallback_summary_from_text(item.summary or item.title, max_words=50)
 
@@ -811,6 +837,8 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
         ranked: List[tuple[int, datetime, NewsArticle]] = []
         for art in candidates:
             summary_for_rank = art.ai_summary or art.raw_summary or ""
+            if not matches_local_interest(art.title, art.raw_summary):
+                continue
             if not _matches_category_filter(art.title, art.raw_summary or "", categories_filter):
                 continue
             rank = _geo_priority_rank(
@@ -830,11 +858,28 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
 
         if not chosen:
             # Fallback: live RSS fetch if DB has nothing yet
+            eff_rss = effective_rss_limit_per_feed(15)
             items: List[RssItem] = fetch_latest_items(
-                RSS_FEEDS, limit_per_feed=15, max_age_hours=24
+                RSS_FEEDS, limit_per_feed=eff_rss, max_age_hours=24
             )
             sorted_items = _sort_items_by_date(items)
-            unique_items = _deduplicate_items(sorted_items, max_items=max_items * 3)
+            if not sorted_items:
+                return (
+                    "I couldn't fetch any news items right now.\n"
+                    "<i>This might be a temporary network issue or the sources are unavailable.</i>"
+                )
+
+            kw_sorted = [i for i in sorted_items if matches_local_interest(i.title, i.summary)]
+            if not kw_sorted:
+                if local_keyword_filter_enabled():
+                    return (
+                        "No recent items matched your local keyword list "
+                        "(<code>Sarawak_Local_Keywords.txt</code>).\n"
+                        "<i>Broaden keywords or clear the file to disable this filter.</i>"
+                    )
+                kw_sorted = sorted_items
+
+            unique_items = _deduplicate_items(kw_sorted, max_items=max_items * 3)
 
             if not unique_items:
                 return (
@@ -912,7 +957,11 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 category = _get_category_with_llm_fallback(item.title, item.summary)
                 article_text = extract_article_content(item.link)
                 source_text = article_text or item.summary or item.title
-                ai_summary = summarize(source_text, max_words=50, title=item.title)
+                ai_summary = (
+                    summarize(source_text, max_words=50, title=item.title)
+                    if matches_local_interest(item.title, item.summary)
+                    else None
+                )
                 if not ai_summary:
                     ai_summary = _fallback_summary_from_text(item.summary or item.title, max_words=50)
                 source_name = _get_source_name(item.source)
@@ -1019,17 +1068,24 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
 
         from src.scrapers.rss_reader import RssItem
 
-        items = fetch_latest_items(RSS_FEEDS, limit_per_feed=10, max_age_hours=24)
+        eff_lim = effective_rss_limit_per_feed(10)
+        items = fetch_latest_items(RSS_FEEDS, limit_per_feed=eff_lim, max_age_hours=24)
         # Prefer items published today (UTC). If published is missing, keep them as fallback.
         todays: list[RssItem] = []
         start_next_day = start_of_today + timedelta(days=1)
         for it in items:
+            if not matches_local_interest(it.title, it.summary):
+                continue
             if it.published and (it.published < start_of_today or it.published >= start_next_day):
                 continue
             todays.append(it)
 
         if not todays:
-            todays = items[: max_articles * 2]
+            todays = [
+                it
+                for it in items
+                if matches_local_interest(it.title, it.summary)
+            ][: max_articles * 2]
 
         if not todays:
             return ""
@@ -1080,6 +1136,9 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
     for art in candidates:
         raw_summary = art.raw_summary or ""
         summary_for_rank = raw_summary or art.ai_summary or art.title or ""
+
+        if not matches_local_interest(art.title or "", art.raw_summary):
+            continue
 
         if not _matches_category_filter(
             art.title or "",
@@ -1162,13 +1221,16 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
 
     # If the DB isn't warmed up, fetch RSS as evidence.
     if not candidates:
-        items = fetch_latest_items(RSS_FEEDS, limit_per_feed=12, max_age_hours=24)
+        eff_lim = effective_rss_limit_per_feed(12)
+        items = fetch_latest_items(RSS_FEEDS, limit_per_feed=eff_lim, max_age_hours=24)
         # Use title+snippet for evidence set.
         evidence_lines: List[str] = []
         for it in items[:12]:
             title = it.title or ""
             snippet = it.summary or it.title or ""
             if not title:
+                continue
+            if not matches_local_interest(title, it.summary):
                 continue
             if not _matches_category_filter(title, it.summary or "", categories_filter):
                 continue
@@ -1194,6 +1256,8 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     ranked: List[tuple[int, datetime, NewsArticle]] = []
     for art in candidates:
         summary_for_rank = art.raw_summary or art.ai_summary or art.title or ""
+        if not matches_local_interest(art.title or "", art.raw_summary):
+            continue
         if not _matches_category_filter(art.title or "", art.raw_summary or "", categories_filter):
             continue
         rank = _geo_priority_rank(

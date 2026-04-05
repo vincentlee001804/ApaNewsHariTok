@@ -6,8 +6,10 @@ from sqlalchemy.exc import IntegrityError
 
 from src.core.services import _get_source_name  # reuse existing mapping
 from src.core.config import RSS_FEEDS
-from src.core.models import NewsArticle
+from src.core.local_keywords import matches_local_interest
 from src.core.location_extractor import extract_location_and_state
+from src.core.models import NewsArticle
+from src.core.rss_limits import effective_rss_limit_per_feed
 from src.scrapers.rss_reader import RssItem, fetch_latest_items
 from src.storage.database import SessionLocal
 
@@ -23,9 +25,10 @@ def prefetch_latest_articles_to_db(
     Deduplication is enforced by the unique constraint on NewsArticle.link.
     Returns the number of newly inserted rows.
     """
+    eff_limit = effective_rss_limit_per_feed(limit_per_feed)
     items: List[RssItem] = fetch_latest_items(
         RSS_FEEDS,
-        limit_per_feed=limit_per_feed,
+        limit_per_feed=eff_limit,
         max_age_hours=max_age_hours,
     )
 
@@ -35,6 +38,8 @@ def prefetch_latest_articles_to_db(
     inserted = 0
     with SessionLocal() as session:
         for item in items:
+            if not matches_local_interest(item.title, item.summary):
+                continue
             location, state = extract_location_and_state(item.title, item.summary)
             article = NewsArticle(
                 title=item.title,

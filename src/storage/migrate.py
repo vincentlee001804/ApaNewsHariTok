@@ -135,6 +135,51 @@ def migrate_add_news_article_location_and_state_columns() -> None:
         pass
 
 
+def migrate_create_user_article_delivery_table() -> None:
+    """
+    Create user_article_delivery for per-user article deduplication (multi-user safe).
+    """
+    try:
+        with SessionLocal() as session:
+            exists_tbl = session.execute(
+                text(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name='user_article_delivery'"
+                )
+            ).fetchone()
+            if exists_tbl:
+                return
+            session.execute(
+                text(
+                    """
+                    CREATE TABLE user_article_delivery (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL REFERENCES users(id),
+                        article_id INTEGER NOT NULL REFERENCES news_articles(id),
+                        sent_at DATETIME NOT NULL,
+                        UNIQUE(user_id, article_id)
+                    )
+                    """
+                )
+            )
+            session.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_article_delivery_user_id "
+                    "ON user_article_delivery (user_id)"
+                )
+            )
+            session.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_article_delivery_article_id "
+                    "ON user_article_delivery (article_id)"
+                )
+            )
+            session.commit()
+            print("✓ Created user_article_delivery table.")
+    except Exception:
+        pass
+
+
 def backfill_news_article_location_and_state() -> None:
     """
     Backfill `location` + `state` for existing rows (best-effort).
@@ -170,4 +215,5 @@ if __name__ == "__main__":
     migrate_add_area_keywords_column()
     migrate_add_ai_summary_column()
     migrate_add_news_article_location_and_state_columns()
+    migrate_create_user_article_delivery_table()
     backfill_news_article_location_and_state()

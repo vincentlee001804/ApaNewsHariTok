@@ -84,6 +84,25 @@ class NewsArticle(Base):
     # Otherwise location can be NULL and state will be "other".
     location = Column(String(255), nullable=True)
     state = Column(String(20), nullable=True)  # "sarawak" or "other"
+    # Deprecated: was used for global “already sent” dedup (wrong for multi-user).
+    # Per-user delivery is tracked in UserArticleDelivery. Kept for DB compatibility.
     last_sent_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class UserArticleDelivery(Base):
+    """
+    Records that a given user has been shown a given article (scheduled push / /latest dedup).
+    Replaces the global NewsArticle.last_sent_at anti-pattern for multi-tenant bots.
+    """
+
+    __tablename__ = "user_article_delivery"
+    __table_args__ = (
+        UniqueConstraint("user_id", "article_id", name="uq_user_article_delivery"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    article_id = Column(Integer, ForeignKey("news_articles.id"), nullable=False, index=True)
+    sent_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

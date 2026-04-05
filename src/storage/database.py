@@ -35,12 +35,14 @@ def init_db() -> None:
             migrate_add_ai_summary_column,
             migrate_add_locations_column,
             migrate_add_news_article_location_and_state_columns,
+            migrate_create_user_article_delivery_table,
             backfill_news_article_location_and_state,
         )
         migrate_add_locations_column()
         migrate_add_area_keywords_column()
         migrate_add_ai_summary_column()
         migrate_add_news_article_location_and_state_columns()
+        migrate_create_user_article_delivery_table()
         backfill_news_article_location_and_state()
     except Exception as e:
         # If migration fails, it's okay - might be first run or column already exists

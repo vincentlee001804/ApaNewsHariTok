@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, List
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 
 from src.ai.summarizer import classify_category, summarize, waze_alerts_to_news_sentences
 from src.core.config import (
@@ -16,10 +16,56 @@ from src.core.config import (
     WAZE_ENV,
     waze_allowed_type_set,
 )
-from src.core.models import NewsArticle
+from src.core.models import NewsArticle, User, UserArticleDelivery
 from src.scrapers.rss_reader import RssItem, fetch_latest_items
 from src.scrapers.waze_client import WazeGeoRssError, list_alerts_in_bbox
 from src.storage.database import SessionLocal
+
+
+def _record_deliveries_for_user(
+    session,
+    user_id: int,
+    articles: List[NewsArticle],
+    sent_at: datetime,
+) -> None:
+    """Insert delivery rows so this user will not see the same articles again while dedup is on."""
+    for art in articles:
+        already = session.execute(
+            select(UserArticleDelivery.id).where(
+                UserArticleDelivery.user_id == user_id,
+                UserArticleDelivery.article_id == art.id,
+            )
+        ).scalar_one_or_none()
+        if already is None:
+            session.add(
+                UserArticleDelivery(
+                    user_id=user_id,
+                    article_id=art.id,
+                    sent_at=sent_at,
+                )
+            )
+
+
+def _get_or_create_article_for_rss_item(session, item: RssItem) -> NewsArticle:
+    existing = session.execute(
+        select(NewsArticle).where(NewsArticle.link == item.link)
+    ).scalar_one_or_none()
+    if existing:
+        return existing
+    from src.core.location_extractor import extract_location_and_state
+
+    loc, st = extract_location_and_state(item.title, item.summary)
+    row = NewsArticle(
+        title=item.title,
+        link=item.link,
+        source=item.source,
+        raw_summary=item.summary,
+        location=loc,
+        state=st,
+    )
+    session.add(row)
+    session.flush()
+    return row
 
 
 def _deduplicate_items(items: List[RssItem], max_items: int) -> List[RssItem]:
@@ -630,15 +676,14 @@ def _latest_news_heading_lines(max_items: int) -> List[str]:
 def get_latest_news_text(max_items: int = 3) -> str:
     """
     Fetch latest items from configured RSS feeds and format them
-    into a Markdown string suitable for Telegram, including
-    a short AI-generated summary for each item where possible.
+    into HTML suitable for Telegram, including AI summaries.
+
+    No Telegram user context: does not apply per-user delivery dedup.
+    For production paths use get_latest_news_text_for_user.
     """
     items: List[RssItem] = fetch_latest_items(RSS_FEEDS, limit_per_feed=3)
-    
-    # Sort by date (newest first) across all sources to mix news from different feeds
+
     sorted_items = _sort_items_by_date(items)
-    
-    # Deduplicate after sorting to ensure we get latest news from any source
     unique_items = _deduplicate_items(sorted_items, max_items=max_items)
 
     if not unique_items:
@@ -647,47 +692,7 @@ def get_latest_news_text(max_items: int = 3) -> str:
             "<i>This might be a temporary network issue or the sources are unavailable.</i>"
         )
 
-    # Deduplication toggle:
-    # - Enabled (default): once sent, never sent again (permanent duplicate prevention)
-    # - Disabled: always show items (useful for testing message formatting)
-    to_display: List[RssItem] = []
-    now = datetime.utcnow()
-
-    if not DEDUPLICATION_ENABLED:
-        to_display = unique_items[:max_items]
-    else:
-        with SessionLocal() as session:
-            for item in unique_items:
-                existing: NewsArticle | None = session.execute(
-                    select(NewsArticle).where(NewsArticle.link == item.link)
-                ).scalar_one_or_none()
-
-                if existing and existing.last_sent_at is not None:
-                    # This article has already been sent at least once; skip it forever.
-                    continue
-
-                if not existing:
-                    from src.core.location_extractor import extract_location_and_state
-
-                    location, state = extract_location_and_state(item.title, item.summary)
-                    existing = NewsArticle(
-                        title=item.title,
-                        link=item.link,
-                        source=item.source,
-                        raw_summary=item.summary,
-                        last_sent_at=now,
-                        location=location,
-                        state=state,
-                    )
-                    session.add(existing)
-                else:
-                    existing.last_sent_at = now
-
-                to_display.append(item)
-                if len(to_display) >= max_items:
-                    break
-
-            session.commit()
+    to_display: List[RssItem] = unique_items[:max_items]
 
     if not to_display:
         return (
@@ -756,9 +761,13 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
 
     When max_items is 1 (scheduled push, /testpush), the outer heading
     "Latest local news with AI summaries:" is omitted for a tighter message.
-    """
-    from src.core.user_service import get_user_preference
 
+    With deduplication on, \"already shown\" is tracked per user via UserArticleDelivery,
+    not global NewsArticle.last_sent_at.
+    """
+    from src.core.user_service import get_or_create_user, get_user_preference
+
+    get_or_create_user(telegram_id, username=None)
     preference = get_user_preference(telegram_id)
     categories_filter = preference.categories if preference else ""
     locations_filter = preference.locations if preference else ""
@@ -772,13 +781,24 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
     cutoff = now - timedelta(hours=24)
 
     with SessionLocal() as session:
+        user_row = session.execute(
+            select(User).where(User.telegram_id == telegram_id)
+        ).scalar_one_or_none()
+        user_id: int | None = user_row.id if user_row else None
+
         stmt = (
             select(NewsArticle)
             .where(NewsArticle.created_at >= cutoff)
             .order_by(NewsArticle.created_at.desc())
         )
-        if DEDUPLICATION_ENABLED:
-            stmt = stmt.where(NewsArticle.last_sent_at.is_(None))
+        if DEDUPLICATION_ENABLED and user_id is not None:
+            already_delivered = exists(
+                select(UserArticleDelivery.id).where(
+                    UserArticleDelivery.article_id == NewsArticle.id,
+                    UserArticleDelivery.user_id == user_id,
+                )
+            )
+            stmt = stmt.where(~already_delivered)
 
         candidates: List[NewsArticle] = list(session.execute(stmt).scalars().all())
         use_area_priority = _should_apply_area_priority(
@@ -843,47 +863,41 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 ranked_items.append((rank, published_ts, item))
 
             ranked_items.sort(key=lambda t: (t[0], -t[1]))
-            filtered_items: List[RssItem] = [t[2] for t in ranked_items[:max_items]]
+            ranked_rss_items: List[RssItem] = [t[2] for t in ranked_items]
 
-            if not filtered_items:
+            if not ranked_rss_items:
                 return (
                     "No news items match your current filters (categories/locations).\n"
                     "<i>Try adjusting your settings with /settings to see more news.</i>"
                 )
 
-            # Deduplication behavior (unchanged for RSS fallback)
             to_display: List[RssItem] = []
-            if not DEDUPLICATION_ENABLED:
-                to_display = filtered_items[:max_items]
-            else:
-                for item in filtered_items:
-                    existing: NewsArticle | None = session.execute(
-                        select(NewsArticle).where(NewsArticle.link == item.link)
-                    ).scalar_one_or_none()
-                    if existing and existing.last_sent_at is not None:
-                        continue
-                    if not existing:
-                        from src.core.location_extractor import extract_location_and_state
+            displayed_articles: List[NewsArticle] = []
 
-                        location, state = extract_location_and_state(
-                            item.title, item.summary
-                        )
-                        existing = NewsArticle(
-                            title=item.title,
-                            link=item.link,
-                            source=item.source,
-                            raw_summary=item.summary,
-                            last_sent_at=now,
-                            location=location,
-                            state=state,
-                        )
-                        session.add(existing)
-                    else:
-                        existing.last_sent_at = now
+            if not DEDUPLICATION_ENABLED or user_id is None:
+                for item in ranked_rss_items[:max_items]:
+                    orm_art = _get_or_create_article_for_rss_item(session, item)
                     to_display.append(item)
+                    displayed_articles.append(orm_art)
+            else:
+                for item in ranked_rss_items:
+                    orm_art = _get_or_create_article_for_rss_item(session, item)
+                    dup = session.execute(
+                        select(UserArticleDelivery.id).where(
+                            UserArticleDelivery.user_id == user_id,
+                            UserArticleDelivery.article_id == orm_art.id,
+                        )
+                    ).scalar_one_or_none()
+                    if dup is not None:
+                        continue
+                    to_display.append(item)
+                    displayed_articles.append(orm_art)
                     if len(to_display) >= max_items:
                         break
-                session.commit()
+
+            if DEDUPLICATION_ENABLED and user_id is not None and displayed_articles:
+                _record_deliveries_for_user(session, user_id, displayed_articles, now)
+            session.commit()
 
             if not to_display:
                 return (
@@ -932,9 +946,8 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                     art.raw_summary or art.title, max_words=50
                 )
 
-        if DEDUPLICATION_ENABLED:
-            for art in chosen:
-                art.last_sent_at = now
+        if DEDUPLICATION_ENABLED and user_id is not None:
+            _record_deliveries_for_user(session, user_id, chosen, now)
 
         session.commit()
 

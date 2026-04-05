@@ -11,3 +11,6 @@ https://www.sinarharian.com.my/rss
 http://www.hmetro.com.my/utama.xml
 http://www.hmetro.com.my/mutakhir.xml
 https://dayakdaily.com/feed/
+https://rss.app/feeds/EYJxxljrFQtbWR8K.xml
+https://rsshub.app/telegram/channel/swbnews
+https://www.sarawakedition.com/feed/

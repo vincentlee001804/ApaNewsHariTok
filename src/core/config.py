@@ -82,6 +82,63 @@ PREFETCH_ENABLED: Final[bool] = os.getenv("PREFETCH_ENABLED", "true").strip().lo
 PREFETCH_INTERVAL_MINUTES: Final[int] = int(os.getenv("PREFETCH_INTERVAL_MINUTES", "10").strip() or "10")
 
 
+def _env_float(key: str, default: str) -> float:
+    return float((os.getenv(key, default) or default).strip() or default)
+
+
+# Waze Live Map (unofficial georss JSON used by the browser map). Bounding box = Sarawak by default.
+WAZE_GEO_RSS_URL: Final[str] = (
+    (os.getenv("WAZE_GEO_RSS_URL") or "https://www.waze.com/live-map/api/georss").strip()
+)
+WAZE_BBOX_TOP: Final[float] = _env_float("WAZE_BBOX_TOP", "5.0")
+WAZE_BBOX_BOTTOM: Final[float] = _env_float("WAZE_BBOX_BOTTOM", "0.8")
+WAZE_BBOX_LEFT: Final[float] = _env_float("WAZE_BBOX_LEFT", "109.5")
+WAZE_BBOX_RIGHT: Final[float] = _env_float("WAZE_BBOX_RIGHT", "115.8")
+WAZE_ENV: Final[str] = (os.getenv("WAZE_ENV", "row").strip() or "row").lower()
+# Comma-separated alert `type` values to include (Waze strings, e.g. ACCIDENT, JAM).
+_DEFAULT_WAZE_ALERT_TYPES: Final[str] = (
+    "ACCIDENT,JAM,HAZARD,ROAD_CLOSED,CONSTRUCTION,WEATHERHAZARD"
+)
+WAZE_ALERT_TYPES: Final[List[str]] = [
+    x.strip().upper()
+    for x in (os.getenv("WAZE_ALERT_TYPES", _DEFAULT_WAZE_ALERT_TYPES) or _DEFAULT_WAZE_ALERT_TYPES).split(
+        ","
+    )
+    if x.strip()
+]
+WAZE_INCLUDE_POLICE: Final[bool] = os.getenv("WAZE_INCLUDE_POLICE", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+# If Waze returns 403, paste a browser Cookie header from DevTools (same session as live map).
+WAZE_COOKIE: Final[str | None] = (os.getenv("WAZE_COOKIE") or "").strip() or None
+WAZE_REQUEST_TIMEOUT_SEC: Final[int] = int(
+    (os.getenv("WAZE_REQUEST_TIMEOUT_SEC") or "25").strip() or "25"
+)
+
+
+def waze_allowed_alert_types() -> List[str]:
+    """
+    Resolved list of Waze alert type strings to keep (uppercase).
+    An empty configured list means no filter (all types returned by Waze are kept).
+    """
+    types = list(dict.fromkeys(WAZE_ALERT_TYPES))  # de-dupe, preserve order
+    if WAZE_INCLUDE_POLICE and "POLICE" not in types:
+        types.append("POLICE")
+    return types
+
+
+def waze_allowed_type_set() -> set[str]:
+    """
+    Set used for filtering. Empty set = accept all alert types.
+    """
+    types = waze_allowed_alert_types()
+    return set() if not types else {t.upper() for t in types}
+
+
 def require_bot_token() -> str:
     """
     Retrieve the Telegram bot token or raise a clear error message.

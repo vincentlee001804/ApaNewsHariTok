@@ -64,7 +64,17 @@ def main() -> None:
             "no news items match your current filters",
             "i couldn't fetch any news items right now",
         ]
-        return any(marker in lowered for marker in skip_markers)
+        news_empty = any(marker in lowered for marker in skip_markers)
+        if not news_empty:
+            return False
+        # Still deliver scheduled push if Waze has matching road alerts (not just empty/error).
+        if "road alerts (waze)" in lowered:
+            if "no waze reports match your area keywords right now." in lowered:
+                return True
+            if "403 forbidden" in lowered or "waze request failed" in lowered:
+                return True
+            return False
+        return True
 
     def _frequency_interval_hours(value: str | None) -> float:
         mapping = {

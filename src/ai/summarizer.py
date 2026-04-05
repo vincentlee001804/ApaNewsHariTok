@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
 import textwrap
-from typing import Optional
+from typing import Any, List, Optional
 
 import requests
 
@@ -313,4 +314,88 @@ def answer_news_question(question: str, items_text: str, max_words: int = 220) -
         return answer or None
     except Exception:
         return None
+
+
+def fallback_waze_alert_sentence(alert: dict[str, Any]) -> str:
+    """
+    Deterministic one-liner when Ollama is down or batch parsing fails.
+    """
+    raw_type = (alert.get("type") or "report").strip()
+    label = raw_type.replace("_", " ").strip().lower() or "traffic report"
+    street = (alert.get("street") or "").strip() or "an unspecified road"
+    city = (alert.get("city") or "").strip()
+    if city:
+        return f"Waze users report {label} on {street} in {city}."
+    return f"Waze users report {label} on {street}."
+
+
+def waze_alerts_to_news_sentences(alerts: List[dict[str, Any]]) -> List[str]:
+    """
+    One Ollama call: turn a list of compact Waze alert dicts into one natural sentence each.
+
+    Falls back to :func:`fallback_waze_alert_sentence` per row if the model output
+    does not line up with the input count.
+    """
+    if not alerts:
+        return []
+
+    compact: List[dict[str, Any]] = []
+    for a in alerts:
+        desc = a.get("reportDescription")
+        if isinstance(desc, str) and len(desc) > 240:
+            desc = desc[:237] + "..."
+        compact.append(
+            {
+                "type": a.get("type"),
+                "subtype": a.get("subtype"),
+                "street": a.get("street"),
+                "city": a.get("city"),
+                "description": desc or None,
+            }
+        )
+
+    n = len(compact)
+    payload = json.dumps(compact, ensure_ascii=False)
+    prompt = textwrap.dedent(
+        f"""
+        You translate Waze live-map alerts into short traffic news lines for drivers in Sarawak, Malaysia.
+
+        You will receive exactly {n} alerts as a JSON array, in order.
+        Output EXACTLY {n} lines of plain text.
+        Line i must be ONE complete sentence describing only alert i.
+        Mention the alert type, road or street name, and city when available.
+        Do not number the lines, do not use bullet characters, and do not wrap sentences in quotation marks.
+
+        Alerts (JSON):
+        {payload}
+        """
+    ).strip()
+
+    try:
+        response = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+            },
+            timeout=90,
+        )
+        response.raise_for_status()
+        data = response.json()
+        raw = (data.get("response") or "").strip()
+    except Exception:
+        return [fallback_waze_alert_sentence(a) for a in alerts]
+
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    cleaned: List[str] = []
+    for ln in lines:
+        ln = re.sub(r"^\d+[\).\s]+", "", ln).strip()
+        if ln:
+            cleaned.append(ln)
+
+    if len(cleaned) != n:
+        return [fallback_waze_alert_sentence(a) for a in alerts]
+
+    return cleaned
 

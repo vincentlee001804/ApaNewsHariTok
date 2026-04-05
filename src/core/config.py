@@ -49,6 +49,38 @@ def _load_rss_feeds_from_file() -> List[str]:
 # otherwise we fall back to a small default list.
 RSS_FEEDS: Final[List[str]] = _load_rss_feeds_from_file() or DEFAULT_RSS_FEEDS
 
+
+def _load_local_interest_keywords() -> tuple[str, ...]:
+    """
+    Load cheap pre-filter phrases from `Sarawak_Local_Keywords.txt` (project root).
+    Empty / missing file means no keyword gating (backward compatible).
+    """
+    project_root = Path(__file__).resolve().parents[2]
+    path = project_root / "Sarawak_Local_Keywords.txt"
+    if not path.exists():
+        return ()
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key = line.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return tuple(out)
+
+
+LOCAL_INTEREST_KEYWORDS: Final[tuple[str, ...]] = _load_local_interest_keywords()
+
+# When news_articles has no rows yet, cap RSS entries per feed (avoids huge first pull).
+FIRST_BOOT_RSS_MAX_PER_FEED: Final[int] = max(
+    1,
+    int((os.getenv("FIRST_BOOT_RSS_MAX_PER_FEED", "3").strip() or "3")),
+)
+
 # Optional Telegram channel sources for ingesting channel posts into DB.
 # Comma-separated values in .env, each can be:
 # - channel username without @, e.g. swbnews

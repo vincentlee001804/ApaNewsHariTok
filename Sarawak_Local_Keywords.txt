@@ -1,0 +1,28 @@
+# One keyword or phrase per line (case-insensitive substring match on title + RSS description).
+# Lines starting with # are ignored. Delete all keywords or remove this file to disable filtering.
+# Narrower lists = fewer articles sent to Ollama.
+
+sarawak
+borneo
+kuching
+miri
+sibu
+bintulu
+samarahan
+kota samarahan
+serian
+bau
+lawas
+limbang
+marudi
+mukah
+betong
+saratok
+sarikei
+sri aman
+kapit
+belaga
+kanowit
+bintangor
+simunjan
+lundu

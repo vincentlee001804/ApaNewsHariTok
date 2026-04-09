@@ -255,6 +255,9 @@ You can adjust folder names as the project grows, but this structure separates c
 5. **Configure environment variables**
    - `TELEGRAM_BOT_TOKEN` – token from BotFather.  
    - `DATABASE_URL` – e.g. `sqlite:///mvp.db`.  
+   - `DB_CLEANUP_ENABLED` – enable automatic old-news cleanup (`true`/`false`, default `true`).  
+   - `DB_RETENTION_DAYS` – keep news for this many days (default `30`).  
+   - `DB_CLEANUP_INTERVAL_HOURS` – cleanup job interval (default `24`).  
    - Any additional config related to Ollama (e.g. host/port if not default).
 
 6. **Run the bot (development mode)**

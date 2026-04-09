@@ -113,6 +113,23 @@ PREFETCH_ENABLED: Final[bool] = os.getenv("PREFETCH_ENABLED", "true").strip().lo
 
 PREFETCH_INTERVAL_MINUTES: Final[int] = int(os.getenv("PREFETCH_INTERVAL_MINUTES", "10").strip() or "10")
 
+# DB retention cleanup (old news + delivery rows).
+DB_CLEANUP_ENABLED: Final[bool] = os.getenv("DB_CLEANUP_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+DB_RETENTION_DAYS: Final[int] = max(
+    1,
+    int((os.getenv("DB_RETENTION_DAYS", "30").strip() or "30")),
+)
+DB_CLEANUP_INTERVAL_HOURS: Final[int] = max(
+    1,
+    int((os.getenv("DB_CLEANUP_INTERVAL_HOURS", "24").strip() or "24")),
+)
+
 
 def _env_float(key: str, default: str) -> float:
     return float((os.getenv(key, default) or default).strip() or default)

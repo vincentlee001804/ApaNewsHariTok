@@ -20,6 +20,8 @@ from src.bot.handlers import (
     dev_waze_command,
 )
 from src.core.config import PREFETCH_ENABLED, PREFETCH_INTERVAL_MINUTES, require_bot_token
+from src.core.config import DB_CLEANUP_ENABLED, DB_CLEANUP_INTERVAL_HOURS, DB_RETENTION_DAYS
+from src.core.cleanup_service import cleanup_old_news_data
 from src.core.prefetch_service import prefetch_latest_articles_to_db
 from src.core.services import get_latest_news_text_for_user
 from src.core.user_service import list_active_user_preferences
@@ -125,6 +127,19 @@ def main() -> None:
         except Exception as e:
             print(f"[push] error: {e}")
 
+    async def _cleanup_job(context) -> None:
+        try:
+            stats = await asyncio.to_thread(cleanup_old_news_data, DB_RETENTION_DAYS)
+            if stats.get("articles_deleted", 0) or stats.get("deliveries_deleted", 0):
+                print(
+                    "[cleanup] deleted "
+                    f"{stats.get('articles_deleted', 0)} articles and "
+                    f"{stats.get('deliveries_deleted', 0)} delivery rows "
+                    f"(retention={DB_RETENTION_DAYS} days)"
+                )
+        except Exception as e:
+            print(f"[cleanup] error: {e}")
+
     if PREFETCH_ENABLED:
         # Prefetch immediately on startup, then repeat.
         application.job_queue.run_repeating(
@@ -135,6 +150,18 @@ def main() -> None:
         )
         print(
             f"RSS prefetch enabled: every {PREFETCH_INTERVAL_MINUTES} minutes (saving to database + frequency push)"
+        )
+
+    if DB_CLEANUP_ENABLED:
+        application.job_queue.run_repeating(
+            _cleanup_job,
+            interval=DB_CLEANUP_INTERVAL_HOURS * 3600,
+            first=60,
+            name="db_cleanup",
+        )
+        print(
+            "DB cleanup enabled: every "
+            f"{DB_CLEANUP_INTERVAL_HOURS} hours (retention={DB_RETENTION_DAYS} days)"
         )
 
     print("Bot is starting... Press Ctrl+C to stop.")

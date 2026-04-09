@@ -15,36 +15,38 @@ from src.core.services import _is_urgent_utility_alert, build_urgent_preview
 from src.core.user_service import (
     get_or_create_user,
     get_user_preference,
+    is_user_active,
     list_active_user_preferences,
+    set_user_active,
     update_user_preference,
 )
 from src.storage.database import SessionLocal
 
 
 WELCOME_TEXT: Final[str] = (
-    "Hello! 👋\n\n"
-    "I am the *Local News Summarization Bot*.\n"
-    "I fetch and summarize local Sarawak news for you.\n\n"
-    "*Available commands:*\n"
-    "• /start – show this welcome message\n"
-    "• /help – show available commands\n"
-    "• /latest – news with AI summaries (Area Keywords boost matching headlines)\n"
-    "• /settings – configure your preferences (categories, frequency)\n"
-    "• /testpush – one-off scheduled-style push (1 item; private; dev/testing)\n\n"
-    "Use /settings to customize which news you want to see!"
+    "Welcome! 👋\n\n"
+    "I am your *Sarawak News Bot*.\n"
+    "I collect recent news and send concise summaries.\n\n"
+    "*Quick start (30 seconds):*\n"
+    "1) Open /settings\n"
+    "2) Choose locations/categories/frequency\n"
+    "3) Tap /latest to see your first personalized update\n\n"
+    "*Main commands:*\n"
+    "• /latest – latest personalized news with summaries\n"
+    "• /settings – edit preferences and subscribe/unsubscribe scheduled pushes\n"
+    "• /help – command guide"
 )
 
 
 HELP_TEXT: Final[str] = (
-    "*Available commands:*\n"
-    "• /start – introduction and project description\n"
+    "*Command guide:*\n"
+    "• /start – welcome and quick start\n"
     "• /help – this help message\n"
-    "• /latest – news + summaries; Area Keywords rank matching roads/areas higher\n"
-    "• /settings – configure your preferences\n"
-    "• /testpush – same as scheduled push (1 headline). Private; optional allow list in `.env`\n"
-    "• /devwaze – developer-only Waze preview (needs Area Keywords; same gate as /testpush)\n\n"
-    "Use /settings to choose categories (e.g., Sarawak-only, sports, politics) "
-    "and delivery frequency (every 1h/3h/6h/12h)."
+    "• /latest – latest personalized news with summaries\n"
+    "• /settings – categories, locations, area keywords, frequency, and subscribe/unsubscribe\n\n"
+    "*Tips:*\n"
+    "- Use Area Keywords for roads or neighborhoods (example: Jalan Song, Tabuan).\n"
+    "- If you only want manual checks, set subscription to OFF inside /settings."
 )
 
 def _format_frequency(value: str | None) -> str:
@@ -366,6 +368,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     frequency_display = _format_frequency(preference.frequency)
     urgent_display = "Yes" if preference.wants_urgent_alerts else "No"
+    subscription_display = "ON" if is_user_active(telegram_id) else "OFF"
     area_keywords_display = (
         ", ".join([k.strip().title() for k in (preference.area_keywords or "").split(",") if k.strip()])
         if (preference.area_keywords or "").strip()
@@ -379,6 +382,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"🗺️ *Area Keywords:* {area_keywords_display}\n"
         "   _(boosts matching news headlines)_\n"
         f"⏰ *Frequency:* {frequency_display}\n"
+        f"🔔 *Subscription:* {subscription_display}\n"
         f"🚨 *Urgent Alerts:* {urgent_display}\n\n"
         "Use the buttons below to change your preferences:"
     )
@@ -672,12 +676,17 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     callback_data="freq_every_12h",
                 ),
             ],
+            [
+                InlineKeyboardButton("✅ Subscribe scheduled push", callback_data="freq_subscribe"),
+                InlineKeyboardButton("⏸️ Unsubscribe", callback_data="freq_unsubscribe"),
+            ],
             [InlineKeyboardButton("◀️ Back", callback_data="settings_back")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
             "*Select Frequency:*\n\n"
             "Choose how often you want push notifications while the bot is running.\n\n"
+            "Use Subscribe/Unsubscribe below to turn scheduled pushes ON/OFF.\n\n"
             f"Current: {_format_frequency(preference.frequency)}",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup,
@@ -735,6 +744,12 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         elif data == "freq_every_12h":
             update_user_preference(telegram_id, frequency="every_12h")
             await query.answer("Frequency set to: Every 12 hours")
+        elif data == "freq_subscribe":
+            set_user_active(telegram_id, True)
+            await query.answer("Subscribed: scheduled pushes ON")
+        elif data == "freq_unsubscribe":
+            set_user_active(telegram_id, False)
+            await query.answer("Unsubscribed: scheduled pushes OFF")
         await settings_callback_refresh(query, telegram_id)
 
     elif data == "settings_back":
@@ -759,6 +774,7 @@ async def settings_callback_refresh(query, telegram_id: int) -> None:
     
     frequency_display = _format_frequency(preference.frequency)
     urgent_display = "Yes" if preference.wants_urgent_alerts else "No"
+    subscription_display = "ON" if is_user_active(telegram_id) else "OFF"
     area_keywords_display = (
         ", ".join([k.strip().title() for k in (preference.area_keywords or "").split(",") if k.strip()])
         if (preference.area_keywords or "").strip()
@@ -772,6 +788,7 @@ async def settings_callback_refresh(query, telegram_id: int) -> None:
         f"🗺️ *Area Keywords:* {area_keywords_display}\n"
         "   _(boosts matching news headlines)_\n"
         f"⏰ *Frequency:* {frequency_display}\n"
+        f"🔔 *Subscription:* {subscription_display}\n"
         f"🚨 *Urgent Alerts:* {urgent_display}\n\n"
         "Use the buttons below to change your preferences:"
     )

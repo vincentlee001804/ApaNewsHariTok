@@ -130,3 +130,33 @@ def list_active_user_preferences() -> list[tuple[int, UserPreference]]:
             .where(User.is_active.is_(True))
         ).all()
         return [(int(telegram_id), pref) for telegram_id, pref in rows]
+
+
+def set_user_active(telegram_id: int, is_active: bool) -> bool:
+    """
+    Update User.is_active by telegram_id.
+    Returns True when user exists and was updated, else False.
+    """
+    with SessionLocal() as session:
+        user: User | None = session.execute(
+            select(User).where(User.telegram_id == telegram_id)
+        ).scalar_one_or_none()
+        if not user:
+            return False
+        user.is_active = bool(is_active)
+        session.commit()
+        return True
+
+
+def is_user_active(telegram_id: int) -> bool:
+    """
+    Return current User.is_active state.
+    Defaults to True for unknown users.
+    """
+    with SessionLocal() as session:
+        user: User | None = session.execute(
+            select(User).where(User.telegram_id == telegram_id)
+        ).scalar_one_or_none()
+        if not user:
+            return True
+        return bool(user.is_active)

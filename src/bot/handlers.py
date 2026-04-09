@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Final
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatType, ParseMode
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import OperationalError
 
 from src.core.config import TELEGRAM_SOURCE_CHANNELS, is_test_push_allowed
 from src.core.location_extractor import extract_location_and_state
@@ -21,6 +23,8 @@ from src.core.user_service import (
     update_user_preference,
 )
 from src.storage.database import SessionLocal
+
+logger = logging.getLogger(__name__)
 
 
 WELCOME_TEXT: Final[str] = (
@@ -99,8 +103,14 @@ async def latest_demo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     # Local import to avoid circular dependency at import time
     from src.core.services import get_latest_news_text_for_user
 
-    text = get_latest_news_text_for_user(telegram_id)
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+    try:
+        text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id)
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+    except OperationalError:
+        logger.exception("Database busy while serving /latest")
+        await update.message.reply_text(
+            "The news database is busy right now. Please try /latest again in a few seconds."
+        )
 
 
 async def test_push_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -127,7 +137,14 @@ async def test_push_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     from src.core.services import get_latest_news_text_for_user
 
-    text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id, 1)
+    try:
+        text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id, 1)
+    except OperationalError:
+        logger.exception("Database busy while serving /testpush")
+        await update.message.reply_text(
+            "The news database is busy right now. Please try /testpush again in a few seconds."
+        )
+        return
     full = (
         "<b>[Test push]</b> Same build as the scheduled job (1 item, your filters):\n\n" + text
     )

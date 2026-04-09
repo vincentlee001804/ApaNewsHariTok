@@ -2,17 +2,29 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///mvp.db")
 
+_IS_SQLITE = DATABASE_URL.startswith("sqlite")
+
 engine = create_engine(
     DATABASE_URL,
     echo=False,
     future=True,
+    connect_args={"timeout": 30, "check_same_thread": False} if _IS_SQLITE else {},
 )
+
+if _IS_SQLITE:
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("PRAGMA synchronous=NORMAL;")
+        cursor.execute("PRAGMA foreign_keys=ON;")
+        cursor.close()
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 

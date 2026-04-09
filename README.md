@@ -156,8 +156,7 @@ You can adjust folder names as the project grows, but this structure separates c
 - **FR8 – Bot Commands**  
   - `/start` – Begin using the bot, register user if new.  
   - `/help` – Show explanation of the bot’s features and commands.  
-  - `/settings` – Configure categories, locations, and frequency.  
-  - `/subscribe` / `/unsubscribe` – Manage subscription status.  
+  - `/settings` – Configure categories, locations, frequency, and subscription ON/OFF.  
   - `/latest` – Request the latest summarized news immediately.
 
 - **FR9 – Admin & Configuration**  

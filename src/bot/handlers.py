@@ -29,12 +29,13 @@ logger = logging.getLogger(__name__)
 
 WELCOME_TEXT: Final[str] = (
     "Welcome! 👋\n\n"
-    "I am your *Sarawak News Bot*.\n"
-    "I collect recent news and send concise summaries.\n\n"
+    "I am an *AI Local News Summarization Bot*.\n"
+    "I automatically gather local Sarawak news, use a local AI model to summarize "
+    "lengthy articles into short ~30-word briefs, and send them directly to your Telegram "
+    "as push notifications.\n\n"
     "*Quick start (30 seconds):*\n"
-    "1) Open /settings\n"
-    "2) Choose locations/categories/frequency\n"
-    "3) Tap /latest to see your first personalized update\n\n"
+    "1) Tap /settings to choose categories/location/frequency\n"
+    "2) Then use /latest to test\n\n"
     "*Main commands:*\n"
     "• /latest – latest personalized news with summaries\n"
     "• /settings – edit preferences and subscribe/unsubscribe scheduled pushes\n"

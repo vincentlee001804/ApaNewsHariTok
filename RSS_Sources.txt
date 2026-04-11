@@ -12,3 +12,7 @@ https://dayakdaily.com/feed/
 https://rss.app/feeds/EYJxxljrFQtbWR8K.xml
 ##https://rsshub.app/telegram/channel/swbnews
 https://www.sarawakedition.com/feed/
+https://cms.buletintv3.my/feed/
+https://berita.rtm.gov.my/feed/
+https://news.google.com/rss/search?q=Sarawak%20water
+https://news.google.com/rss/search?q=Sarawak%20energy

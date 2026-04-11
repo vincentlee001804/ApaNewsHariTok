@@ -19,7 +19,12 @@ from src.bot.handlers import (
     test_push_command,
     dev_waze_command,
 )
-from src.core.config import PREFETCH_ENABLED, PREFETCH_INTERVAL_MINUTES, require_bot_token
+from src.core.config import (
+    PREFETCH_ENABLED,
+    PREFETCH_INTERVAL_MINUTES,
+    TELEGRAM_SOURCE_CHANNELS,
+    require_bot_token,
+)
 from src.core.config import DB_CLEANUP_ENABLED, DB_CLEANUP_INTERVAL_HOURS, DB_RETENTION_DAYS
 from src.core.cleanup_service import cleanup_old_news_data
 from src.core.prefetch_service import prefetch_latest_articles_to_db
@@ -146,10 +151,16 @@ def main() -> None:
             _prefetch_job,
             interval=PREFETCH_INTERVAL_MINUTES * 60,
             first=0,
-            name="rss_prefetch",
+            name="content_prefetch",
+        )
+        tg_note = (
+            f" + Telegram ({len(TELEGRAM_SOURCE_CHANNELS)} source(s))"
+            if TELEGRAM_SOURCE_CHANNELS
+            else ""
         )
         print(
-            f"RSS prefetch enabled: every {PREFETCH_INTERVAL_MINUTES} minutes (saving to database + frequency push)"
+            f"Prefetch enabled: every {PREFETCH_INTERVAL_MINUTES} minutes "
+            f"(RSS{tg_note} → database + frequency push)"
         )
 
     if DB_CLEANUP_ENABLED:

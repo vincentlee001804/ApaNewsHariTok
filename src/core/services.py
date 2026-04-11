@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, List
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, select
 
 from src.ai.summarizer import classify_category, summarize, waze_alerts_to_news_sentences
 from src.core.config import (
     DEDUPLICATION_ENABLED,
     RSS_FEEDS,
+    TELEGRAM_SOURCE_CHANNELS,
     WAZE_BBOX_BOTTOM,
     WAZE_BBOX_LEFT,
     WAZE_BBOX_RIGHT,
@@ -20,6 +21,10 @@ from src.core.local_keywords import local_keyword_filter_enabled, matches_local_
 from src.core.models import NewsArticle, User, UserArticleDelivery
 from src.core.rss_limits import effective_rss_limit_per_feed
 from src.scrapers.rss_reader import RssItem, fetch_latest_items
+from src.scrapers.telegram_reader import (
+    canonical_link_for_news_item,
+    fetch_latest_telegram_items,
+)
 from src.scrapers.waze_client import WazeGeoRssError, list_alerts_in_bbox
 from src.storage.database import SessionLocal
 
@@ -49,9 +54,15 @@ def _record_deliveries_for_user(
 
 
 def _get_or_create_article_for_rss_item(session, item: RssItem) -> NewsArticle:
-    existing = session.execute(
-        select(NewsArticle).where(NewsArticle.link == item.link)
-    ).scalar_one_or_none()
+    link = canonical_link_for_news_item(item)
+    if link.lower().startswith("https://t.me/"):
+        existing = session.execute(
+            select(NewsArticle).where(func.lower(NewsArticle.link) == link.lower())
+        ).scalar_one_or_none()
+    else:
+        existing = session.execute(
+            select(NewsArticle).where(NewsArticle.link == link)
+        ).scalar_one_or_none()
     if existing:
         return existing
     from src.core.location_extractor import extract_location_and_state
@@ -59,8 +70,8 @@ def _get_or_create_article_for_rss_item(session, item: RssItem) -> NewsArticle:
     loc, st = extract_location_and_state(item.title, item.summary)
     row = NewsArticle(
         title=item.title,
-        link=item.link,
-        source=item.source,
+        link=link,
+        source=_get_source_name(item.source),
         raw_summary=item.summary,
         location=loc,
         state=st,
@@ -78,9 +89,11 @@ def _deduplicate_items(items: List[RssItem], max_items: int) -> List[RssItem]:
     seen_links = set()
     unique_items: List[RssItem] = []
     for item in items:
-        if item.link in seen_links:
+        link = canonical_link_for_news_item(item)
+        dedup_key = link.lower() if link.lower().startswith("https://t.me/") else link
+        if dedup_key in seen_links:
             continue
-        seen_links.add(item.link)
+        seen_links.add(dedup_key)
         unique_items.append(item)
         if len(unique_items) >= max_items:
             break
@@ -124,6 +137,26 @@ def _matches_category_filter(title: str, summary: str, categories: str) -> bool:
             return True
 
     return False
+
+
+def _fetch_combined_latest_items(
+    *,
+    limit_per_feed: int,
+    max_age_hours: int | None = None,
+) -> List[RssItem]:
+    kwargs: dict[str, int] = {"limit_per_feed": limit_per_feed}
+    if max_age_hours is not None:
+        kwargs["max_age_hours"] = max_age_hours
+
+    items: List[RssItem] = fetch_latest_items(RSS_FEEDS, **kwargs)
+    telegram_items = fetch_latest_telegram_items(
+        TELEGRAM_SOURCE_CHANNELS,
+        limit_per_source=limit_per_feed,
+        max_age_hours=max_age_hours if max_age_hours is not None else 24,
+    )
+    if telegram_items:
+        items.extend(telegram_items)
+    return items
 
 
 def _matches_location_filter(title: str, summary: str, locations: str) -> bool:
@@ -560,6 +593,12 @@ def _get_source_name(source_url: str) -> str:
     """
     Extract a friendly source name from the RSS feed URL.
     """
+    if source_url.lower().startswith("telegram:"):
+        handle = source_url.split(":", 1)[1].strip()
+        if handle.replace("-", "").isdigit():
+            return "Telegram"
+        return f"Telegram (@{handle.lstrip('@')})"
+
     source_mapping = {
         "sarawaktribune.com": "Sarawak Tribune",
         "seehua.com": "See Hua Daily News",
@@ -687,7 +726,7 @@ def get_latest_news_text(max_items: int = 3) -> str:
     For production paths use get_latest_news_text_for_user.
     """
     eff_limit = effective_rss_limit_per_feed(3)
-    items: List[RssItem] = fetch_latest_items(RSS_FEEDS, limit_per_feed=eff_limit)
+    items: List[RssItem] = _fetch_combined_latest_items(limit_per_feed=eff_limit)
 
     sorted_items = _sort_items_by_date(items)
     if not sorted_items:
@@ -769,11 +808,10 @@ def get_latest_news_text(max_items: int = 3) -> str:
         lines.append(f'Source: <a href="{item.link}">{escaped_source}</a>')
         lines.append("────────────")  # Visual separator between items
 
-    # Remove the last empty line and add footer
+    # Remove trailing separator before final join
     if lines and lines[-1] == "────────────":
         lines.pop()
 
-    lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")
     return "\n".join(lines)
 
 
@@ -859,8 +897,8 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
         if not chosen:
             # Fallback: live RSS fetch if DB has nothing yet
             eff_rss = effective_rss_limit_per_feed(15)
-            items: List[RssItem] = fetch_latest_items(
-                RSS_FEEDS, limit_per_feed=eff_rss, max_age_hours=24
+            items: List[RssItem] = _fetch_combined_latest_items(
+                limit_per_feed=eff_rss, max_age_hours=24
             )
             sorted_items = _sort_items_by_date(items)
             if not sorted_items:
@@ -978,7 +1016,6 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
 
             if lines and lines[-1] == "────────────":
                 lines.pop()
-            lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")
             return "\n".join(lines)
 
         # Ensure ai_summary exists (cache)
@@ -1023,7 +1060,6 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
 
         if lines and lines[-1] == "────────────":
             lines.pop()
-        lines.append("\n<i>Summaries generated locally by the LLM (no external AI APIs used).</i>")
         return "\n".join(lines)
 
 
@@ -1069,7 +1105,7 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
         from src.scrapers.rss_reader import RssItem
 
         eff_lim = effective_rss_limit_per_feed(10)
-        items = fetch_latest_items(RSS_FEEDS, limit_per_feed=eff_lim, max_age_hours=24)
+        items = _fetch_combined_latest_items(limit_per_feed=eff_lim, max_age_hours=24)
         # Prefer items published today (UTC). If published is missing, keep them as fallback.
         todays: list[RssItem] = []
         start_next_day = start_of_today + timedelta(days=1)
@@ -1222,7 +1258,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     # If the DB isn't warmed up, fetch RSS as evidence.
     if not candidates:
         eff_lim = effective_rss_limit_per_feed(12)
-        items = fetch_latest_items(RSS_FEEDS, limit_per_feed=eff_lim, max_age_hours=24)
+        items = _fetch_combined_latest_items(limit_per_feed=eff_lim, max_age_hours=24)
         # Use title+snippet for evidence set.
         evidence_lines: List[str] = []
         for it in items[:12]:

@@ -81,7 +81,11 @@ FIRST_BOOT_RSS_MAX_PER_FEED: Final[int] = max(
     int((os.getenv("FIRST_BOOT_RSS_MAX_PER_FEED", "3").strip() or "3")),
 )
 
-# Optional Telegram channel sources for ingesting channel posts into DB.
+# Optional Telegram sources for prefetch (same job as RSS while bot_main is running).
+# Requires TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE and an authorized Telethon
+# session file (default name matches test_sibuwb_bot.py: sibuwb_session).
+# Set PREFETCH_INTERVAL_MINUTES=60 for hourly RSS + Telegram fetch.
+#
 # Comma-separated values in .env, each can be:
 # - channel username without @, e.g. swbnews
 # - numeric chat id, e.g. -1001234567890
@@ -111,7 +115,10 @@ PREFETCH_ENABLED: Final[bool] = os.getenv("PREFETCH_ENABLED", "true").strip().lo
     "on",
 }
 
-PREFETCH_INTERVAL_MINUTES: Final[int] = int(os.getenv("PREFETCH_INTERVAL_MINUTES", "10").strip() or "10")
+PREFETCH_INTERVAL_MINUTES: Final[int] = max(
+    1,
+    int((os.getenv("PREFETCH_INTERVAL_MINUTES", "10").strip() or "10")),
+)
 
 # DB retention cleanup (old news + delivery rows).
 DB_CLEANUP_ENABLED: Final[bool] = os.getenv("DB_CLEANUP_ENABLED", "true").strip().lower() in {

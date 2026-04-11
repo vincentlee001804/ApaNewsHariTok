@@ -15,6 +15,12 @@ env/
 *.db
 *.sqlite
 *.sqlite3
+*.db-wal
+*.db-shm
+
+# Telethon / local scrape artifacts
+*.session
+sibuwb_messages.json
 
 # Environment variables
 .env

@@ -47,8 +47,9 @@ class UserPreference(Base):
     categories = Column(String(500), nullable=True, default="")
     # Locations: comma-separated list like "kuching,miri,sibu" or empty for all Sarawak
     locations = Column(String(500), nullable=True, default="")
-    # Area keywords: comma-separated free-text phrases like "jalan wawasan,taman desa"
-    # If set, only articles containing these keywords will be shown (more specific than city-level locations).
+    # Area keywords: comma-separated free-text phrases like "jalan wawasan,taman desa,bekalan air"
+    # For Telegram channel posts: if set, a user only receives posts whose text matches one of these phrases.
+    # For RSS/other: used with geo ranking (priority), not as a hard filter unless noted in services.
     area_keywords = Column(String(1000), nullable=True, default="")
     # Frequency values:
     # - every_15m, every_30m, every_1h, every_3h, every_6h, every_12h

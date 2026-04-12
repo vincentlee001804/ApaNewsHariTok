@@ -8,6 +8,7 @@ from typing import Iterable, List
 
 from telethon import TelegramClient
 from telethon.errors import UserAlreadyParticipantError
+from telethon.sessions import StringSession
 from telethon.tl.functions.channels import JoinChannelRequest
 from telethon.tl.types import Channel, User
 
@@ -126,20 +127,25 @@ async def _fetch_async(
     api_id: int,
     api_hash: str,
     session_name: str,
+    session_string: str | None,
     auto_join_channels: bool,
 ) -> List[RssItem]:
-    session_path = _project_root() / session_name
     cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
     items: List[RssItem] = []
     seen_links: set[str] = set()
 
-    client = TelegramClient(str(session_path), api_id, api_hash)
+    if session_string and session_string.strip():
+        client = TelegramClient(StringSession(session_string.strip()), api_id, api_hash)
+    else:
+        session_path = _project_root() / session_name
+        client = TelegramClient(str(session_path), api_id, api_hash)
     await client.connect()
     try:
         if not await client.is_user_authorized():
             raise RuntimeError(
                 "Telegram source session is not authorized. "
-                "Run test_sibuwb_bot.py once to complete login, then retry."
+                "Run test_sibuwb_bot.py locally to log in, copy TELEGRAM_SESSION_STRING for Fly, "
+                "or use a .session file on disk."
             )
 
         for source in sources:
@@ -187,12 +193,16 @@ def fetch_latest_telegram_items(
     api_id_raw = (os.getenv("TELEGRAM_API_ID") or "").strip()
     api_hash = (os.getenv("TELEGRAM_API_HASH") or "").strip()
     _phone = (os.getenv("TELEGRAM_PHONE") or "").strip()
+    session_string = (os.getenv("TELEGRAM_SESSION_STRING") or "").strip() or None
     session_name = (os.getenv("TELEGRAM_SOURCE_SESSION_NAME") or "sibuwb_session").strip()
     auto_join = (os.getenv("TELEGRAM_AUTO_JOIN_CHANNELS", "true").strip().lower() in {
         "1", "true", "yes", "y", "on",
     })
 
-    if not api_id_raw or not api_hash or not _phone:
+    if not api_id_raw or not api_hash:
+        return []
+    # Phone was historically required; with TELEGRAM_SESSION_STRING (e.g. Fly.io) it is not.
+    if not session_string and not _phone:
         return []
 
     try:
@@ -209,6 +219,7 @@ def fetch_latest_telegram_items(
                 api_id=api_id,
                 api_hash=api_hash,
                 session_name=session_name,
+                session_string=session_string,
                 auto_join_channels=auto_join,
             )
         )

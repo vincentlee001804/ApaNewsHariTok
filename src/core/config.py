@@ -98,8 +98,10 @@ FIRST_BOOT_RSS_MAX_PER_FEED: Final[int] = max(
 )
 
 # Optional Telegram sources for prefetch (same job as RSS while bot_main is running).
-# Requires TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE and an authorized Telethon
-# session file (default name matches test_sibuwb_bot.py: sibuwb_session).
+# Requires TELEGRAM_API_ID, TELEGRAM_API_HASH and either:
+# - TELEGRAM_SESSION_STRING (recommended on Fly.io: no sqlite3 / .session file). Obtain by running
+#   `python test_sibuwb_bot.py` locally after login; the script prints the string at the end.
+# - TELEGRAM_PHONE plus an authorized Telethon session file (default: sibuwb_session).
 # Set PREFETCH_INTERVAL_MINUTES=60 for hourly RSS + Telegram fetch.
 #
 # Comma-separated values in .env, each can be:
@@ -135,6 +137,16 @@ PREFETCH_INTERVAL_MINUTES: Final[int] = max(
     1,
     int((os.getenv("PREFETCH_INTERVAL_MINUTES", "10").strip() or "10")),
 )
+
+# After each prefetch insert, call Ollama to fill news_articles.ai_summary (same pipeline as user delivery).
+# Set PREFETCH_AI_SUMMARY=false to skip (saves API quota / latency on insert).
+PREFETCH_AI_SUMMARY: Final[bool] = os.getenv("PREFETCH_AI_SUMMARY", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
 
 # DB retention cleanup (old news + delivery rows).
 DB_CLEANUP_ENABLED: Final[bool] = os.getenv("DB_CLEANUP_ENABLED", "true").strip().lower() in {

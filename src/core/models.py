@@ -46,7 +46,7 @@ class UserPreference(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
     # Categories: comma-separated lowercase tokens matched against NewsArticle.category
-    # (same taxonomy as _extract_category / bot labels), e.g. sports, politics, tourism.
+    # (same taxonomy as news_categories.NEWS_ARTICLE_CATEGORY_LABELS + token "sarawak"), e.g. infrastructure, weather.
     # Empty means all. Token "sarawak" also matches state=sarawak, label Local, or text "sarawak".
     categories = Column(String(500), nullable=True, default="")
     # Locations: comma-separated list like "kuching,miri,sibu" or empty for all Sarawak

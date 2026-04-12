@@ -698,6 +698,143 @@ def _extract_category(title: str, summary: str | None) -> str:
     # Food - restaurants, food, dining
     if any(word in text for word in ["food", "restaurant", "cuisine", "dining", "cafe", "culinary", "gastronomy", "recipe"]):
         return "Food"
+
+    # Agriculture / fisheries / rural economy
+    if any(
+        word in text
+        for word in [
+            "agriculture",
+            "plantation",
+            "palm oil",
+            "farmer",
+            "farming",
+            "fishery",
+            "fishing",
+            "padi",
+            "livestock",
+            "veterinar",
+            "crop",
+            "harvest",
+            "fama",
+        ]
+    ):
+        return "Agriculture"
+
+    # Transport (operations, delays, airports) — not bridge inaugurations (Infrastructure)
+    if any(
+        word in text
+        for word in [
+            "airport",
+            "flight",
+            "airline",
+            "maswings",
+            "ferry",
+            "bus terminal",
+            "traffic jam",
+            "road closure",
+            "closed to traffic",
+            "mikro",
+            "express boat",
+        ]
+    ):
+        return "Transport"
+
+    # Weather / Met — forecasts and alerts (floods as disaster stay Emergency if keyword hit earlier)
+    if any(
+        word in text
+        for word in [
+            "metmalaysia",
+            "met malaysia",
+            "meteorolog",
+            "weather forecast",
+            "monsoon",
+            "thunderstorm",
+            "heatwave",
+            "cuaca",
+        ]
+    ):
+        return "Weather"
+
+    # Culture / heritage / arts (not generic "event")
+    if any(
+        word in text
+        for word in [
+            "heritage",
+            "museum",
+            "cultural heritage",
+            "traditional dance",
+            "gawai",
+            "kaamatan",
+            "cultural village",
+            "handicraft",
+        ]
+    ):
+        return "Culture"
+
+    # Religion — places of worship and religious observance
+    if any(
+        word in text
+        for word in [
+            "surau",
+            "mosque",
+            "masjid",
+            "church",
+            "temple",
+            "easter",
+            "ramadan",
+            "hari raya",
+            "christmas",
+            "good friday",
+            "interfaith",
+        ]
+    ):
+        return "Religion"
+
+    # Consumer / prices / shortages (retail staples)
+    if any(
+        word in text
+        for word in [
+            "price of",
+            "shortage of",
+            "cooking oil",
+            "sugar supply",
+            "subsid",
+            "harga",
+            "inflation",
+            "consumer",
+        ]
+    ):
+        return "Consumer"
+
+    # Housing / property schemes
+    if any(
+        word in text
+        for word in [
+            "housing scheme",
+            "affordable housing",
+            "rumah",
+            "stamp duty",
+            "squatter",
+            "pr1ma",
+            "public housing",
+        ]
+    ):
+        return "Housing"
+
+    # Defence / security forces (not civilian police Crime)
+    if any(
+        word in text
+        for word in [
+            "malaysian armed forces",
+            "malaysian army",
+            "royal malaysian navy",
+            "tentera",
+            "esscom",
+            "military exercise",
+            "border security",
+        ]
+    ):
+        return "Defence"
     
     # Default to "Local" for general Sarawak news (checked last since location names appear in most news)
     # Only use "Local" if no other category matched

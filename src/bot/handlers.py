@@ -18,8 +18,13 @@ from src.core.config import (
 )
 from src.core.location_extractor import extract_location_and_state
 from src.core.models import NewsArticle
+from src.core.news_categories import (
+    NEWS_ARTICLE_CATEGORY_LABELS,
+    label_from_slug,
+    slug_for_callback,
+)
 from src.core.services import (
-    _extract_category,
+    _get_category_with_llm_fallback,
     _is_urgent_utility_alert,
     build_urgent_preview,
     post_matches_user_locations_filter,
@@ -35,6 +40,42 @@ from src.core.user_service import (
 from src.storage.database import SessionLocal
 
 logger = logging.getLogger(__name__)
+
+# Category picker in /settings: first page = common filters; second = rest of taxonomy.
+_CAT_SETTINGS_PAGE1: tuple[str, ...] = NEWS_ARTICLE_CATEGORY_LABELS[:12]
+_CAT_SETTINGS_PAGE2: tuple[str, ...] = NEWS_ARTICLE_CATEGORY_LABELS[12:]
+
+
+def _category_settings_keyboard_rows(page: int) -> list[list[InlineKeyboardButton]]:
+    rows: list[list[InlineKeyboardButton]] = []
+    if page == 1:
+        rows.append(
+            [
+                InlineKeyboardButton("All Categories", callback_data="cat_all"),
+                InlineKeyboardButton("Sarawak Only", callback_data="cat_sarawak"),
+            ]
+        )
+        labels = _CAT_SETTINGS_PAGE1
+    else:
+        labels = _CAT_SETTINGS_PAGE2
+
+    for i in range(0, len(labels), 2):
+        pair = labels[i : i + 2]
+        rows.append(
+            [
+                InlineKeyboardButton(lab, callback_data=f"cat_{slug_for_callback(lab)}")
+                for lab in pair
+            ]
+        )
+
+    if page == 1:
+        rows.append([InlineKeyboardButton("More categories…", callback_data="cat_page2")])
+    else:
+        rows.append([InlineKeyboardButton("◀️ Page 1", callback_data="settings_categories")])
+
+    rows.append([InlineKeyboardButton("Custom (comma-separated)", callback_data="cat_custom")])
+    rows.append([InlineKeyboardButton("◀️ Back", callback_data="settings_back")])
+    return rows
 
 # user_data flag: after tapping Area Keywords, next plain-text message updates area_keywords.
 AWAITING_AREA_KEYWORDS_UD_KEY: Final[str] = "awaiting_area_keywords"
@@ -273,7 +314,7 @@ async def ingest_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
             raw_summary=text[:8000],
             location=location,
             state=state,
-            category=_extract_category(title, text),
+            category=_get_category_with_llm_fallback(title, text),
         )
         session.add(row)
         inserted = False
@@ -485,26 +526,10 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         context.user_data.pop(AWAITING_AREA_KEYWORDS_UD_KEY, None)
 
     if data == "settings_categories":
-        # Show category selection
-        keyboard = [
-            [
-                InlineKeyboardButton("All Categories", callback_data="cat_all"),
-                InlineKeyboardButton("Sarawak Only", callback_data="cat_sarawak"),
-            ],
-            [
-                InlineKeyboardButton("Sports", callback_data="cat_sports"),
-                InlineKeyboardButton("Politics", callback_data="cat_politics"),
-            ],
-            [
-                InlineKeyboardButton("Custom (comma-separated)", callback_data="cat_custom"),
-            ],
-            [InlineKeyboardButton("◀️ Back", callback_data="settings_back")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(_category_settings_keyboard_rows(1))
         await query.edit_message_text(
-            "*Select Categories:*\n\n"
-            "Choose which news categories you want to see. "
-            "You can select multiple by choosing 'Custom'.\n\n"
+            "*Select Categories* (1/2)\n\n"
+            "Pick one category to filter by, or use *Custom* for several (comma-separated, lowercase tokens).\n\n"
             "Current: " + (preference.categories if preference.categories else "All"),
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup,
@@ -764,26 +789,38 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     elif data.startswith("cat_"):
         # Category selection
+        if data == "cat_page2":
+            reply_markup = InlineKeyboardMarkup(_category_settings_keyboard_rows(2))
+            await query.edit_message_text(
+                "*Select Categories* (2/2)\n\n"
+                "Pick one category to filter by, or use *Custom* for several.\n\n"
+                "Current: " + (preference.categories if preference.categories else "All"),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=reply_markup,
+            )
+            return
         if data == "cat_all":
             update_user_preference(telegram_id, categories="")
             await query.answer("Categories set to: All")
         elif data == "cat_sarawak":
             update_user_preference(telegram_id, categories="sarawak")
             await query.answer("Categories set to: Sarawak only")
-        elif data == "cat_sports":
-            update_user_preference(telegram_id, categories="sports")
-            await query.answer("Categories set to: Sports")
-        elif data == "cat_politics":
-            update_user_preference(telegram_id, categories="politics")
-            await query.answer("Categories set to: Politics")
         elif data == "cat_custom":
             await query.edit_message_text(
-                "To set custom categories, send me a message like:\n"
-                "`/setcategories sarawak,sports,politics`\n\n"
-                "Or use single words separated by commas.",
+                "Send a command like:\n"
+                "`/setcategories sarawak,infrastructure,weather`\n\n"
+                "Use lowercase tokens separated by commas (same names as the category buttons).",
                 parse_mode=ParseMode.MARKDOWN,
             )
             return
+        else:
+            slug = data.removeprefix("cat_")
+            label = label_from_slug(slug)
+            if not label:
+                logger.warning("Unknown category callback: %s", data)
+                return
+            update_user_preference(telegram_id, categories=slug)
+            await query.answer(f"Categories set to: {label}")
         await settings_callback_refresh(query, telegram_id)
 
     elif data.startswith("freq_"):

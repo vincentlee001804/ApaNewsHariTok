@@ -209,6 +209,59 @@ def migrate_create_user_article_delivery_table() -> None:
         pass
 
 
+def migrate_add_last_scheduled_push_at_column() -> None:
+    """
+    Persist last scheduled push time so Fly restarts do not blast all users immediately.
+    Backfill from max(user_article_delivery.sent_at) per user when still NULL.
+    """
+    try:
+        insp = inspect(engine)
+        if "user_preferences" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("user_preferences")}
+        if "last_scheduled_push_at" not in cols:
+            with SessionLocal() as session:
+                if engine.dialect.name == "postgresql":
+                    session.execute(
+                        text(
+                            "ALTER TABLE user_preferences "
+                            "ADD COLUMN last_scheduled_push_at TIMESTAMP NULL"
+                        )
+                    )
+                else:
+                    session.execute(
+                        text(
+                            "ALTER TABLE user_preferences "
+                            "ADD COLUMN last_scheduled_push_at DATETIME NULL"
+                        )
+                    )
+                session.commit()
+                print("✓ Added last_scheduled_push_at to user_preferences.")
+        if "user_article_delivery" not in insp.get_table_names():
+            return
+        with SessionLocal() as session:
+            session.execute(
+                text(
+                    """
+                    UPDATE user_preferences
+                    SET last_scheduled_push_at = (
+                        SELECT MAX(uad.sent_at)
+                        FROM user_article_delivery AS uad
+                        WHERE uad.user_id = user_preferences.user_id
+                    )
+                    WHERE last_scheduled_push_at IS NULL
+                    AND EXISTS (
+                        SELECT 1 FROM user_article_delivery AS u2
+                        WHERE u2.user_id = user_preferences.user_id
+                    )
+                    """
+                )
+            )
+            session.commit()
+    except Exception:
+        pass
+
+
 def migrate_add_news_article_category_column() -> None:
     """
     Add `category` to `news_articles` (SQLite + Postgres) via SQLAlchemy inspect.
@@ -292,5 +345,6 @@ if __name__ == "__main__":
     migrate_add_news_article_location_and_state_columns()
     migrate_add_news_article_category_column()
     migrate_create_user_article_delivery_table()
+    migrate_add_last_scheduled_push_at_column()
     backfill_news_article_location_and_state()
     backfill_news_article_category()

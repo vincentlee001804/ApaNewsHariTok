@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta
 from typing import Final
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -10,7 +11,11 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import OperationalError
 
-from src.core.config import TELEGRAM_SOURCE_CHANNELS, is_test_push_allowed
+from src.core.config import (
+    SCHEDULED_PUSH_GRACE_MINUTES_AFTER_FIRST_SEEN,
+    TELEGRAM_SOURCE_CHANNELS,
+    is_test_push_allowed,
+)
 from src.core.location_extractor import extract_location_and_state
 from src.core.models import NewsArticle
 from src.core.services import _extract_category, _is_urgent_utility_alert, build_urgent_preview
@@ -273,7 +278,7 @@ async def ingest_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         except IntegrityError:
             session.rollback()
 
-    # Urgent alerts bypass frequency and are pushed immediately on receive.
+    # Urgent alerts bypass per-user frequency but share the post-signup grace with scheduled pushes.
     if inserted and _is_urgent_utility_alert(title, text):
         safe_title = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         preview = build_urgent_preview(title, text, max_words=45)
@@ -291,6 +296,8 @@ async def ingest_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Avoid blocking the asyncio event loop with synchronous DB access.
         users = await asyncio.to_thread(list_active_user_preferences)
         shared_sent = context.application.bot_data.setdefault("urgent_sent_links", {})
+        now = datetime.utcnow()
+        grace_after_start = timedelta(minutes=SCHEDULED_PUSH_GRACE_MINUTES_AFTER_FIRST_SEEN)
 
         semaphore = asyncio.Semaphore(5)
 
@@ -310,7 +317,9 @@ async def ingest_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
                     pass
 
         send_tasks: list[asyncio.Task[None]] = []
-        for telegram_id, preference in users:
+        for telegram_id, preference, first_seen_at in users:
+            if first_seen_at and (now - first_seen_at) < grace_after_start:
+                continue
             if not preference.wants_urgent_alerts:
                 continue
             sent_links = shared_sent.setdefault(telegram_id, set())
@@ -416,7 +425,6 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"📂 *Categories:* {categories_display}\n"
         f"📍 *Locations:* {locations_display}\n"
         f"🗺️ *Area Keywords:* {area_keywords_display}\n"
-        "   _(boosts matching news headlines)_\n"
         f"⏰ *Frequency:* {frequency_display}\n"
         f"🔔 *Subscription:* {subscription_display}\n"
         f"🚨 *Urgent Alerts:* {urgent_display}\n\n"
@@ -833,7 +841,6 @@ async def settings_callback_refresh(query, telegram_id: int) -> None:
         f"📂 *Categories:* {categories_display}\n"
         f"📍 *Locations:* {locations_display}\n"
         f"🗺️ *Area Keywords:* {area_keywords_display}\n"
-        "   _(boosts matching news headlines)_\n"
         f"⏰ *Frequency:* {frequency_display}\n"
         f"🔔 *Subscription:* {subscription_display}\n"
         f"🚨 *Urgent Alerts:* {urgent_display}\n\n"

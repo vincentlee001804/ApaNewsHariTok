@@ -52,6 +52,7 @@ def init_db() -> None:
             migrate_add_news_article_category_column,
             migrate_add_news_article_location_and_state_columns,
             migrate_create_user_article_delivery_table,
+            migrate_add_last_scheduled_push_at_column,
             migrate_users_telegram_id_to_bigint,
             backfill_news_article_category,
             backfill_news_article_location_and_state,
@@ -63,6 +64,7 @@ def init_db() -> None:
         migrate_add_news_article_location_and_state_columns()
         migrate_add_news_article_category_column()
         migrate_create_user_article_delivery_table()
+        migrate_add_last_scheduled_push_at_column()
         backfill_news_article_location_and_state()
         backfill_news_article_category()
     except Exception as e:

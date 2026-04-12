@@ -24,16 +24,19 @@ from src.bot.handlers import (
     dev_waze_command,
 )
 from src.core.config import (
+    DB_CLEANUP_ENABLED,
+    DB_CLEANUP_INTERVAL_HOURS,
+    DB_RETENTION_DAYS,
     PREFETCH_ENABLED,
     PREFETCH_INTERVAL_MINUTES,
+    SCHEDULED_PUSH_GRACE_MINUTES_AFTER_FIRST_SEEN,
     TELEGRAM_SOURCE_CHANNELS,
     require_bot_token,
 )
-from src.core.config import DB_CLEANUP_ENABLED, DB_CLEANUP_INTERVAL_HOURS, DB_RETENTION_DAYS
 from src.core.cleanup_service import cleanup_old_news_data
 from src.core.prefetch_service import prefetch_latest_articles_to_db
 from src.core.services import get_latest_news_text_for_user
-from src.core.user_service import list_active_user_preferences
+from src.core.user_service import list_active_user_preferences, touch_last_scheduled_push_at
 from src.storage.database import init_db
 
 
@@ -98,8 +101,6 @@ def main() -> None:
         )
     )
 
-    last_push_tracker: dict[int, datetime] = {}
-
     def _should_skip_push_message(text: str) -> bool:
         lowered = (text or "").lower()
         skip_markers = [
@@ -146,9 +147,12 @@ def main() -> None:
         try:
             users = await asyncio.to_thread(list_active_user_preferences)
             now = datetime.utcnow()
-            for telegram_id, preference in users:
+            grace_after_start = timedelta(minutes=SCHEDULED_PUSH_GRACE_MINUTES_AFTER_FIRST_SEEN)
+            for telegram_id, preference, first_seen_at in users:
+                if first_seen_at and (now - first_seen_at) < grace_after_start:
+                    continue
                 interval_hours = _frequency_interval_hours(preference.frequency)
-                last_sent = last_push_tracker.get(telegram_id)
+                last_sent = preference.last_scheduled_push_at
                 if last_sent and (now - last_sent) < timedelta(hours=interval_hours):
                     continue
 
@@ -165,7 +169,7 @@ def main() -> None:
                     text=text,
                     parse_mode=ParseMode.HTML,
                 )
-                last_push_tracker[telegram_id] = now
+                await asyncio.to_thread(touch_last_scheduled_push_at, telegram_id, now)
         except Exception as e:
             print(f"[push] error: {e}")
 

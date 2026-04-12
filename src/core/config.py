@@ -133,6 +133,13 @@ PREFETCH_ENABLED: Final[bool] = os.getenv("PREFETCH_ENABLED", "true").strip().lo
     "on",
 }
 
+# Scheduled digest only after this many minutes from user.first_seen_at (set on /start).
+# Lets new users explore /settings without an immediate push. Set to 0 to disable.
+SCHEDULED_PUSH_GRACE_MINUTES_AFTER_FIRST_SEEN: Final[int] = max(
+    0,
+    int((os.getenv("SCHEDULED_PUSH_GRACE_MINUTES_AFTER_FIRST_SEEN", "30").strip() or "30")),
+)
+
 # Global RSS + Telegram fetch interval (minutes): ONE schedule for the whole app, not per user.
 # Default 15. Per-user notification timing is user_preferences.frequency (/settings) in bot_main.
 # Optional: PREFETCH_INTERVAL_MINUTES=60 for hourly fetch.

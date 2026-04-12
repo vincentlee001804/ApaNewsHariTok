@@ -118,18 +118,41 @@ def update_user_preference(
         return preference
 
 
-def list_active_user_preferences() -> list[tuple[int, UserPreference]]:
+def touch_last_scheduled_push_at(telegram_id: int, at: datetime | None = None) -> None:
+    """
+    Record that a scheduled push was delivered to this user (after successful Telegram send).
+    """
+    when = at or datetime.utcnow()
+    with SessionLocal() as session:
+        user: User | None = session.execute(
+            select(User).where(User.telegram_id == telegram_id)
+        ).scalar_one_or_none()
+        if not user:
+            return
+        pref: UserPreference | None = session.execute(
+            select(UserPreference).where(UserPreference.user_id == user.id)
+        ).scalar_one_or_none()
+        if not pref:
+            return
+        pref.last_scheduled_push_at = when
+        pref.updated_at = when
+        session.commit()
+
+
+def list_active_user_preferences() -> list[tuple[int, UserPreference, datetime]]:
     """
     Return active users with their preference records as:
-    [(telegram_id, preference), ...]
+    [(telegram_id, preference, first_seen_at), ...]
+
+    first_seen_at is used by the scheduled push job for a post-start grace period.
     """
     with SessionLocal() as session:
         rows = session.execute(
-            select(User.telegram_id, UserPreference)
+            select(User.telegram_id, UserPreference, User.first_seen_at)
             .join(UserPreference, UserPreference.user_id == User.id)
             .where(User.is_active.is_(True))
         ).all()
-        return [(int(telegram_id), pref) for telegram_id, pref in rows]
+        return [(int(telegram_id), pref, first_seen_at) for telegram_id, pref, first_seen_at in rows]
 
 
 def set_user_active(telegram_id: int, is_active: bool) -> bool:

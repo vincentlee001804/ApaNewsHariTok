@@ -429,7 +429,7 @@ def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
             try:
                 article_text = extract_article_content(art.link)
                 source_text = article_text or art.raw_summary or art.title or ""
-                ai = summarize(source_text, max_words=50, title=art.title or "")
+                ai = summarize(source_text, max_words=60, title=art.title or "")
                 if not ai:
                     ai = _fallback_summary_from_text(art.raw_summary or art.title or "", max_words=50)
                 art.ai_summary = ai
@@ -861,7 +861,7 @@ def get_latest_news_text(max_items: int = 3) -> str:
             source_text = item.summary or item.title
 
         ai_summary = (
-            summarize(source_text, max_words=50, title=item.title)
+            summarize(source_text, max_words=60, title=item.title)
             if matches_local_interest(item.title, item.summary)
             else None
         )
@@ -1084,7 +1084,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 article_text = extract_article_content(item.link)
                 source_text = article_text or item.summary or item.title
                 ai_summary = (
-                    summarize(source_text, max_words=50, title=item.title)
+                    summarize(source_text, max_words=60, title=item.title)
                     if matches_local_interest(item.title, item.summary)
                     else None
                 )
@@ -1114,7 +1114,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 continue
             article_text = extract_article_content(art.link)
             source_text = article_text or art.raw_summary or art.title
-            art.ai_summary = summarize(source_text, max_words=50, title=art.title)
+            art.ai_summary = summarize(source_text, max_words=60, title=art.title)
             if not art.ai_summary:
                 art.ai_summary = _fallback_summary_from_text(
                     art.raw_summary or art.title, max_words=50

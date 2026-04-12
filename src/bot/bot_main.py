@@ -122,8 +122,8 @@ def main() -> None:
         key = (value or "").strip().lower()
         return mapping.get(key, 1)
 
-    async def _prefetch_job(context) -> None:
-        # Run blocking RSS/network + DB writes in a thread to avoid blocking the bot event loop.
+    async def _prefetch_db_job(context) -> None:
+        """RSS + Telegram → database (and optional ai_summary backfill)."""
         try:
             inserted = await asyncio.to_thread(prefetch_latest_articles_to_db)
             if inserted:
@@ -135,10 +135,12 @@ def main() -> None:
                 )
         except Exception as e:
             print(f"[prefetch] error: {e}")
-            inserted = 0
 
-        # Regular frequency push path (non-urgent).
-        # Urgent alerts are handled immediately on ingest, not by scheduler.
+    async def _scheduled_push_job(context) -> None:
+        """
+        Frequency-based push, checked every minute so /settings every_15m aligns with wall time
+        (previously combined with prefetch every 10m, pushes could drift to ~20m apart).
+        """
         try:
             users = await asyncio.to_thread(list_active_user_preferences)
             now = datetime.utcnow()
@@ -148,8 +150,6 @@ def main() -> None:
                 if last_sent and (now - last_sent) < timedelta(hours=interval_hours):
                     continue
 
-                # Scheduled push sends a single top-priority article per run.
-                # /latest command remains multi-item (default handled in handlers/services).
                 text = await asyncio.to_thread(
                     get_latest_news_text_for_user,
                     telegram_id,
@@ -181,12 +181,18 @@ def main() -> None:
             print(f"[cleanup] error: {e}")
 
     if PREFETCH_ENABLED:
-        # Prefetch immediately on startup, then repeat.
         application.job_queue.run_repeating(
-            _prefetch_job,
+            _prefetch_db_job,
             interval=PREFETCH_INTERVAL_MINUTES * 60,
             first=0,
-            name="content_prefetch",
+            name="db_prefetch",
+        )
+        # Separate from prefetch interval so "every 15m" delivery is not tied to RSS poll cadence.
+        application.job_queue.run_repeating(
+            _scheduled_push_job,
+            interval=60,
+            first=10,
+            name="scheduled_push",
         )
         tg_note = (
             f" + Telegram ({len(TELEGRAM_SOURCE_CHANNELS)} source(s))"
@@ -195,7 +201,7 @@ def main() -> None:
         )
         print(
             f"Prefetch enabled: every {PREFETCH_INTERVAL_MINUTES} minutes "
-            f"(RSS{tg_note} → database + frequency push)"
+            f"(RSS{tg_note} → database); scheduled push: checked every 60s (user frequency in /settings)"
         )
 
     if DB_CLEANUP_ENABLED:

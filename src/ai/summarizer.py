@@ -108,14 +108,9 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
     prompt = textwrap.dedent(
         f"""
         You are summarizing a local news article from Sarawak, Malaysia.
-        Read the full article below and write a summary of at most {max_words} words.
-        Hard rule: your entire answer must be {max_words} words or fewer — count before you answer.
-        Prefer one or two tight sentences; omit minor detail if needed to stay within the limit.
+        Read the full article and output a brief {max_words}-word summary only: one or two tight
+        sentences with who, what, where, and the main outcome; skip minor detail if needed.
         {title_line}
-
-        Focus on:
-        - Key facts: who, what, where, when, why
-        - Only the most important numbers or outcomes
 
         Strict relevance rules:
         - The summary MUST match the provided headline/article only.
@@ -178,13 +173,6 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
         ]
         if any(marker in lowered for marker in rejection_markers):
             return None
-
-        # Keep output concise even if model exceeds the requested limit.
-        words = re.findall(r"\S+", summary)
-        if len(words) > max_words:
-            summary = " ".join(words[:max_words]).rstrip(" ,;:\"'")
-            if summary and not summary.endswith(("…", "...", ".")):
-                summary = summary + "…"
 
         return summary or None
     except Exception:

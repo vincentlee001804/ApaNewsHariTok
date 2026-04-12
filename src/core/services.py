@@ -28,9 +28,6 @@ from src.scrapers.telegram_reader import (
 from src.scrapers.waze_client import WazeGeoRssError, list_alerts_in_bbox
 from src.storage.database import SessionLocal
 
-# Single-article AI body under Telegram headline; matches local Ollama behavior (~30 words).
-AI_ARTICLE_SUMMARY_MAX_WORDS = 30
-
 
 def _record_deliveries_for_user(
     session,
@@ -432,16 +429,9 @@ def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
             try:
                 article_text = extract_article_content(art.link)
                 source_text = article_text or art.raw_summary or art.title or ""
-                ai = summarize(
-                    source_text,
-                    max_words=AI_ARTICLE_SUMMARY_MAX_WORDS,
-                    title=art.title or "",
-                )
+                ai = summarize(source_text, title=art.title or "")
                 if not ai:
-                    ai = _fallback_summary_from_text(
-                        art.raw_summary or art.title or "",
-                        max_words=AI_ARTICLE_SUMMARY_MAX_WORDS,
-                    )
+                    ai = _fallback_summary_from_text(art.raw_summary or art.title or "", max_words=30)
                 art.ai_summary = ai
                 session.commit()
                 updated += 1
@@ -451,8 +441,7 @@ def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
                     art2 = session.get(NewsArticle, aid)
                     if art2 is not None and not (art2.ai_summary or "").strip():
                         art2.ai_summary = _fallback_summary_from_text(
-                            art2.raw_summary or art2.title or "",
-                            max_words=AI_ARTICLE_SUMMARY_MAX_WORDS,
+                            art2.raw_summary or art2.title or "", max_words=30
                         )
                         session.commit()
                         updated += 1
@@ -872,14 +861,12 @@ def get_latest_news_text(max_items: int = 3) -> str:
             source_text = item.summary or item.title
 
         ai_summary = (
-            summarize(source_text, max_words=AI_ARTICLE_SUMMARY_MAX_WORDS, title=item.title)
+            summarize(source_text, title=item.title)
             if matches_local_interest(item.title, item.summary)
             else None
         )
         if not ai_summary:
-            ai_summary = _fallback_summary_from_text(
-                item.summary or item.title, max_words=AI_ARTICLE_SUMMARY_MAX_WORDS
-            )
+            ai_summary = _fallback_summary_from_text(item.summary or item.title, max_words=30)
 
         # Get source name
         source_name = _get_source_name(item.source)
@@ -1097,13 +1084,13 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 article_text = extract_article_content(item.link)
                 source_text = article_text or item.summary or item.title
                 ai_summary = (
-                    summarize(source_text, max_words=AI_ARTICLE_SUMMARY_MAX_WORDS, title=item.title)
+                    summarize(source_text, title=item.title)
                     if matches_local_interest(item.title, item.summary)
                     else None
                 )
                 if not ai_summary:
                     ai_summary = _fallback_summary_from_text(
-                        item.summary or item.title, max_words=AI_ARTICLE_SUMMARY_MAX_WORDS
+                        item.summary or item.title, max_words=30
                     )
                 source_name = _get_source_name(item.source)
 
@@ -1129,12 +1116,10 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 continue
             article_text = extract_article_content(art.link)
             source_text = article_text or art.raw_summary or art.title
-            art.ai_summary = summarize(
-                source_text, max_words=AI_ARTICLE_SUMMARY_MAX_WORDS, title=art.title
-            )
+            art.ai_summary = summarize(source_text, title=art.title)
             if not art.ai_summary:
                 art.ai_summary = _fallback_summary_from_text(
-                    art.raw_summary or art.title, max_words=AI_ARTICLE_SUMMARY_MAX_WORDS
+                    art.raw_summary or art.title, max_words=30
                 )
 
         if DEDUPLICATION_ENABLED and user_id is not None:
@@ -1153,9 +1138,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
             escaped_title = escape_html(art.title)
             escaped_summary = escape_html(
                 art.ai_summary
-                or _fallback_summary_from_text(
-                    art.raw_summary or art.title, max_words=AI_ARTICLE_SUMMARY_MAX_WORDS
-                )
+                or _fallback_summary_from_text(art.raw_summary or art.title, max_words=30)
             )
             escaped_source = escape_html(source_name)
             escaped_category = escape_html(category)

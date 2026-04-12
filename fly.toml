@@ -6,6 +6,8 @@ builder = "paketobuildpacks/builder:base"
 
 [env]
 PORT = "8080"
+# So print() and logging reach Fly log stream immediately (no line-buffer delay).
+PYTHONUNBUFFERED = "1"
 
 # Telegram polling + APScheduler need a process that stays up. Inbound HTTP to PORT is only
 # for Fly health checks — traffic is mostly outbound to Telegram, so autostop would suspend

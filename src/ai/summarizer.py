@@ -18,6 +18,44 @@ def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
         timeout=timeout,
     )
 
+def strip_markdown_artifacts_for_plain_text(text: str) -> str:
+    """
+    Telegram /latest and pushes use ParseMode.HTML; summary lines are plain escaped text.
+    Models often emit **bold** or *italic* (Markdown), which shows as ugly literals — strip it.
+    """
+    if not text:
+        return text
+    s = text
+    for _ in range(16):
+        prev = s
+        s = re.sub(r"\*\*([^*]+?)\*\*", r"\1", s, flags=re.DOTALL)
+        s = re.sub(r"__([^_]+?)__", r"\1", s, flags=re.DOTALL)
+        s = re.sub(r"(?<!\*)\*([^*\n]+?)\*(?!\*)", r"\1", s, flags=re.DOTALL)
+        if s == prev:
+            break
+    s = s.replace("**", "").replace("__", "")
+    s = s.replace("*", "")
+    return " ".join(s.split()).strip()
+
+
+def clip_plain_text_to_word_limit(text: str, max_words: int) -> str:
+    """
+    Enforce a word cap; when truncating, try to end at the last full sentence in range.
+    """
+    cleaned = " ".join((text or "").split())
+    if not cleaned or max_words < 1:
+        return cleaned
+    words = cleaned.split()
+    if len(words) <= max_words:
+        return cleaned
+    clipped = " ".join(words[:max_words])
+    for punct in (". ", "? ", "! ", "。", "？", "！"):
+        pos = clipped.rfind(punct)
+        if pos > int(len(clipped) * 0.45):
+            return clipped[: pos + len(punct.rstrip())].strip()
+    return clipped.rstrip(" ,;:.—-") + "…"
+
+
 ALLOWED_CATEGORIES = [
     "Emergency",
     "Health",
@@ -120,6 +158,7 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
         Provide only the summary text, no instructions, labels, or quotes around the summary.
         Write in clear, natural language.
         End with a complete sentence (do not stop mid-thought).
+        Use plain text only: no Markdown, no ** or * for bold/italic, no __underscores__.
 
         Full Article:
         \"\"\"{text.strip()}\"\"\"
@@ -174,6 +213,8 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
         if any(marker in lowered for marker in rejection_markers):
             return None
 
+        summary = strip_markdown_artifacts_for_plain_text(summary)
+        summary = clip_plain_text_to_word_limit(summary, max_words)
         return summary or None
     except Exception:
         # For now, fail quietly and let the caller decide how to handle None.
@@ -233,10 +274,8 @@ def summarize_digest(items_text: str, max_words: int = 160) -> Optional[str]:
         if any(marker in lowered for marker in rejection_markers):
             return None
 
-        # Keep total output within max_words
-        words = re.findall(r"\S+", summary)
-        if len(words) > max_words:
-            summary = " ".join(words[:max_words]).strip()
+        summary = strip_markdown_artifacts_for_plain_text(summary)
+        summary = clip_plain_text_to_word_limit(summary, max_words)
 
         return summary or None
     except Exception:
@@ -301,15 +340,12 @@ def answer_news_question(question: str, items_text: str, max_words: int = 220) -
         if any(marker in lowered for marker in rejection_markers):
             # Still allow the specific "couldn't find relevant info..." phrasing.
             if "couldn't find relevant information" in lowered:
-                return answer
+                return strip_markdown_artifacts_for_plain_text(answer)
             # Otherwise treat as failure so caller can fallback.
             return None
 
-        # Keep answer within max_words if the model overshoots.
-        words = re.findall(r"\S+", answer)
-        if len(words) > max_words:
-            answer = " ".join(words[:max_words]).strip()
-
+        answer = strip_markdown_artifacts_for_plain_text(answer)
+        answer = clip_plain_text_to_word_limit(answer, max_words)
         return answer or None
     except Exception:
         return None

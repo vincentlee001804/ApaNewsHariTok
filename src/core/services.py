@@ -5,7 +5,13 @@ from typing import Any, List
 
 from sqlalchemy import exists, func, select
 
-from src.ai.summarizer import classify_category, summarize, waze_alerts_to_news_sentences
+from src.ai.summarizer import (
+    classify_category,
+    clip_plain_text_to_word_limit,
+    strip_markdown_artifacts_for_plain_text,
+    summarize,
+    waze_alerts_to_news_sentences,
+)
 from src.core.config import (
     DEDUPLICATION_ENABLED,
     RSS_FEEDS,
@@ -445,14 +451,10 @@ def _fallback_summary_from_text(text: str, max_words: int = 50) -> str:
     """
     Deterministic fallback summary when LLM output is unavailable/unreliable.
     """
-    cleaned = " ".join((text or "").split())
+    cleaned = strip_markdown_artifacts_for_plain_text(" ".join((text or "").split()))
     if not cleaned:
         return "(No summary available right now.)"
-
-    words = cleaned.split()
-    if len(words) <= max_words:
-        return cleaned
-    return " ".join(words[:max_words]).rstrip(" ,;:.") + "..."
+    return clip_plain_text_to_word_limit(cleaned, max_words)
 
 
 def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
@@ -972,7 +974,9 @@ def get_latest_news_text(max_items: int = 3) -> str:
             return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
         escaped_title = escape_html(item.title)
-        escaped_summary = escape_html(ai_summary)
+        escaped_summary = escape_html(
+            strip_markdown_artifacts_for_plain_text(ai_summary or "")
+        )
         escaped_source = escape_html(source_name)
 
         # Format according to specification:
@@ -1211,7 +1215,9 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 source_name = _get_source_name(item.source)
 
                 escaped_title = escape_html(item.title)
-                escaped_summary = escape_html(ai_summary)
+                escaped_summary = escape_html(
+                    strip_markdown_artifacts_for_plain_text(ai_summary or "")
+                )
                 escaped_source = escape_html(source_name)
                 escaped_category = escape_html(category)
 
@@ -1252,9 +1258,11 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 source_name = _get_source_name(source_name)
 
             escaped_title = escape_html(art.title)
+            raw_sum = art.ai_summary or _fallback_summary_from_text(
+                art.raw_summary or art.title, max_words=30
+            )
             escaped_summary = escape_html(
-                art.ai_summary
-                or _fallback_summary_from_text(art.raw_summary or art.title, max_words=30)
+                strip_markdown_artifacts_for_plain_text(raw_sum or "")
             )
             escaped_source = escape_html(source_name)
             escaped_category = escape_html(category)
@@ -1384,7 +1392,7 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
         def escape_html(text: str) -> str:
             return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-        safe_digest = escape_html(digest)
+        safe_digest = escape_html(strip_markdown_artifacts_for_plain_text(digest))
         return (
             "<b>🗞️ Today's news summary</b>\n"
             f"{safe_digest}\n\n"
@@ -1440,7 +1448,7 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
     def escape_html(text: str) -> str:
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    safe_digest = escape_html(digest)
+    safe_digest = escape_html(strip_markdown_artifacts_for_plain_text(digest))
     return (
         "<b>🗞️ Today's news summary</b>\n"
         f"{safe_digest}\n\n"
@@ -1525,7 +1533,10 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
         def escape_html(text: str) -> str:
             return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-        return f"<b>🗞️ News agent</b>\n{escape_html(answer)}"
+        return (
+            "<b>🗞️ News agent</b>\n"
+            f"{escape_html(strip_markdown_artifacts_for_plain_text(answer))}"
+        )
 
     ranked: List[tuple[int, datetime, NewsArticle]] = []
     for art in candidates:
@@ -1568,4 +1579,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     def escape_html(text: str) -> str:
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    return f"<b>🗞️ News agent</b>\n{escape_html(answer)}"
+    return (
+        "<b>🗞️ News agent</b>\n"
+        f"{escape_html(strip_markdown_artifacts_for_plain_text(answer))}"
+    )

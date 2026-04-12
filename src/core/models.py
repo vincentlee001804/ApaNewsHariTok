@@ -60,6 +60,8 @@ class UserPreference(Base):
     # Legacy values (instant/daily) are still accepted in runtime mapping.
     frequency = Column(String(50), nullable=False, default="every_1h")
     wants_urgent_alerts = Column(Boolean, default=True, nullable=False)
+    # Last time a scheduled push was successfully sent (persists across restarts; see bot_main).
+    last_scheduled_push_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

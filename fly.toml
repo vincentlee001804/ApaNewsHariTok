@@ -7,16 +7,18 @@ builder = "paketobuildpacks/builder:base"
 [env]
 PORT = "8080"
 
+# Telegram polling + APScheduler need a process that stays up. Inbound HTTP to PORT is only
+# for Fly health checks — traffic is mostly outbound to Telegram, so autostop would suspend
+# the machine and stop prefetch / scheduled pushes.
 [http_service]
 auto_start_machines = true
-auto_stop_machines = true
+auto_stop_machines = false
 force_https = true
-internal_port = 8_080
-min_machines_running = 0
+internal_port = 8080
+min_machines_running = 1
 processes = [ "app" ]
 
 [[vm]]
 cpu_kind = "shared"
 cpus = 1
-memory = "1gb"
-memory_mb = 512
+memory = "512mb"

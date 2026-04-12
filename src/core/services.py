@@ -75,6 +75,7 @@ def _get_or_create_article_for_rss_item(session, item: RssItem) -> NewsArticle:
         raw_summary=item.summary,
         location=loc,
         state=st,
+        category=_extract_category(item.title, item.summary),
     )
     session.add(row)
     session.flush()
@@ -115,28 +116,6 @@ def _sort_items_by_date(items: List[RssItem]) -> List[RssItem]:
             return (float('inf'),)
     
     return sorted(items, key=get_sort_key)
-
-
-def _matches_category_filter(title: str, summary: str, categories: str) -> bool:
-    """
-    Check if a news item matches the user's category filter.
-    If categories is empty, all items match.
-    Otherwise, check if any category keyword appears in title or summary (case-insensitive).
-    """
-    if not categories or categories.strip() == "":
-        return True
-
-    category_list = [cat.strip().lower() for cat in categories.split(",") if cat.strip()]
-    if not category_list:
-        return True
-
-    text_to_search = (title + " " + (summary or "")).lower()
-
-    for category in category_list:
-        if category in text_to_search:
-            return True
-
-    return False
 
 
 def _fetch_combined_latest_items(
@@ -264,7 +243,13 @@ def _db_article_eligible_for_user_pref(
     Telegram posts: if the user set Area Keywords, require a substring match; otherwise use the
     global Sarawak_Local_Keywords file. Non-Telegram: unchanged (global keywords + categories).
     """
-    if not _matches_category_filter(art.title, art.raw_summary or "", categories_filter):
+    if not _matches_user_category_filter(
+        stored_category=getattr(art, "category", None),
+        state=getattr(art, "state", None),
+        title=art.title or "",
+        summary=art.raw_summary or art.ai_summary or "",
+        categories_filter=categories_filter,
+    ):
         return False
     combined = f"{art.title}\n{art.ai_summary or art.raw_summary or ''}"
     if _article_source_is_telegram(art.source):
@@ -657,6 +642,47 @@ def _extract_category(title: str, summary: str | None) -> str:
     return "General"
 
 
+def _matches_user_category_filter(
+    *,
+    stored_category: str | None,
+    state: str | None,
+    title: str,
+    summary: str | None,
+    categories_filter: str,
+) -> bool:
+    """
+    Match user /settings categories against a resolved taxonomy label (stored on the article
+    or derived with the same rules as _extract_category). Replaces substring search on title/body.
+
+    Special case: token ``sarawak`` matches Sarawak-tagged geography (DB ``state``), the
+    ``Local`` label, or the word \"sarawak\" in title/summary (RSS rows often lack ``state``).
+    """
+    if not categories_filter or not categories_filter.strip():
+        return True
+
+    tokens = [t.strip().lower() for t in categories_filter.split(",") if t.strip()]
+    if not tokens:
+        return True
+
+    resolved = (stored_category or "").strip()
+    if not resolved:
+        resolved = _extract_category(title, summary or "")
+
+    ac_lower = resolved.lower()
+    text_blob = (title + " " + (summary or "")).lower()
+    st = (state or "").strip().lower()
+
+    for tok in tokens:
+        if tok == "sarawak":
+            if st == "sarawak" or ac_lower == "local" or "sarawak" in text_blob:
+                return True
+            continue
+        if ac_lower == tok:
+            return True
+
+    return False
+
+
 def _get_category_with_llm_fallback(title: str, summary: str | None) -> str:
     """
     Prefer LLM-based classification (more accurate), fallback to keyword rules.
@@ -669,6 +695,13 @@ def _get_category_with_llm_fallback(title: str, summary: str | None) -> str:
     if llm_category:
         return llm_category
     return _extract_category(title, summary)
+
+
+def category_label_for_article(art: NewsArticle) -> str:
+    """Prefer persisted category; otherwise same pipeline as before (LLM + keyword fallback)."""
+    if (getattr(art, "category", None) or "").strip():
+        return (art.category or "").strip()
+    return _get_category_with_llm_fallback(art.title, art.ai_summary or art.raw_summary)
 
 
 def _get_source_name(source_url: str) -> str:
@@ -1022,7 +1055,13 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 area_keywords_filter if use_area_priority_rss else ""
             )
             for item in unique_items:
-                if not _matches_category_filter(item.title, item.summary or "", categories_filter):
+                if not _matches_user_category_filter(
+                    stored_category=None,
+                    state=None,
+                    title=item.title or "",
+                    summary=item.summary or "",
+                    categories_filter=categories_filter,
+                ):
                     continue
                 rank = _geo_priority_rank(
                     title=item.title,
@@ -1129,7 +1168,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
 
         lines: List[str] = list(_latest_news_heading_lines(max_items))
         for art in chosen:
-            category = _get_category_with_llm_fallback(art.title, art.ai_summary or art.raw_summary)
+            category = category_label_for_article(art)
 
             source_name = art.source
             if source_name.lower().startswith("http"):
@@ -1220,7 +1259,13 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
         ranked: List[tuple[int, datetime, RssItem]] = []
         for it in todays:
             snippet_for_rank = it.summary or it.title or ""
-            if not _matches_category_filter(it.title or "", it.summary or "", categories_filter):
+            if not _matches_user_category_filter(
+                stored_category=None,
+                state=None,
+                title=it.title or "",
+                summary=it.summary or "",
+                categories_filter=categories_filter,
+            ):
                 continue
             rank = _geo_priority_rank(
                 title=it.title or "",
@@ -1355,7 +1400,13 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
                 continue
             if not _rss_item_prefilter_for_user_pref(it, area_keywords_filter=area_keywords_filter):
                 continue
-            if not _matches_category_filter(title, it.summary or "", categories_filter):
+            if not _matches_user_category_filter(
+                stored_category=None,
+                state=None,
+                title=title,
+                summary=it.summary or "",
+                categories_filter=categories_filter,
+            ):
                 continue
             rank = _geo_priority_rank(
                 title=title,

@@ -4,9 +4,38 @@ Run this once to update your existing database.
 """
 from __future__ import annotations
 
-from sqlalchemy import select, text
+from sqlalchemy import inspect, select, text
 
 from src.storage.database import engine, SessionLocal
+
+
+def migrate_users_telegram_id_to_bigint() -> None:
+    """
+    Postgres: widen users.telegram_id to BIGINT. Telegram IDs can be > 2^31-1.
+    SQLite INTEGER is already 64-bit; skip there.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    try:
+        insp = inspect(engine)
+        if "users" not in insp.get_table_names():
+            return
+        cols = {c["name"]: c for c in insp.get_columns("users")}
+        col = cols.get("telegram_id")
+        if not col:
+            return
+        # Reflected type name is dialect-specific; INTEGER must become BIGINT.
+        tname = str(col["type"]).upper()
+        if "BIGINT" in tname:
+            return
+        with SessionLocal() as session:
+            session.execute(
+                text("ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT")
+            )
+            session.commit()
+            print("✓ users.telegram_id widened to BIGINT (Postgres).")
+    except Exception:
+        pass
 
 
 def migrate_add_locations_column() -> None:
@@ -180,6 +209,24 @@ def migrate_create_user_article_delivery_table() -> None:
         pass
 
 
+def migrate_add_news_article_category_column() -> None:
+    """
+    Add `category` to `news_articles` (SQLite + Postgres) via SQLAlchemy inspect.
+    """
+    try:
+        insp = inspect(engine)
+        cols = insp.get_columns("news_articles")
+        names = {c["name"] for c in cols}
+        if "category" in names:
+            return
+        with SessionLocal() as session:
+            session.execute(text("ALTER TABLE news_articles ADD COLUMN category VARCHAR(64)"))
+            session.commit()
+            print("✓ Added 'category' column to news_articles.")
+    except Exception:
+        pass
+
+
 def backfill_news_article_location_and_state() -> None:
     """
     Backfill `location` + `state` for existing rows (best-effort).
@@ -210,10 +257,40 @@ def backfill_news_article_location_and_state() -> None:
         pass
 
 
+def backfill_news_article_category() -> None:
+    """Fill `category` for rows where it is missing (keyword taxonomy only; no Ollama)."""
+    try:
+        from src.core.services import _extract_category
+        from src.core.models import NewsArticle
+
+        with SessionLocal() as session:
+            rows = list(
+                session.execute(
+                    select(NewsArticle).where(
+                        (NewsArticle.category.is_(None)) | (NewsArticle.category == "")
+                    )
+                ).scalars().all()
+            )
+            if not rows:
+                return
+            for art in rows:
+                art.category = _extract_category(
+                    art.title or "",
+                    art.raw_summary or art.ai_summary,
+                )
+            session.commit()
+            print(f"✓ Backfilled category on {len(rows)} news_articles row(s).")
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
+    migrate_users_telegram_id_to_bigint()
     migrate_add_locations_column()
     migrate_add_area_keywords_column()
     migrate_add_ai_summary_column()
     migrate_add_news_article_location_and_state_columns()
+    migrate_add_news_article_category_column()
     migrate_create_user_article_delivery_table()
     backfill_news_article_location_and_state()
+    backfill_news_article_category()

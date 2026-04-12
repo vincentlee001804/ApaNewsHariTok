@@ -5,7 +5,11 @@ from typing import List
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from src.core.services import _get_source_name, backfill_ai_summaries_for_article_ids
+from src.core.services import (
+    _extract_category,
+    _get_source_name,
+    backfill_ai_summaries_for_article_ids,
+)
 from src.core.config import PREFETCH_AI_SUMMARY, RSS_FEEDS, TELEGRAM_SOURCE_CHANNELS
 from src.core.local_keywords import matches_local_interest
 from src.core.location_extractor import extract_location_and_state
@@ -89,6 +93,7 @@ def prefetch_latest_articles_to_db(
                 raw_summary=item.summary,
                 location=location,
                 state=state,
+                category=_extract_category(item.title, item.summary),
             )
             session.add(article)
             try:

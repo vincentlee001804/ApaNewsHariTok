@@ -13,7 +13,7 @@ from sqlalchemy.exc import OperationalError
 from src.core.config import TELEGRAM_SOURCE_CHANNELS, is_test_push_allowed
 from src.core.location_extractor import extract_location_and_state
 from src.core.models import NewsArticle
-from src.core.services import _is_urgent_utility_alert, build_urgent_preview
+from src.core.services import _extract_category, _is_urgent_utility_alert, build_urgent_preview
 from src.core.user_service import (
     get_or_create_user,
     get_user_preference,
@@ -243,6 +243,7 @@ async def ingest_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
             raw_summary=text[:8000],
             location=location,
             state=state,
+            category=_extract_category(title, text),
         )
         session.add(row)
         inserted = False

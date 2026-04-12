@@ -127,7 +127,12 @@ def main() -> None:
         try:
             inserted = await asyncio.to_thread(prefetch_latest_articles_to_db)
             if inserted:
-                print(f"[prefetch] inserted {inserted} new articles")
+                print(f"[prefetch] inserted {inserted} new row(s) into database (RSS + Telegram)")
+            else:
+                print(
+                    "[prefetch] completed: 0 new rows (sources returned nothing new, "
+                    "or all items already in DB / filtered)"
+                )
         except Exception as e:
             print(f"[prefetch] error: {e}")
             inserted = 0

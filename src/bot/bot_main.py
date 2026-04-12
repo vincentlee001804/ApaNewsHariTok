@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import threading
 from datetime import datetime, timedelta
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram.constants import ParseMode
 
@@ -33,12 +36,39 @@ from src.core.user_service import list_active_user_preferences
 from src.storage.database import init_db
 
 
+class _HealthHandler(BaseHTTPRequestHandler):
+    """Minimal handler so Fly.io / other hosts can probe PORT (Telegram bot uses polling, not HTTP)."""
+
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+
+def _start_health_server_if_port_set() -> None:
+    raw = (os.environ.get("PORT") or "").strip()
+    if not raw:
+        return
+    try:
+        port = int(raw)
+    except ValueError:
+        return
+    if port <= 0:
+        return
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+
 def main() -> None:
     """
     Entry point for running the bot in polling mode.
     python-telegram-bot v21 manages its own asyncio event loop internally,
     so this function is synchronous and calls run_polling() directly.
     """
+    _start_health_server_if_port_set()
+
     # Ensure database tables exist before the bot starts handling traffic.
     init_db()
 

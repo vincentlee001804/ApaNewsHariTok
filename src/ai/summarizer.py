@@ -95,7 +95,7 @@ def classify_category(text: str) -> Optional[str]:
         return None
 
 
-def summarize(text: str, max_words: int = 40, title: str = "") -> Optional[str]:
+def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
     """
     Use a local Ollama model to summarize the given text.
 
@@ -108,19 +108,20 @@ def summarize(text: str, max_words: int = 40, title: str = "") -> Optional[str]:
     prompt = textwrap.dedent(
         f"""
         You are summarizing a local news article from Sarawak, Malaysia.
-        Read the full article below and create a concise summary in at most {max_words} words.
+        Read the full article below and write a summary of at most {max_words} words.
+        Hard rule: your entire answer must be {max_words} words or fewer — count before you answer.
+        Prefer one or two tight sentences; omit minor detail if needed to stay within the limit.
         {title_line}
-        
+
         Focus on:
         - Key facts: who, what, where, when, why
-        - Important details and numbers mentioned
-        - Main points and outcomes
+        - Only the most important numbers or outcomes
 
         Strict relevance rules:
         - The summary MUST match the provided headline/article only.
         - Do NOT use information from other articles or prior context.
         - If the text does not contain enough matching information for the headline, output exactly: NO_SUMMARY
-        
+
         Provide only the summary text, no instructions, labels, or quotes around the summary.
         Write in clear, natural language.
         End with a complete sentence (do not stop mid-thought).
@@ -145,7 +146,11 @@ def summarize(text: str, max_words: int = 40, title: str = "") -> Optional[str]:
         
         # Clean up any instruction text that might be included
         # Remove common prefixes like "Here is a summary...", "Summary:", etc.
-        summary = summary.replace("Here is a summary of the news article in 40 words or less:", "")
+        summary = re.sub(
+            r"(?i)Here is a summary of the news article in \d+ words or less:\s*",
+            "",
+            summary,
+        )
         summary = summary.replace("Here is a summary:", "")
         summary = summary.replace("Summary:", "")
         summary = summary.replace("Here is the summary:", "")

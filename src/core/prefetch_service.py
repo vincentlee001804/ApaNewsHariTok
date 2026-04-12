@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from src.core.services import (
-    _extract_category,
+    _get_category_with_llm_fallback,
     _get_source_name,
     backfill_ai_summaries_for_article_ids,
 )
@@ -93,7 +93,7 @@ def prefetch_latest_articles_to_db(
                 raw_summary=item.summary,
                 location=location,
                 state=state,
-                category=_extract_category(item.title, item.summary),
+                category=_get_category_with_llm_fallback(item.title, item.summary),
             )
             session.add(article)
             try:

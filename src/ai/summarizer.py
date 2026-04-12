@@ -13,6 +13,11 @@ from src.core.config import (
     OLLAMA_SUMMARY_NUM_PREDICT,
     ollama_request_headers,
 )
+from src.core.news_categories import (
+    NEWS_ARTICLE_CATEGORY_LABELS as ALLOWED_CATEGORIES,
+    category_labels_for_llm_prompt,
+    normalize_llm_category_token,
+)
 
 
 def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
@@ -96,26 +101,6 @@ def normalize_stored_ai_summary(text: str | None, *, max_words: int = 30) -> str
     return finalize_summary_plain_text(s)
 
 
-ALLOWED_CATEGORIES = [
-    "Emergency",
-    "Health",
-    "Sports",
-    "Politics",
-    "Education",
-    "Business",
-    "Technology",
-    "Entertainment",
-    "Environment",
-    "Infrastructure",
-    "Crime",
-    "Social",
-    "Tourism",
-    "Food",
-    "Local",
-    "General",
-]
-
-
 def classify_category(text: str) -> Optional[str]:
     """
     Use the local Ollama model to classify a news item into exactly ONE category.
@@ -125,7 +110,7 @@ def classify_category(text: str) -> Optional[str]:
     if not text or not text.strip():
         return None
 
-    categories = ", ".join(ALLOWED_CATEGORIES)
+    categories = category_labels_for_llm_prompt()
     prompt = textwrap.dedent(
         f"""
         You are classifying a Sarawak (Malaysia) local news item into exactly ONE category.
@@ -133,8 +118,14 @@ def classify_category(text: str) -> Optional[str]:
         {categories}
 
         Rules:
-        - Output EXACTLY one category word from the list above.
-        - No extra words, no punctuation, no quotes.
+        - Output EXACTLY one category label from the list above (same spelling and capitalization as listed).
+        - No extra words, no punctuation, no quotes, no explanation.
+        - Pick the MAIN subject. Use "Politics" only when government, elections, policy, or legislation
+          is central—not merely because an MP or minister is mentioned at a community event
+          (then prefer Social, Local, Infrastructure, Culture, or Religion as appropriate).
+        - Use "Infrastructure" for roads, bridges, utilities, water supply, resurfacing projects.
+        - Use "Social" for community gatherings, welfare, NGOs, village requests, surau upgrades unless
+          the focus is clearly Religion or Infrastructure.
         - If unsure, output "General".
 
         News text:
@@ -148,6 +139,7 @@ def classify_category(text: str) -> Optional[str]:
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,
+                "options": {"num_predict": 32},
             },
             timeout=60,
         )
@@ -155,20 +147,8 @@ def classify_category(text: str) -> Optional[str]:
         data = response.json()
         raw = (data.get("response", "") or "").strip()
 
-        # Normalize common mistakes
-        raw = raw.strip().strip('"').strip("'")
-        raw = raw.splitlines()[0].strip()
-
-        # Exact match preferred
-        if raw in ALLOWED_CATEGORIES:
-            return raw
-
-        # Case-insensitive match
-        for cat in ALLOWED_CATEGORIES:
-            if raw.lower() == cat.lower():
-                return cat
-
-        return None
+        normalized = normalize_llm_category_token(raw)
+        return normalized
     except Exception:
         return None
 

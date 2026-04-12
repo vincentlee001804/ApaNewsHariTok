@@ -138,8 +138,8 @@ def main() -> None:
 
     async def _scheduled_push_job(context) -> None:
         """
-        Frequency-based push, checked every minute so /settings every_15m aligns with wall time
-        (previously combined with prefetch every 10m, pushes could drift to ~20m apart).
+        Per-user scheduled push: each row's preference.frequency (every_15m, every_30m, every_1h, …).
+        Runs every 60s to evaluate who is due; not tied to the global fetch interval.
         """
         try:
             users = await asyncio.to_thread(list_active_user_preferences)
@@ -187,7 +187,6 @@ def main() -> None:
             first=0,
             name="db_prefetch",
         )
-        # Separate from prefetch interval so "every 15m" delivery is not tied to RSS poll cadence.
         application.job_queue.run_repeating(
             _scheduled_push_job,
             interval=60,
@@ -200,8 +199,10 @@ def main() -> None:
             else ""
         )
         print(
-            f"Prefetch enabled: every {PREFETCH_INTERVAL_MINUTES} minutes "
-            f"(RSS{tg_note} → database); scheduled push: checked every 60s (user frequency in /settings)"
+            f"Global fetch: every {PREFETCH_INTERVAL_MINUTES} min — RSS{tg_note} → database (same for all users)."
+        )
+        print(
+            "Scheduled push: each user's /settings frequency (15m / 30m / 1h / …); eligibility checked every 60s."
         )
 
     if DB_CLEANUP_ENABLED:

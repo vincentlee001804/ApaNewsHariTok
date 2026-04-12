@@ -7,7 +7,12 @@ from typing import Any, List, Optional
 
 import requests
 
-from src.core.config import OLLAMA_GENERATE_URL, OLLAMA_MODEL, ollama_request_headers
+from src.core.config import (
+    OLLAMA_GENERATE_URL,
+    OLLAMA_MODEL,
+    OLLAMA_SUMMARY_NUM_PREDICT,
+    ollama_request_headers,
+)
 
 
 def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
@@ -54,6 +59,41 @@ def clip_plain_text_to_word_limit(text: str, max_words: int) -> str:
         if pos > int(len(clipped) * 0.45):
             return clipped[: pos + len(punct.rstrip())].strip()
     return clipped.rstrip(" ,;:.—-") + "…"
+
+
+def finalize_summary_plain_text(text: str) -> str:
+    """
+    If the model hit a token limit or omitted final punctuation, avoid leaving a dangling clause.
+    Prefer trimming back to the last full sentence; otherwise append an ellipsis.
+    """
+    t = " ".join((text or "").split()).strip()
+    if not t:
+        return t
+    if t[-1] in ".!?。！？" or t.endswith("…"):
+        return t
+    best = -1
+    for sep in (". ", "? ", "! "):
+        p = t.rfind(sep)
+        if p > best:
+            best = p
+    for sep in ("。", "？", "！"):
+        p = t.rfind(sep)
+        if p > best:
+            best = p
+    if best >= max(20, int(len(t) * 0.28)):
+        return t[: best + 1].strip()
+    return t + "…"
+
+
+def normalize_stored_ai_summary(text: str | None, *, max_words: int = 30) -> str:
+    """
+    Single pipeline for text saved to news_articles.ai_summary (fixes legacy Markdown / cuts).
+    """
+    s = strip_markdown_artifacts_for_plain_text(text or "")
+    if not s:
+        return ""
+    s = clip_plain_text_to_word_limit(s, max_words)
+    return finalize_summary_plain_text(s)
 
 
 ALLOWED_CATEGORIES = [
@@ -171,13 +211,14 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,
+                "options": {"num_predict": OLLAMA_SUMMARY_NUM_PREDICT},
             },
             timeout=60,
         )
         response.raise_for_status()
         data = response.json()
         summary = data.get("response", "").strip()
-        
+
         # Clean up any instruction text that might be included
         # Remove common prefixes like "Here is a summary...", "Summary:", etc.
         summary = re.sub(
@@ -215,6 +256,7 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
 
         summary = strip_markdown_artifacts_for_plain_text(summary)
         summary = clip_plain_text_to_word_limit(summary, max_words)
+        summary = finalize_summary_plain_text(summary)
         return summary or None
     except Exception:
         # For now, fail quietly and let the caller decide how to handle None.
@@ -252,6 +294,7 @@ def summarize_digest(items_text: str, max_words: int = 160) -> Optional[str]:
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,
+                "options": {"num_predict": max(OLLAMA_SUMMARY_NUM_PREDICT, 512)},
             },
             timeout=60,
         )
@@ -276,6 +319,7 @@ def summarize_digest(items_text: str, max_words: int = 160) -> Optional[str]:
 
         summary = strip_markdown_artifacts_for_plain_text(summary)
         summary = clip_plain_text_to_word_limit(summary, max_words)
+        summary = finalize_summary_plain_text(summary)
 
         return summary or None
     except Exception:
@@ -320,6 +364,7 @@ def answer_news_question(question: str, items_text: str, max_words: int = 220) -
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,
+                "options": {"num_predict": max(OLLAMA_SUMMARY_NUM_PREDICT, 512)},
             },
             timeout=60,
         )
@@ -340,12 +385,15 @@ def answer_news_question(question: str, items_text: str, max_words: int = 220) -
         if any(marker in lowered for marker in rejection_markers):
             # Still allow the specific "couldn't find relevant info..." phrasing.
             if "couldn't find relevant information" in lowered:
-                return strip_markdown_artifacts_for_plain_text(answer)
+                return finalize_summary_plain_text(
+                    strip_markdown_artifacts_for_plain_text(answer)
+                )
             # Otherwise treat as failure so caller can fallback.
             return None
 
         answer = strip_markdown_artifacts_for_plain_text(answer)
         answer = clip_plain_text_to_word_limit(answer, max_words)
+        answer = finalize_summary_plain_text(answer)
         return answer or None
     except Exception:
         return None

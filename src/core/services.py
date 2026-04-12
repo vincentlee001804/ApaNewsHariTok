@@ -8,6 +8,7 @@ from sqlalchemy import exists, func, select
 from src.ai.summarizer import (
     classify_category,
     clip_plain_text_to_word_limit,
+    normalize_stored_ai_summary,
     strip_markdown_artifacts_for_plain_text,
     summarize,
     waze_alerts_to_news_sentences,
@@ -482,7 +483,7 @@ def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
                 ai = summarize(source_text, title=art.title or "")
                 if not ai:
                     ai = _fallback_summary_from_text(art.raw_summary or art.title or "", max_words=30)
-                art.ai_summary = ai
+                art.ai_summary = normalize_stored_ai_summary(ai, max_words=30)
                 session.commit()
                 updated += 1
             except Exception:
@@ -975,7 +976,7 @@ def get_latest_news_text(max_items: int = 3) -> str:
 
         escaped_title = escape_html(item.title)
         escaped_summary = escape_html(
-            strip_markdown_artifacts_for_plain_text(ai_summary or "")
+            normalize_stored_ai_summary(ai_summary or "", max_words=30)
         )
         escaped_source = escape_html(source_name)
 
@@ -1216,7 +1217,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
 
                 escaped_title = escape_html(item.title)
                 escaped_summary = escape_html(
-                    strip_markdown_artifacts_for_plain_text(ai_summary or "")
+                    normalize_stored_ai_summary(ai_summary or "", max_words=30)
                 )
                 escaped_source = escape_html(source_name)
                 escaped_category = escape_html(category)
@@ -1243,6 +1244,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 art.ai_summary = _fallback_summary_from_text(
                     art.raw_summary or art.title, max_words=30
                 )
+            art.ai_summary = normalize_stored_ai_summary(art.ai_summary, max_words=30)
 
         if DEDUPLICATION_ENABLED and user_id is not None:
             _record_deliveries_for_user(session, user_id, chosen, now)
@@ -1262,7 +1264,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 art.raw_summary or art.title, max_words=30
             )
             escaped_summary = escape_html(
-                strip_markdown_artifacts_for_plain_text(raw_sum or "")
+                normalize_stored_ai_summary(raw_sum or "", max_words=30)
             )
             escaped_source = escape_html(source_name)
             escaped_category = escape_html(category)

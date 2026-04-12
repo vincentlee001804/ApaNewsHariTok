@@ -7,9 +7,16 @@ from typing import Any, List, Optional
 
 import requests
 
+from src.core.config import OLLAMA_GENERATE_URL, OLLAMA_MODEL, ollama_request_headers
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "llama3.1"
+
+def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
+    return requests.post(
+        OLLAMA_GENERATE_URL,
+        json=json_body,
+        headers=ollama_request_headers(),
+        timeout=timeout,
+    )
 
 ALLOWED_CATEGORIES = [
     "Emergency",
@@ -58,9 +65,8 @@ def classify_category(text: str) -> Optional[str]:
     ).strip()
 
     try:
-        response = requests.post(
-            OLLAMA_URL,
-            json={
+        response = _ollama_post(
+            {
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,
@@ -124,9 +130,8 @@ def summarize(text: str, max_words: int = 40, title: str = "") -> Optional[str]:
     ).strip()
 
     try:
-        response = requests.post(
-            OLLAMA_URL,
-            json={
+        response = _ollama_post(
+            {
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,
@@ -205,9 +210,8 @@ def summarize_digest(items_text: str, max_words: int = 160) -> Optional[str]:
     ).strip()
 
     try:
-        response = requests.post(
-            OLLAMA_URL,
-            json={
+        response = _ollama_post(
+            {
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,
@@ -276,9 +280,8 @@ def answer_news_question(question: str, items_text: str, max_words: int = 220) -
     ).strip()
 
     try:
-        response = requests.post(
-            OLLAMA_URL,
-            json={
+        response = _ollama_post(
+            {
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,
@@ -372,9 +375,8 @@ def waze_alerts_to_news_sentences(alerts: List[dict[str, Any]]) -> List[str]:
     ).strip()
 
     try:
-        response = requests.post(
-            OLLAMA_URL,
-            json={
+        response = _ollama_post(
+            {
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,

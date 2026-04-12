@@ -133,8 +133,9 @@ PREFETCH_ENABLED: Final[bool] = os.getenv("PREFETCH_ENABLED", "true").strip().lo
     "on",
 }
 
-# RSS/Telegram fetch interval. Push timing uses a separate 60s job so "every 15m" users are not
-# skewed when this was 10 (pushes could land at 0, 20, 40 min instead of 0, 15, 30).
+# Global RSS + Telegram fetch interval (minutes): ONE schedule for the whole app, not per user.
+# Default 15. Per-user notification timing is user_preferences.frequency (/settings) in bot_main.
+# Optional: PREFETCH_INTERVAL_MINUTES=60 for hourly fetch.
 PREFETCH_INTERVAL_MINUTES: Final[int] = max(
     1,
     int((os.getenv("PREFETCH_INTERVAL_MINUTES", "15").strip() or "15")),

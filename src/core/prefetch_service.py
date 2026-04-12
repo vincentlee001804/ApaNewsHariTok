@@ -34,7 +34,7 @@ def prefetch_latest_articles_to_db(
     Fetch recent RSS items plus optional Telegram channels (see TELEGRAM_SOURCE_CHANNELS)
     and store them into the database.
 
-    Runs on the bot's repeating prefetch job (see PREFETCH_INTERVAL_MINUTES in bot_main).
+    Runs on the bot's global fetch job (same interval for all users; see PREFETCH_INTERVAL_MINUTES).
 
     Deduplication is enforced by the unique constraint on NewsArticle.link.
     Returns the number of newly inserted rows.

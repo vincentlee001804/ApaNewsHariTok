@@ -19,6 +19,18 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _normalize_telegram_session_string(raw: str | None) -> str | None:
+    """
+    Fly.io / dashboard pastes sometimes inject newlines or spaces inside the base64 session
+    string, which causes Telethon to raise binascii.Error: Incorrect padding.
+    """
+    if not raw or not str(raw).strip():
+        return None
+    # Remove all whitespace so a line-broken paste becomes one valid token.
+    collapsed = "".join(str(raw).split())
+    return collapsed or None
+
+
 def normalize_telegram_post_url(url: str) -> str:
     """
     Canonical form for one Telegram post so the same message always maps to one DB `link`
@@ -134,8 +146,8 @@ async def _fetch_async(
     items: List[RssItem] = []
     seen_links: set[str] = set()
 
-    if session_string and session_string.strip():
-        client = TelegramClient(StringSession(session_string.strip()), api_id, api_hash)
+    if session_string:
+        client = TelegramClient(StringSession(session_string), api_id, api_hash)
     else:
         session_path = _project_root() / session_name
         client = TelegramClient(str(session_path), api_id, api_hash)
@@ -193,7 +205,7 @@ def fetch_latest_telegram_items(
     api_id_raw = (os.getenv("TELEGRAM_API_ID") or "").strip()
     api_hash = (os.getenv("TELEGRAM_API_HASH") or "").strip()
     _phone = (os.getenv("TELEGRAM_PHONE") or "").strip()
-    session_string = (os.getenv("TELEGRAM_SESSION_STRING") or "").strip() or None
+    session_string = _normalize_telegram_session_string(os.getenv("TELEGRAM_SESSION_STRING"))
     session_name = (os.getenv("TELEGRAM_SOURCE_SESSION_NAME") or "sibuwb_session").strip()
     auto_join = (os.getenv("TELEGRAM_AUTO_JOIN_CHANNELS", "true").strip().lower() in {
         "1", "true", "yes", "y", "on",
@@ -224,5 +236,12 @@ def fetch_latest_telegram_items(
             )
         )
     except Exception as exc:
-        print(f"[telegram] fetch failed: {exc}")
+        err = str(exc).lower()
+        hint = ""
+        if "padding" in err:
+            hint = (
+                " (often: TELEGRAM_SESSION_STRING has newlines/spaces/truncation in Fly secrets — "
+                "re-paste the full line from test_sibuwb_bot.py)"
+            )
+        print(f"[telegram] fetch failed: {exc}{hint}")
         return []

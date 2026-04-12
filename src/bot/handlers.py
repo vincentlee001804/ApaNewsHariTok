@@ -26,6 +26,26 @@ from src.storage.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
+# user_data flag: after tapping Area Keywords, next plain-text message updates area_keywords.
+AWAITING_AREA_KEYWORDS_UD_KEY: Final[str] = "awaiting_area_keywords"
+
+
+def _normalize_area_keywords_raw(raw: str) -> str:
+    """
+    Comma-separated user input → stored lowercase comma-separated string.
+    clear/none/off or empty → "".
+    """
+    value = (raw or "").strip()
+    if value.lower() in {"clear", "none", "off"}:
+        return ""
+    keywords = [k.strip() for k in value.split(",") if k.strip()]
+    return ",".join([k.lower() for k in keywords])
+
+
+def _display_area_keywords_raw(raw: str) -> str:
+    """Pretty display from the user's original comma-separated message."""
+    return ", ".join([k.strip() for k in (raw or "").split(",") if k.strip()])
+
 
 WELCOME_TEXT: Final[str] = (
     "Welcome! 👋\n\n"
@@ -334,17 +354,12 @@ async def setareas_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     value = parts[1].strip()
-    if value.lower() in {"clear", "none", "off"}:
-        value = ""
-
-    # Normalize: store as comma-separated, lowercased for matching (display can be title-cased later)
-    keywords = [k.strip() for k in value.split(",") if k.strip()]
-    normalized = ",".join([k.lower() for k in keywords])
+    normalized = _normalize_area_keywords_raw(value)
 
     update_user_preference(telegram_id, area_keywords=normalized)
 
     if normalized:
-        display = ", ".join([k.strip() for k in value.split(",") if k.strip()])
+        display = _display_area_keywords_raw(value)
         await update.message.reply_text(
             f"✅ Area keywords updated:\n{display}\n\n"
             "News mentioning these areas ranks higher. Waze is not included in "
@@ -362,6 +377,8 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     """Handle /settings command. Show current preferences and options."""
     if not update.message:
         return
+
+    context.user_data.pop(AWAITING_AREA_KEYWORDS_UD_KEY, None)
 
     telegram_id = update.message.from_user.id
     get_or_create_user(telegram_id, update.message.from_user.username)
@@ -449,6 +466,9 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     data = query.data
 
+    if data != "settings_area_keywords":
+        context.user_data.pop(AWAITING_AREA_KEYWORDS_UD_KEY, None)
+
     if data == "settings_categories":
         # Show category selection
         keyboard = [
@@ -476,27 +496,35 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
     elif data == "settings_area_keywords":
+        context.user_data[AWAITING_AREA_KEYWORDS_UD_KEY] = True
         current = (
             ", ".join([k.strip().title() for k in (preference.area_keywords or "").split(",") if k.strip()])
             if (preference.area_keywords or "").strip()
             else "None"
         )
+        keyboard = [
+            [InlineKeyboardButton("🗑️ Clear all keywords", callback_data="area_kw_clear")],
+            [InlineKeyboardButton("◀️ Back", callback_data="settings_back")],
+        ]
         await query.edit_message_text(
-            "*Area Keywords (specific roads/areas):*\n\n"
-            "Examples:\n"
-            "- Jalan Wawasan\n"
-            "- Taman Desa\n"
-            "- Kampung Tabuan\n\n"
-            "*News:* matching articles get *higher priority* in rankings; "
-            "other news is still shown.\n"
-            "*Waze:* not sent in `/latest` or scheduled pushes. Developers can run "
-            "`/devwaze` (same allow list as /testpush) to preview filtered alerts.\n\n"
-            "Set with:\n"
-            "`/setareas Jalan Wawasan, Taman Desa`\n\n"
-            f"Current: {current}",
+            "*Area Keywords*\n\n"
+            "Type your roads or areas in *one message*, separated by commas, then send.\n"
+            "Example:\n"
+            "`Jalan Wawasan, Taman Desa, Kampung Tabuan`\n\n"
+            "• Matching news gets *higher priority*; other news is still shown.\n"
+            "• Waze is not included in `/latest` or pushes (`/devwaze` is developer-only).\n"
+            "• Send `clear`, `none`, or `off` as the message to remove all keywords.\n"
+            "• `/setareas …` still works if you prefer a command.\n"
+            "• `/cancel` exits this step without saving.\n\n"
+            f"*Current:* {current}",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Back", callback_data="settings_back")]]),
+            reply_markup=InlineKeyboardMarkup(keyboard),
         )
+        return
+
+    elif data == "area_kw_clear":
+        update_user_preference(telegram_id, area_keywords="")
+        await settings_callback_refresh(query, telegram_id)
         return
 
     elif data == "settings_locations":
@@ -868,6 +896,34 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
     message_text = update.message.text
     lowered = (message_text or "").strip().lower()
 
+    if context.user_data.get(AWAITING_AREA_KEYWORDS_UD_KEY):
+        stripped = (message_text or "").strip()
+        if not stripped:
+            return
+        if lowered == "cancel":
+            context.user_data.pop(AWAITING_AREA_KEYWORDS_UD_KEY, None)
+            await update.message.reply_text(
+                "Cancelled. Open /settings when you want to set area keywords.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+        normalized = _normalize_area_keywords_raw(stripped)
+        update_user_preference(telegram_id, area_keywords=normalized)
+        context.user_data.pop(AWAITING_AREA_KEYWORDS_UD_KEY, None)
+        if normalized:
+            display = _display_area_keywords_raw(stripped)
+            await update.message.reply_text(
+                f"✅ Area keywords saved:\n{display}\n\n"
+                "News mentioning these areas ranks higher. Use /settings to change again.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        else:
+            await update.message.reply_text(
+                "✅ Area keywords cleared. News ranking no longer uses them.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        return
+
     # Friendly shortcuts.
     if any(greet in lowered for greet in ["hi", "hello", "hey", "good morning", "good night"]):
         await update.message.reply_text(
@@ -911,3 +967,14 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
         get_news_agent_response_for_user, telegram_id, message_text
     )
     await update.message.reply_text(response, parse_mode=ParseMode.HTML)
+
+
+async def cancel_awaiting_area_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Exit Area Keywords text-input step (see AWAITING_AREA_KEYWORDS_UD_KEY)."""
+    if not update.message:
+        return
+    if context.user_data.pop(AWAITING_AREA_KEYWORDS_UD_KEY, None):
+        await update.message.reply_text(
+            "Cancelled area keywords. Open /settings when you want to try again.",
+            parse_mode=ParseMode.MARKDOWN,
+        )

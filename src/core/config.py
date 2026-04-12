@@ -133,9 +133,11 @@ PREFETCH_ENABLED: Final[bool] = os.getenv("PREFETCH_ENABLED", "true").strip().lo
     "on",
 }
 
+# RSS/Telegram fetch interval. Push timing uses a separate 60s job so "every 15m" users are not
+# skewed when this was 10 (pushes could land at 0, 20, 40 min instead of 0, 15, 30).
 PREFETCH_INTERVAL_MINUTES: Final[int] = max(
     1,
-    int((os.getenv("PREFETCH_INTERVAL_MINUTES", "10").strip() or "10")),
+    int((os.getenv("PREFETCH_INTERVAL_MINUTES", "15").strip() or "15")),
 )
 
 # After each prefetch insert, call Ollama to fill news_articles.ai_summary (same pipeline as user delivery).

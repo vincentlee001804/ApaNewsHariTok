@@ -123,6 +123,7 @@ def summarize(text: str, max_words: int = 40, title: str = "") -> Optional[str]:
         
         Provide only the summary text, no instructions, labels, or quotes around the summary.
         Write in clear, natural language.
+        End with a complete sentence (do not stop mid-thought).
 
         Full Article:
         \"\"\"{text.strip()}\"\"\"
@@ -176,8 +177,10 @@ def summarize(text: str, max_words: int = 40, title: str = "") -> Optional[str]:
         # Keep output concise even if model exceeds the requested limit.
         words = re.findall(r"\S+", summary)
         if len(words) > max_words:
-            summary = " ".join(words[:max_words]).strip()
-        
+            summary = " ".join(words[:max_words]).rstrip(" ,;:\"'")
+            if summary and not summary.endswith(("…", "...", ".")):
+                summary = summary + "…"
+
         return summary or None
     except Exception:
         # For now, fail quietly and let the caller decide how to handle None.

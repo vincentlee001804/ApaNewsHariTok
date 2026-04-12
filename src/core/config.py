@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Final, List
 
@@ -145,6 +146,54 @@ SCHEDULED_PUSH_GRACE_MINUTES_AFTER_FIRST_SEEN: Final[int] = max(
     0,
     int((os.getenv("SCHEDULED_PUSH_GRACE_MINUTES_AFTER_FIRST_SEEN", "30").strip() or "30")),
 )
+
+# Scheduled pushes only: no digests during this local wall-clock window (default 12am–6am Malaysia time).
+# Does not affect /latest, /testpush, or urgent channel alerts.
+SCHEDULED_PUSH_QUIET_HOURS_ENABLED: Final[bool] = os.getenv(
+    "SCHEDULED_PUSH_QUIET_HOURS_ENABLED", "true"
+).strip().lower() in {"1", "true", "yes", "y", "on"}
+SCHEDULED_PUSH_QUIET_TIMEZONE: Final[str] = (
+    (os.getenv("SCHEDULED_PUSH_QUIET_TIMEZONE", "Asia/Kuching") or "Asia/Kuching").strip()
+)
+
+
+def _env_hour(key: str, default: int) -> int:
+    try:
+        v = int((os.getenv(key, str(default)) or str(default)).strip())
+    except ValueError:
+        return default
+    return max(0, min(23, v))
+
+
+SCHEDULED_PUSH_QUIET_START_HOUR_LOCAL: Final[int] = _env_hour(
+    "SCHEDULED_PUSH_QUIET_START_HOUR", 0
+)
+SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL: Final[int] = _env_hour(
+    "SCHEDULED_PUSH_QUIET_END_HOUR", 6
+)
+
+
+def is_scheduled_push_quiet_hours_now() -> bool:
+    """
+    True if scheduled news pushes should be skipped. Window is [start, end) in local hours;
+    if start > end, the quiet period wraps past midnight (e.g. 22–6).
+    """
+    if not SCHEDULED_PUSH_QUIET_HOURS_ENABLED:
+        return False
+    s, e = SCHEDULED_PUSH_QUIET_START_HOUR_LOCAL, SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL
+    if s == e:
+        return False
+    try:
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(SCHEDULED_PUSH_QUIET_TIMEZONE)
+    except Exception:
+        return False
+    h = datetime.now(tz).hour
+    if s < e:
+        return s <= h < e
+    return h >= s or h < e
+
 
 # Global RSS + Telegram fetch interval (minutes): ONE schedule for the whole app, not per user.
 # Default 15. Per-user notification timing is user_preferences.frequency (/settings) in bot_main.

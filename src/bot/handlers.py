@@ -13,6 +13,10 @@ from sqlalchemy.exc import OperationalError
 
 from src.core.config import (
     SCHEDULED_PUSH_GRACE_MINUTES_AFTER_FIRST_SEEN,
+    SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL,
+    SCHEDULED_PUSH_QUIET_HOURS_ENABLED,
+    SCHEDULED_PUSH_QUIET_START_HOUR_LOCAL,
+    SCHEDULED_PUSH_QUIET_TIMEZONE,
     TELEGRAM_SOURCE_CHANNELS,
     is_test_push_allowed,
 )
@@ -774,11 +778,21 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             [InlineKeyboardButton("◀️ Back", callback_data="settings_back")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
+        freq_body = (
             "*Select Frequency:*\n\n"
             "Choose how often you want push notifications while the bot is running.\n\n"
-            "Use Subscribe/Unsubscribe below to turn scheduled pushes ON/OFF.\n\n"
-            f"Current: {_format_frequency(preference.frequency)}",
+            "Use Subscribe/Unsubscribe below to turn scheduled pushes ON/OFF."
+        )
+        if SCHEDULED_PUSH_QUIET_HOURS_ENABLED:
+            freq_body += (
+                f"\n\n_Scheduled pushes are paused from "
+                f"{SCHEDULED_PUSH_QUIET_START_HOUR_LOCAL:02d}:00 to "
+                f"{SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL:02d}:00 "
+                f"({SCHEDULED_PUSH_QUIET_TIMEZONE})._ "
+                "_Urgent alerts are still sent._"
+            )
+        await query.edit_message_text(
+            freq_body + f"\n\nCurrent: {_format_frequency(preference.frequency)}",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup,
         )

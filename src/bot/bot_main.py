@@ -30,7 +30,12 @@ from src.core.config import (
     PREFETCH_ENABLED,
     PREFETCH_INTERVAL_MINUTES,
     SCHEDULED_PUSH_GRACE_MINUTES_AFTER_FIRST_SEEN,
+    SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL,
+    SCHEDULED_PUSH_QUIET_HOURS_ENABLED,
+    SCHEDULED_PUSH_QUIET_START_HOUR_LOCAL,
+    SCHEDULED_PUSH_QUIET_TIMEZONE,
     TELEGRAM_SOURCE_CHANNELS,
+    is_scheduled_push_quiet_hours_now,
     require_bot_token,
 )
 from src.core.cleanup_service import cleanup_old_news_data
@@ -145,6 +150,8 @@ def main() -> None:
         Runs every 60s to evaluate who is due; not tied to the global fetch interval.
         """
         try:
+            if is_scheduled_push_quiet_hours_now():
+                return
             users = await asyncio.to_thread(list_active_user_preferences)
             now = datetime.utcnow()
             grace_after_start = timedelta(minutes=SCHEDULED_PUSH_GRACE_MINUTES_AFTER_FIRST_SEEN)
@@ -210,6 +217,12 @@ def main() -> None:
         print(
             "Scheduled push: each user's /settings frequency (15m / 30m / 1h / …); eligibility checked every 60s."
         )
+        if SCHEDULED_PUSH_QUIET_HOURS_ENABLED:
+            print(
+                "Scheduled push quiet hours: "
+                f"{SCHEDULED_PUSH_QUIET_START_HOUR_LOCAL:02d}:00–{SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL:02d}:00 "
+                f"local ({SCHEDULED_PUSH_QUIET_TIMEZONE}); set SCHEDULED_PUSH_QUIET_HOURS_ENABLED=false to disable."
+            )
 
     if DB_CLEANUP_ENABLED:
         application.job_queue.run_repeating(

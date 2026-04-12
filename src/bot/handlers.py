@@ -122,7 +122,11 @@ HELP_TEXT: Final[str] = (
     "• /settings – categories, locations, area keywords, frequency, and subscribe/unsubscribe\n\n"
     "*Tips:*\n"
     "- Use Area Keywords for roads or neighborhoods (example: Jalan Song, Tabuan).\n"
-    "- If you only want manual checks, set subscription to OFF inside /settings."
+    "- If you only want manual checks, set subscription to OFF inside /settings.\n\n"
+    "If you have any question or feedback, you may contact me at:\n"
+    "Email: [bcs24020018@student.uts.edu.my](mailto:bcs24020018@student.uts.edu.my)\n"
+    "Telegram: [https://t.me/VincentLee\\_4966](https://t.me/VincentLee_4966)\n"
+    "WhatsApp: [https://wa.me/601114004966](https://wa.me/601114004966)"
 )
 
 def _format_frequency(value: str | None) -> str:

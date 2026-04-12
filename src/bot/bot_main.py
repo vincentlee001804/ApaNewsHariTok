@@ -11,6 +11,7 @@ from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from src.bot.handlers import (
+    cancel_awaiting_area_keywords,
     help_command,
     conversational_message,
     ingest_channel_post,
@@ -82,6 +83,7 @@ def main() -> None:
     application.add_handler(CommandHandler("testpush", test_push_command))
     application.add_handler(CommandHandler("devwaze", dev_waze_command))
     application.add_handler(CommandHandler("setareas", setareas_command))
+    application.add_handler(CommandHandler("cancel", cancel_awaiting_area_keywords))
     application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, ingest_channel_post))
     application.add_handler(
@@ -92,7 +94,7 @@ def main() -> None:
     )
     application.add_handler(
         CallbackQueryHandler(
-            settings_callback, pattern="^settings_|^cat_|^freq_|^loc_"
+            settings_callback, pattern="^settings_|^cat_|^freq_|^loc_|^area_kw_"
         )
     )
 

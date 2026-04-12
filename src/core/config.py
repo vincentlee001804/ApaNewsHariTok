@@ -10,6 +10,22 @@ load_dotenv()
 
 TELEGRAM_BOT_TOKEN: str | None = os.getenv("TELEGRAM_BOT_TOKEN")
 
+# Ollama: default local server. For Ollama Cloud set OLLAMA_API_BASE=https://ollama.com and OLLAMA_API_KEY
+# (see https://ollama.com/settings/keys). Use a cloud-capable tag, e.g. ministral-3:8b-cloud.
+_OLLAMA_API_BASE: Final[str] = (
+    (os.getenv("OLLAMA_API_BASE", "http://localhost:11434").strip() or "http://localhost:11434").rstrip("/")
+)
+OLLAMA_GENERATE_URL: Final[str] = f"{_OLLAMA_API_BASE}/api/generate"
+OLLAMA_API_KEY: Final[str | None] = (os.getenv("OLLAMA_API_KEY") or "").strip() or None
+OLLAMA_MODEL: Final[str] = (os.getenv("OLLAMA_MODEL", "llama3.1").strip() or "llama3.1")
+
+
+def ollama_request_headers() -> dict[str, str]:
+    """Authorization header for Ollama Cloud; empty for local Ollama."""
+    if OLLAMA_API_KEY:
+        return {"Authorization": f"Bearer {OLLAMA_API_KEY}"}
+    return {}
+
 DEFAULT_RSS_FEEDS: Final[List[str]] = [
     "https://www.sarawaktribune.com/feed/",
     "https://news.seehua.com/feed/",

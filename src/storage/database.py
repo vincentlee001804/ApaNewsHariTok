@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+# Load .env before DATABASE_URL is read (config.py also calls load_dotenv; safe to repeat).
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///mvp.db")
 

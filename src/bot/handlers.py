@@ -18,7 +18,12 @@ from src.core.config import (
 )
 from src.core.location_extractor import extract_location_and_state
 from src.core.models import NewsArticle
-from src.core.services import _extract_category, _is_urgent_utility_alert, build_urgent_preview
+from src.core.services import (
+    _extract_category,
+    _is_urgent_utility_alert,
+    build_urgent_preview,
+    post_matches_user_locations_filter,
+)
 from src.core.user_service import (
     get_or_create_user,
     get_user_preference,
@@ -321,6 +326,8 @@ async def ingest_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
             if first_seen_at and (now - first_seen_at) < grace_after_start:
                 continue
             if not preference.wants_urgent_alerts:
+                continue
+            if not post_matches_user_locations_filter(title, text, preference.locations or ""):
                 continue
             sent_links = shared_sent.setdefault(telegram_id, set())
             if link in sent_links:

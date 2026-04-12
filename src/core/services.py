@@ -18,6 +18,7 @@ from src.core.config import (
     waze_allowed_type_set,
 )
 from src.core.local_keywords import local_keyword_filter_enabled, matches_local_interest
+from src.core.location_extractor import extract_location_and_state
 from src.core.models import NewsArticle, User, UserArticleDelivery
 from src.core.rss_limits import effective_rss_limit_per_feed
 from src.scrapers.rss_reader import RssItem, fetch_latest_items
@@ -65,7 +66,6 @@ def _get_or_create_article_for_rss_item(session, item: RssItem) -> NewsArticle:
         ).scalar_one_or_none()
     if existing:
         return existing
-    from src.core.location_extractor import extract_location_and_state
 
     loc, st = extract_location_and_state(item.title, item.summary)
     row = NewsArticle(
@@ -227,6 +227,57 @@ def _matches_location_filter(title: str, summary: str, locations: str) -> bool:
     return False
 
 
+def _is_locations_filter_all_sarawak(locations_filter: str | None) -> bool:
+    """
+    True when the user did not narrow to specific cities (all Sarawak-wide news allowed).
+    Supabase UI may show blank as EMPTY; some rows use the literal 'sarawak' for whole-region.
+    """
+    if locations_filter is None:
+        return True
+    s = locations_filter.strip().lower()
+    if not s or s in {"empty", "sarawak", "all", "all sarawak"}:
+        return True
+    return False
+
+
+def _row_matches_user_locations(
+    *,
+    title: str,
+    summary: str | None,
+    state: str | None,
+    location: str | None,
+    locations_filter: str,
+) -> bool:
+    """
+    Hard filter: if the user selected specific location(s), keep only matching articles.
+    Uses DB location column when set; otherwise headline/summary heuristics (_matches_location_filter).
+    """
+    if _is_locations_filter_all_sarawak(locations_filter):
+        return True
+
+    user_locs = {loc.strip().lower() for loc in locations_filter.split(",") if loc.strip()}
+    if not user_locs:
+        return True
+
+    loc_col = (location or "").strip().lower()
+    if loc_col:
+        return loc_col in user_locs
+
+    return _matches_location_filter(title, summary or "", locations_filter)
+
+
+def post_matches_user_locations_filter(title: str, body: str | None, locations_filter: str) -> bool:
+    """Channel posts / urgent alerts: same rules as DB rows using extracted location/state."""
+    loc, st = extract_location_and_state(title, body)
+    return _row_matches_user_locations(
+        title=title,
+        summary=body,
+        state=st,
+        location=loc,
+        locations_filter=locations_filter,
+    )
+
+
 def _article_source_is_telegram(source: str | None) -> bool:
     """NewsArticle.source is a display name like 'Telegram (@swbnews)'."""
     return (source or "").lower().startswith("telegram")
@@ -237,6 +288,7 @@ def _db_article_eligible_for_user_pref(
     *,
     categories_filter: str,
     area_keywords_filter: str,
+    locations_filter: str = "",
 ) -> bool:
     """
     Per-user gate for DB-backed news rows before geo ranking.
@@ -254,9 +306,20 @@ def _db_article_eligible_for_user_pref(
     combined = f"{art.title}\n{art.ai_summary or art.raw_summary or ''}"
     if _article_source_is_telegram(art.source):
         if (area_keywords_filter or "").strip():
-            return _matches_area_keywords_filter(combined, area_keywords_filter)
-        return matches_local_interest(art.title, art.raw_summary)
-    if not matches_local_interest(art.title, art.raw_summary):
+            if not _matches_area_keywords_filter(combined, area_keywords_filter):
+                return False
+        elif not matches_local_interest(art.title, art.raw_summary):
+            return False
+    elif not matches_local_interest(art.title, art.raw_summary):
+        return False
+
+    if not _row_matches_user_locations(
+        title=art.title or "",
+        summary=art.raw_summary or art.ai_summary,
+        state=getattr(art, "state", None),
+        location=getattr(art, "location", None),
+        locations_filter=locations_filter,
+    ):
         return False
     return True
 
@@ -994,6 +1057,7 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 art,
                 categories_filter=categories_filter,
                 area_keywords_filter=area_keywords_filter,
+                locations_filter=locations_filter,
             ):
                 continue
             rank = _geo_priority_rank(
@@ -1063,11 +1127,24 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                     categories_filter=categories_filter,
                 ):
                     continue
+                loc_rss, st_rss = extract_location_and_state(
+                    item.title or "", item.summary or ""
+                )
+                if not _row_matches_user_locations(
+                    title=item.title or "",
+                    summary=item.summary,
+                    state=st_rss,
+                    location=loc_rss,
+                    locations_filter=locations_filter,
+                ):
+                    continue
                 rank = _geo_priority_rank(
                     title=item.title,
                     summary=item.summary or "",
                     locations_filter=locations_filter,
                     area_keywords_filter=effective_area_keywords_filter_rss,
+                    state=st_rss,
+                    location=loc_rss,
                 )
                 published_ts = item.published.timestamp() if item.published else 0.0
                 ranked_items.append((rank, published_ts, item))
@@ -1267,11 +1344,22 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
                 categories_filter=categories_filter,
             ):
                 continue
+            loc_d, st_d = extract_location_and_state(it.title or "", it.summary or "")
+            if not _row_matches_user_locations(
+                title=it.title or "",
+                summary=it.summary,
+                state=st_d,
+                location=loc_d,
+                locations_filter=locations_filter,
+            ):
+                continue
             rank = _geo_priority_rank(
                 title=it.title or "",
                 summary=snippet_for_rank,
                 locations_filter=locations_filter,
                 area_keywords_filter=area_keywords_filter,
+                state=st_d,
+                location=loc_d,
             )
             published_ts = it.published or start_of_today
             ranked.append((rank, published_ts, it))
@@ -1312,6 +1400,7 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
             art,
             categories_filter=categories_filter,
             area_keywords_filter=area_keywords_filter,
+            locations_filter=locations_filter,
         ):
             continue
 
@@ -1408,11 +1497,22 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
                 categories_filter=categories_filter,
             ):
                 continue
+            loc_e, st_e = extract_location_and_state(title, it.summary or "")
+            if not _row_matches_user_locations(
+                title=title,
+                summary=it.summary,
+                state=st_e,
+                location=loc_e,
+                locations_filter=locations_filter,
+            ):
+                continue
             rank = _geo_priority_rank(
                 title=title,
                 summary=snippet,
                 locations_filter=locations_filter,
                 area_keywords_filter=area_keywords_filter,
+                state=st_e,
+                location=loc_e,
             )
             # rank is only used to choose order; we don't need full ranking here.
             evidence_lines.append(f"- {title}\n  {_truncate_text(snippet, max_chars=450)}")
@@ -1434,6 +1534,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
             art,
             categories_filter=categories_filter,
             area_keywords_filter=area_keywords_filter,
+            locations_filter=locations_filter,
         ):
             continue
         rank = _geo_priority_rank(

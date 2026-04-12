@@ -248,6 +248,45 @@ def _matches_location_filter(title: str, summary: str, locations: str) -> bool:
     return False
 
 
+def _article_source_is_telegram(source: str | None) -> bool:
+    """NewsArticle.source is a display name like 'Telegram (@swbnews)'."""
+    return (source or "").lower().startswith("telegram")
+
+
+def _db_article_eligible_for_user_pref(
+    art: NewsArticle,
+    *,
+    categories_filter: str,
+    area_keywords_filter: str,
+) -> bool:
+    """
+    Per-user gate for DB-backed news rows before geo ranking.
+    Telegram posts: if the user set Area Keywords, require a substring match; otherwise use the
+    global Sarawak_Local_Keywords file. Non-Telegram: unchanged (global keywords + categories).
+    """
+    if not _matches_category_filter(art.title, art.raw_summary or "", categories_filter):
+        return False
+    combined = f"{art.title}\n{art.ai_summary or art.raw_summary or ''}"
+    if _article_source_is_telegram(art.source):
+        if (area_keywords_filter or "").strip():
+            return _matches_area_keywords_filter(combined, area_keywords_filter)
+        return matches_local_interest(art.title, art.raw_summary)
+    if not matches_local_interest(art.title, art.raw_summary):
+        return False
+    return True
+
+
+def _rss_item_prefilter_for_user_pref(item: RssItem, *, area_keywords_filter: str) -> bool:
+    """Live-fetch fallback: same Telegram vs global rule as _db_article_eligible_for_user_pref (no category here)."""
+    is_tg = (item.source or "").lower().startswith("telegram:")
+    if is_tg:
+        if (area_keywords_filter or "").strip():
+            combined = f"{item.title}\n{item.summary or ''}"
+            return _matches_area_keywords_filter(combined, area_keywords_filter)
+        return matches_local_interest(item.title, item.summary)
+    return matches_local_interest(item.title, item.summary)
+
+
 def _matches_area_keywords_filter(text: str, area_keywords: str) -> bool:
     """
     Substring match for roads/areas (roads, taman, kampung).
@@ -366,6 +405,49 @@ def _fallback_summary_from_text(text: str, max_words: int = 50) -> str:
     if len(words) <= max_words:
         return cleaned
     return " ".join(words[:max_words]).rstrip(" ,;:.") + "..."
+
+
+def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
+    """
+    Fill ai_summary for the given news_articles rows (same logic as get_latest_news_text_for_user:
+    optional full-page scrape, Ollama summarize, deterministic fallback). Commits per row so one
+    failure does not block the rest.
+    """
+    if not article_ids:
+        return 0
+    from src.ai.summarizer import summarize
+    from src.scrapers.article_scraper import extract_article_content
+
+    updated = 0
+    with SessionLocal() as session:
+        for aid in article_ids:
+            art = session.get(NewsArticle, aid)
+            if art is None:
+                continue
+            if (art.ai_summary or "").strip():
+                continue
+            try:
+                article_text = extract_article_content(art.link)
+                source_text = article_text or art.raw_summary or art.title or ""
+                ai = summarize(source_text, max_words=50, title=art.title or "")
+                if not ai:
+                    ai = _fallback_summary_from_text(art.raw_summary or art.title or "", max_words=50)
+                art.ai_summary = ai
+                session.commit()
+                updated += 1
+            except Exception:
+                session.rollback()
+                try:
+                    art2 = session.get(NewsArticle, aid)
+                    if art2 is not None and not (art2.ai_summary or "").strip():
+                        art2.ai_summary = _fallback_summary_from_text(
+                            art2.raw_summary or art2.title or "", max_words=50
+                        )
+                        session.commit()
+                        updated += 1
+                except Exception:
+                    session.rollback()
+    return updated
 
 
 def build_urgent_preview(title: str, summary: str | None, max_words: int = 45) -> str:
@@ -875,9 +957,11 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
         ranked: List[tuple[int, datetime, NewsArticle]] = []
         for art in candidates:
             summary_for_rank = art.ai_summary or art.raw_summary or ""
-            if not matches_local_interest(art.title, art.raw_summary):
-                continue
-            if not _matches_category_filter(art.title, art.raw_summary or "", categories_filter):
+            if not _db_article_eligible_for_user_pref(
+                art,
+                categories_filter=categories_filter,
+                area_keywords_filter=area_keywords_filter,
+            ):
                 continue
             rank = _geo_priority_rank(
                 title=art.title,
@@ -907,7 +991,11 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                     "<i>This might be a temporary network issue or the sources are unavailable.</i>"
                 )
 
-            kw_sorted = [i for i in sorted_items if matches_local_interest(i.title, i.summary)]
+            kw_sorted = [
+                i
+                for i in sorted_items
+                if _rss_item_prefilter_for_user_pref(i, area_keywords_filter=area_keywords_filter)
+            ]
             if not kw_sorted:
                 if local_keyword_filter_enabled():
                     return (
@@ -1110,7 +1198,7 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
         todays: list[RssItem] = []
         start_next_day = start_of_today + timedelta(days=1)
         for it in items:
-            if not matches_local_interest(it.title, it.summary):
+            if not _rss_item_prefilter_for_user_pref(it, area_keywords_filter=area_keywords_filter):
                 continue
             if it.published and (it.published < start_of_today or it.published >= start_next_day):
                 continue
@@ -1120,7 +1208,7 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
             todays = [
                 it
                 for it in items
-                if matches_local_interest(it.title, it.summary)
+                if _rss_item_prefilter_for_user_pref(it, area_keywords_filter=area_keywords_filter)
             ][: max_articles * 2]
 
         if not todays:
@@ -1173,13 +1261,10 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
         raw_summary = art.raw_summary or ""
         summary_for_rank = raw_summary or art.ai_summary or art.title or ""
 
-        if not matches_local_interest(art.title or "", art.raw_summary):
-            continue
-
-        if not _matches_category_filter(
-            art.title or "",
-            summary_for_rank or "",
-            categories_filter,
+        if not _db_article_eligible_for_user_pref(
+            art,
+            categories_filter=categories_filter,
+            area_keywords_filter=area_keywords_filter,
         ):
             continue
 
@@ -1266,7 +1351,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
             snippet = it.summary or it.title or ""
             if not title:
                 continue
-            if not matches_local_interest(title, it.summary):
+            if not _rss_item_prefilter_for_user_pref(it, area_keywords_filter=area_keywords_filter):
                 continue
             if not _matches_category_filter(title, it.summary or "", categories_filter):
                 continue
@@ -1292,9 +1377,11 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     ranked: List[tuple[int, datetime, NewsArticle]] = []
     for art in candidates:
         summary_for_rank = art.raw_summary or art.ai_summary or art.title or ""
-        if not matches_local_interest(art.title or "", art.raw_summary):
-            continue
-        if not _matches_category_filter(art.title or "", art.raw_summary or "", categories_filter):
+        if not _db_article_eligible_for_user_pref(
+            art,
+            categories_filter=categories_filter,
+            area_keywords_filter=area_keywords_filter,
+        ):
             continue
         rank = _geo_priority_rank(
             title=art.title or "",

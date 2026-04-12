@@ -5,8 +5,8 @@ from typing import List
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from src.core.services import _get_source_name  # reuse existing mapping
-from src.core.config import RSS_FEEDS, TELEGRAM_SOURCE_CHANNELS
+from src.core.services import _get_source_name, backfill_ai_summaries_for_article_ids
+from src.core.config import PREFETCH_AI_SUMMARY, RSS_FEEDS, TELEGRAM_SOURCE_CHANNELS
 from src.core.local_keywords import matches_local_interest
 from src.core.location_extractor import extract_location_and_state
 from src.core.models import NewsArticle
@@ -57,10 +57,14 @@ def prefetch_latest_articles_to_db(
         return 0
 
     inserted = 0
+    inserted_ids: List[int] = []
     with SessionLocal() as session:
         seen_batch: set[str] = set()
         for item in items:
-            if not matches_local_interest(item.title, item.summary):
+            is_telegram = (item.source or "").lower().startswith("telegram:")
+            # RSS: keep global Sarawak_Local_Keywords gate. Telegram: store all channel posts to DB;
+            # per-user delivery uses /settings Area Keywords (see services.get_latest_news_text_for_user).
+            if not is_telegram and not matches_local_interest(item.title, item.summary):
                 continue
             link = canonical_link_for_news_item(item)
             bkey = _batch_dedup_key(link)
@@ -88,13 +92,20 @@ def prefetch_latest_articles_to_db(
             )
             session.add(article)
             try:
+                session.flush()
+                new_id = article.id
                 session.commit()
                 inserted += 1
+                if new_id is not None:
+                    inserted_ids.append(int(new_id))
             except IntegrityError:
                 session.rollback()  # duplicate link
             except Exception:
                 session.rollback()
                 raise
+
+    if PREFETCH_AI_SUMMARY and inserted_ids:
+        backfill_ai_summaries_for_article_ids(inserted_ids)
 
     return inserted
 

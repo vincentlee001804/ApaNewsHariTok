@@ -6,6 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError, UserAlreadyParticipantError
+from telethon.sessions import StringSession
 from telethon.tl.functions.channels import JoinChannelRequest
 
 
@@ -120,6 +121,24 @@ async def run_test() -> None:
         print(f"Fetched messages: {len(messages)}")
         print(f"Keyword matches: {len(matched)}")
         print(f"Saved output to: {OUTPUT_FILE.resolve()}")
+
+        try:
+            # SQLiteSession.save() only commits the DB file and returns None.
+            # StringSession.save(session) serializes any session type to a portable string.
+            exported = StringSession.save(client.session)
+            if not exported:
+                print(
+                    "\n--- TELEGRAM_SESSION_STRING ---\n"
+                    "<empty: session not authorized or missing auth key>\n"
+                )
+            else:
+                print(
+                    "\n--- TELEGRAM_SESSION_STRING (keep secret; use on Fly.io without sqlite3) ---\n"
+                    "Set as env TELEGRAM_SESSION_STRING; same TELEGRAM_API_ID / TELEGRAM_API_HASH required.\n"
+                    f"{exported}\n"
+                )
+        except Exception as exc:
+            print(f"\n(Could not export session string: {exc})")
 
         if matched:
             print("\nTop matched messages:")

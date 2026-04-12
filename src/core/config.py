@@ -19,6 +19,12 @@ OLLAMA_GENERATE_URL: Final[str] = f"{_OLLAMA_API_BASE}/api/generate"
 OLLAMA_API_KEY: Final[str | None] = (os.getenv("OLLAMA_API_KEY") or "").strip() or None
 OLLAMA_MODEL: Final[str] = (os.getenv("OLLAMA_MODEL", "llama3.1").strip() or "llama3.1")
 
+# Max tokens Ollama may generate for article summaries (/api/generate). Too low cuts mid-sentence.
+OLLAMA_SUMMARY_NUM_PREDICT: Final[int] = max(
+    128,
+    int((os.getenv("OLLAMA_SUMMARY_NUM_PREDICT", "384").strip() or "384")),
+)
+
 
 def ollama_request_headers() -> dict[str, str]:
     """Authorization header for Ollama Cloud; empty for local Ollama."""

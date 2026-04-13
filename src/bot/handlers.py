@@ -1007,11 +1007,11 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
     if lowered.strip() in pure_greetings:
         await update.message.reply_text(
             "Hello! I am *Apa News Hari Tok?* 👋\n\n"
-            "I can help you with Sarawak local news.\n"
+            "My main feature is scheduled Sarawak local news summaries.\n"
             "Try one of these:\n"
             "• `/latest`\n"
             "• `today summary` (or `ringkasan berita hari ini`)\n"
-            "• `Any water disruption in Kuching today?`\n",
+            "• `/settings` to configure your schedule and preferences\n",
             parse_mode=ParseMode.MARKDOWN,
         )
         return
@@ -1031,9 +1031,8 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
             "I am *Apa News Hari Tok?* — your Sarawak local news assistant.\n\n"
             "I can:\n"
             "• summarize latest local news\n"
-            "• answer questions based on news in my database\n"
             "• send personalized scheduled updates\n\n"
-            "Try `/latest` or ask: `Any water disruption in Kuching today?`",
+            "Try `/latest` and use `/settings` to set your schedule.",
             parse_mode=ParseMode.MARKDOWN,
         )
         return

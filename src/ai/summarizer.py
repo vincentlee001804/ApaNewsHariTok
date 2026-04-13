@@ -5,6 +5,7 @@ import logging
 import re
 import textwrap
 from typing import Any, List, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -23,6 +24,18 @@ from src.core.news_categories import (
 logger = logging.getLogger(__name__)
 
 
+def _ollama_endpoint_log_label(generate_url: str, *, used_fallback: bool) -> str:
+    """Human-readable route for logs: local vs cloud vs other remote."""
+    host = (urlparse(generate_url).hostname or "").lower()
+    if used_fallback:
+        return "cloud (fallback)"
+    if host in ("localhost", "127.0.0.1", "::1") or host.endswith(".localhost"):
+        return "local (primary)"
+    if "ollama.com" in host:
+        return "cloud (primary)"
+    return "remote (primary)"
+
+
 def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
     """
     Try primary Ollama (usually local), then OLLAMA_API_BASE_FALLBACK if configured.
@@ -39,8 +52,11 @@ def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=t)
             response.raise_for_status()
-            if i > 0:
-                logger.info("Ollama: using fallback host %s", url.rsplit("/api/", 1)[0])
+            netloc = urlparse(url).netloc or urlparse(url).path.split("/api/")[0] or url
+            route = _ollama_endpoint_log_label(url, used_fallback=(i > 0))
+            msg = f"[ollama] {route} host={netloc} model={model}"
+            print(msg, flush=True)
+            logger.info(msg)
             return response
         except Exception as exc:
             last_exc = exc

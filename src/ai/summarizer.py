@@ -112,14 +112,16 @@ def finalize_summary_plain_text(text: str) -> str:
     return t + "…"
 
 
-def normalize_stored_ai_summary(text: str | None, *, max_words: int = 30) -> str:
+def normalize_stored_ai_summary(text: str | None, *, max_words: int | None = None) -> str:
     """
-    Single pipeline for text saved to news_articles.ai_summary (fixes legacy Markdown / cuts).
+    Pipeline for news_articles.ai_summary and Telegram display: strip Markdown artifacts,
+    optional word cap, light finish. Default is no word cap so the full model output is kept.
     """
     s = strip_markdown_artifacts_for_plain_text(text or "")
     if not s:
         return ""
-    s = clip_plain_text_to_word_limit(s, max_words)
+    if max_words is not None and max_words > 0:
+        s = clip_plain_text_to_word_limit(s, max_words)
     return finalize_summary_plain_text(s)
 
 
@@ -177,9 +179,8 @@ def classify_category(text: str) -> Optional[str]:
 
 def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
     """
-    Use a local Ollama model to summarize the given text.
-
-    Returns a short summary string, or None if the request fails.
+    Use Ollama to summarize the given text. The prompt asks for about ``max_words`` words, but the
+    returned text is not hard-clipped so longer accurate summaries are preserved end-to-end.
     """
     if not text:
         return None
@@ -257,7 +258,6 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
             return None
 
         summary = strip_markdown_artifacts_for_plain_text(summary)
-        summary = clip_plain_text_to_word_limit(summary, max_words)
         summary = finalize_summary_plain_text(summary)
         return summary or None
     except Exception:

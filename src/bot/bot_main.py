@@ -40,7 +40,10 @@ from src.core.config import (
 )
 from src.core.cleanup_service import cleanup_old_news_data
 from src.core.prefetch_service import prefetch_latest_articles_to_db
-from src.core.services import get_latest_news_text_for_user
+from src.core.services import (
+    SCHEDULED_PUSH_SUMMARY_PENDING_SKIP_MARKER,
+    get_latest_news_text_for_user,
+)
 from src.core.user_service import list_active_user_preferences, touch_last_scheduled_push_at
 from src.storage.database import init_db
 
@@ -112,6 +115,7 @@ def main() -> None:
             "no new headlines since your last request",
             "no news items match your current filters",
             "i couldn't fetch any news items right now",
+            SCHEDULED_PUSH_SUMMARY_PENDING_SKIP_MARKER,
         ]
         return any(marker in lowered for marker in skip_markers)
 
@@ -164,9 +168,9 @@ def main() -> None:
                     continue
 
                 text = await asyncio.to_thread(
-                    get_latest_news_text_for_user,
-                    telegram_id,
-                    1,
+                    lambda tid=telegram_id: get_latest_news_text_for_user(
+                        tid, 1, scheduled_push=True
+                    )
                 )
                 if _should_skip_push_message(text):
                     continue

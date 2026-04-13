@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any, List
+from typing import Any, Final, List
 
 from sqlalchemy import exists, func, select
 
@@ -482,8 +482,8 @@ def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
                 source_text = article_text or art.raw_summary or art.title or ""
                 ai = summarize(source_text, title=art.title or "")
                 if not ai:
-                    ai = _fallback_summary_from_text(art.raw_summary or art.title or "", max_words=30)
-                art.ai_summary = normalize_stored_ai_summary(ai, max_words=30)
+                    ai = _fallback_summary_from_text(art.raw_summary or art.title or "", max_words=80)
+                art.ai_summary = normalize_stored_ai_summary(ai)
                 session.commit()
                 updated += 1
             except Exception:
@@ -492,7 +492,7 @@ def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
                     art2 = session.get(NewsArticle, aid)
                     if art2 is not None and not (art2.ai_summary or "").strip():
                         art2.ai_summary = _fallback_summary_from_text(
-                            art2.raw_summary or art2.title or "", max_words=30
+                            art2.raw_summary or art2.title or "", max_words=80
                         )
                         session.commit()
                         updated += 1
@@ -1102,7 +1102,7 @@ def get_latest_news_text(max_items: int = 3) -> str:
             else None
         )
         if not ai_summary:
-            ai_summary = _fallback_summary_from_text(item.summary or item.title, max_words=30)
+            ai_summary = _fallback_summary_from_text(item.summary or item.title, max_words=80)
 
         # Get source name
         source_name = _get_source_name(item.source)
@@ -1113,7 +1113,7 @@ def get_latest_news_text(max_items: int = 3) -> str:
 
         escaped_title = escape_html(item.title)
         escaped_summary = escape_html(
-            normalize_stored_ai_summary(ai_summary or "", max_words=30)
+            normalize_stored_ai_summary(ai_summary or "")
         )
         escaped_source = escape_html(source_name)
 
@@ -1135,7 +1135,22 @@ def get_latest_news_text(max_items: int = 3) -> str:
     return "\n".join(lines)
 
 
-def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
+# Substring used by the scheduled job to skip sending without advancing last_scheduled_push_at.
+SCHEDULED_PUSH_SUMMARY_PENDING_SKIP_MARKER: Final[str] = "ai summaries are still being prepared"
+
+SCHEDULED_PUSH_SUMMARY_PENDING_USER_MESSAGE: Final[str] = (
+    "AI summaries are still being prepared for the latest articles.\n"
+    "<i>We will include them in your next notification when ready. "
+    "Scheduled pushes do not send raw article text.</i>"
+)
+
+
+def get_latest_news_text_for_user(
+    telegram_id: int,
+    max_items: int = 3,
+    *,
+    scheduled_push: bool = False,
+) -> str:
     """
     Fetch latest items from configured RSS feeds, filtered by user preferences,
     and format them into HTML suitable for Telegram.
@@ -1148,6 +1163,10 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
 
     With deduplication on, \"already shown\" is tracked per user via UserArticleDelivery,
     not global NewsArticle.last_sent_at.
+
+    When ``scheduled_push`` is True, only rows with a non-empty ``ai_summary`` are eligible.
+    If articles match filters but summaries are not ready yet, returns
+    :data:`SCHEDULED_PUSH_SUMMARY_PENDING_USER_MESSAGE`. Live RSS fallback is not used.
     """
     from src.core.user_service import get_or_create_user, get_user_preference
 
@@ -1215,9 +1234,20 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
         # Sort by rank (best first), then newest first
         ranked.sort(key=lambda t: (t[0], -t[1].timestamp()))
 
-        chosen: List[NewsArticle] = [t[2] for t in ranked[:max_items]]
+        ranked_pick = ranked
+        if scheduled_push:
+            ranked_pick = [t for t in ranked if (t[2].ai_summary or "").strip()]
+
+        chosen: List[NewsArticle] = [t[2] for t in ranked_pick[:max_items]]
 
         if not chosen:
+            if scheduled_push:
+                if ranked:
+                    return SCHEDULED_PUSH_SUMMARY_PENDING_USER_MESSAGE
+                return (
+                    "No new headlines since your last request.\n"
+                    "<i>You are up to date with the latest news from these sources.</i>"
+                )
             # Fallback: live RSS fetch if DB has nothing yet
             eff_rss = effective_rss_limit_per_feed(15)
             items: List[RssItem] = _fetch_combined_latest_items(
@@ -1348,13 +1378,13 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 )
                 if not ai_summary:
                     ai_summary = _fallback_summary_from_text(
-                        item.summary or item.title, max_words=30
+                        item.summary or item.title, max_words=80
                     )
                 source_name = _get_source_name(item.source)
 
                 escaped_title = escape_html(item.title)
                 escaped_summary = escape_html(
-                    normalize_stored_ai_summary(ai_summary or "", max_words=30)
+                    normalize_stored_ai_summary(ai_summary or "")
                 )
                 escaped_source = escape_html(source_name)
                 escaped_category = escape_html(category)
@@ -1368,20 +1398,21 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 lines.pop()
             return "\n".join(lines)
 
-        # Ensure ai_summary exists (cache)
+        # Ensure ai_summary exists (cache); scheduled pushes only use rows already summarized.
         from src.scrapers.article_scraper import extract_article_content
 
-        for art in chosen:
-            if art.ai_summary:
-                continue
-            article_text = extract_article_content(art.link)
-            source_text = article_text or art.raw_summary or art.title
-            art.ai_summary = summarize(source_text, title=art.title)
-            if not art.ai_summary:
-                art.ai_summary = _fallback_summary_from_text(
-                    art.raw_summary or art.title, max_words=30
-                )
-            art.ai_summary = normalize_stored_ai_summary(art.ai_summary, max_words=30)
+        if not scheduled_push:
+            for art in chosen:
+                if art.ai_summary:
+                    continue
+                article_text = extract_article_content(art.link)
+                source_text = article_text or art.raw_summary or art.title
+                art.ai_summary = summarize(source_text, title=art.title)
+                if not art.ai_summary:
+                    art.ai_summary = _fallback_summary_from_text(
+                        art.raw_summary or art.title, max_words=80
+                    )
+                art.ai_summary = normalize_stored_ai_summary(art.ai_summary)
 
         if DEDUPLICATION_ENABLED and user_id is not None:
             _record_deliveries_for_user(session, user_id, chosen, now)
@@ -1397,12 +1428,14 @@ def get_latest_news_text_for_user(telegram_id: int, max_items: int = 3) -> str:
                 source_name = _get_source_name(source_name)
 
             escaped_title = escape_html(art.title)
-            raw_sum = art.ai_summary or _fallback_summary_from_text(
-                art.raw_summary or art.title, max_words=30
-            )
-            escaped_summary = escape_html(
-                normalize_stored_ai_summary(raw_sum or "", max_words=30)
-            )
+            if scheduled_push:
+                body = (art.ai_summary or "").strip()
+                escaped_summary = escape_html(normalize_stored_ai_summary(body))
+            else:
+                raw_sum = art.ai_summary or _fallback_summary_from_text(
+                    art.raw_summary or art.title, max_words=80
+                )
+                escaped_summary = escape_html(normalize_stored_ai_summary(raw_sum or ""))
             escaped_source = escape_html(source_name)
             escaped_category = escape_html(category)
 

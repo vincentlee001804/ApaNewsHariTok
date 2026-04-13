@@ -197,7 +197,8 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
         - If the text does not contain enough matching information for the headline, output exactly: NO_SUMMARY
 
         Provide only the summary text, no instructions, labels, or quotes around the summary.
-        Write in clear, natural language.
+        Write in clear, natural language using simple everyday words.
+        Avoid jargon, legal wording, and technical terms unless necessary.
         End with a complete sentence (do not stop mid-thought).
         Use plain text only: no Markdown, no ** or * for bold/italic, no __underscores__.
 
@@ -282,6 +283,7 @@ def summarize_digest(items_text: str, max_words: int = 160) -> Optional[str]:
         - Do NOT include headings or numbering.
         - Total output must be within {max_words} words.
         - Use plain text only (no HTML, no Markdown).
+        - Use simple, easy-to-understand words for general readers.
 
         Items (titles + item summaries):
         \"\"\"{items_text.strip()}\"\"\"
@@ -347,6 +349,7 @@ def answer_news_question(question: str, items_text: str, max_words: int = 220) -
           "I couldn't find relevant information in the news items I have."
         - Keep the answer concise (<= {max_words} words).
         - Use plain text only (no HTML, no Markdown).
+        - Use simple, easy-to-understand words.
         - Prefer bullet points when there are multiple facts.
         - Optionally end with a short "Related headlines:" line listing 2-4 titles.
 

@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import Final, List
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -11,14 +12,27 @@ load_dotenv()
 
 TELEGRAM_BOT_TOKEN: str | None = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# Ollama: default local server. For Ollama Cloud set OLLAMA_API_BASE=https://ollama.com and OLLAMA_API_KEY
-# (see https://ollama.com/settings/keys). Use a cloud-capable tag, e.g. ministral-3:8b-cloud.
+# Ollama: primary = local or any URL. Optional OLLAMA_API_BASE_FALLBACK = Ollama Cloud when primary is down.
+# Cloud: https://ollama.com + API key (https://ollama.com/settings/keys). Use a cloud tag, e.g. ministral-3:8b-cloud.
 _OLLAMA_API_BASE: Final[str] = (
     (os.getenv("OLLAMA_API_BASE", "http://localhost:11434").strip() or "http://localhost:11434").rstrip("/")
 )
 OLLAMA_GENERATE_URL: Final[str] = f"{_OLLAMA_API_BASE}/api/generate"
 OLLAMA_API_KEY: Final[str | None] = (os.getenv("OLLAMA_API_KEY") or "").strip() or None
 OLLAMA_MODEL: Final[str] = (os.getenv("OLLAMA_MODEL", "llama3.1").strip() or "llama3.1")
+
+_fb_base_raw = (os.getenv("OLLAMA_API_BASE_FALLBACK") or "").strip().rstrip("/")
+OLLAMA_API_BASE_FALLBACK: Final[str | None] = _fb_base_raw or None
+OLLAMA_FALLBACK_API_KEY: Final[str | None] = (os.getenv("OLLAMA_FALLBACK_API_KEY") or "").strip() or None
+OLLAMA_MODEL_FALLBACK: Final[str] = (
+    (os.getenv("OLLAMA_MODEL_FALLBACK") or "").strip() or OLLAMA_MODEL
+)
+
+# When a fallback URL is set, the first (primary) request uses this cap so a sleeping PC fails fast (seconds not minutes).
+OLLAMA_PRIMARY_TIMEOUT_SEC: Final[int] = max(
+    1,
+    int((os.getenv("OLLAMA_PRIMARY_TIMEOUT_SEC", "8").strip() or "8")),
+)
 
 # Max tokens Ollama may generate for article summaries (/api/generate). Too low cuts mid-sentence.
 OLLAMA_SUMMARY_NUM_PREDICT: Final[int] = max(
@@ -27,11 +41,56 @@ OLLAMA_SUMMARY_NUM_PREDICT: Final[int] = max(
 )
 
 
-def ollama_request_headers() -> dict[str, str]:
-    """Authorization header for Ollama Cloud; empty for local Ollama."""
-    if OLLAMA_API_KEY:
-        return {"Authorization": f"Bearer {OLLAMA_API_KEY}"}
+def _ollama_host_is_loopback(url: str) -> bool:
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    return host in ("localhost", "127.0.0.1", "::1") or host.endswith(".localhost")
+
+
+def ollama_headers_for_endpoint(generate_url: str, *, is_fallback: bool) -> dict[str, str]:
+    """
+    Auth for /api/generate. Fallback uses OLLAMA_FALLBACK_API_KEY or OLLAMA_API_KEY.
+    Primary on localhost/127.0.0.1 sends no Bearer so the same OLLAMA_API_KEY can be cloud-only.
+    Primary on any other host uses OLLAMA_API_KEY (single cloud endpoint).
+    """
+    if is_fallback:
+        key = OLLAMA_FALLBACK_API_KEY or OLLAMA_API_KEY
+    elif _ollama_host_is_loopback(generate_url):
+        return {}
+    else:
+        key = OLLAMA_API_KEY
+    if key:
+        return {"Authorization": f"Bearer {key}"}
     return {}
+
+
+def iter_ollama_generate_targets() -> tuple[tuple[str, dict[str, str], str, bool], ...]:
+    """
+    Ordered /api/generate targets: (url, headers, model, use_short_timeout_when_fallback_configured).
+    """
+    primary = (
+        OLLAMA_GENERATE_URL,
+        ollama_headers_for_endpoint(OLLAMA_GENERATE_URL, is_fallback=False),
+        OLLAMA_MODEL,
+        True,
+    )
+    if not OLLAMA_API_BASE_FALLBACK:
+        return (primary,)
+    fb_url = f"{OLLAMA_API_BASE_FALLBACK}/api/generate"
+    secondary = (
+        fb_url,
+        ollama_headers_for_endpoint(fb_url, is_fallback=True),
+        OLLAMA_MODEL_FALLBACK,
+        False,
+    )
+    return (primary, secondary)
+
+
+def ollama_request_headers() -> dict[str, str]:
+    """Same as primary endpoint headers (backward compatible)."""
+    return ollama_headers_for_endpoint(OLLAMA_GENERATE_URL, is_fallback=False)
 
 DEFAULT_RSS_FEEDS: Final[List[str]] = [
     "https://www.sarawaktribune.com/feed/",

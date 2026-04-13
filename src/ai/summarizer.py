@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import textwrap
 from typing import Any, List, Optional
@@ -8,10 +9,10 @@ from typing import Any, List, Optional
 import requests
 
 from src.core.config import (
-    OLLAMA_GENERATE_URL,
     OLLAMA_MODEL,
+    OLLAMA_PRIMARY_TIMEOUT_SEC,
     OLLAMA_SUMMARY_NUM_PREDICT,
-    ollama_request_headers,
+    iter_ollama_generate_targets,
 )
 from src.core.news_categories import (
     NEWS_ARTICLE_CATEGORY_LABELS as ALLOWED_CATEGORIES,
@@ -19,14 +20,35 @@ from src.core.news_categories import (
     normalize_llm_category_token,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
-    return requests.post(
-        OLLAMA_GENERATE_URL,
-        json=json_body,
-        headers=ollama_request_headers(),
-        timeout=timeout,
-    )
+    """
+    Try primary Ollama (usually local), then OLLAMA_API_BASE_FALLBACK if configured.
+    When two targets exist, the first uses a shorter timeout so a sleeping host fails fast.
+    """
+    targets = iter_ollama_generate_targets()
+    last_exc: Exception | None = None
+    multi = len(targets) > 1
+    for i, (url, headers, model, use_short_timeout) in enumerate(targets):
+        payload = {**json_body, "model": model}
+        t = timeout
+        if multi and use_short_timeout:
+            t = min(timeout, OLLAMA_PRIMARY_TIMEOUT_SEC)
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=t)
+            response.raise_for_status()
+            if i > 0:
+                logger.info("Ollama: using fallback host %s", url.rsplit("/api/", 1)[0])
+            return response
+        except Exception as exc:
+            last_exc = exc
+            host = url.rsplit("/api/", 1)[0]
+            logger.debug("Ollama request failed (%s): %s", host, exc)
+            continue
+    assert last_exc is not None
+    raise last_exc
 
 def strip_markdown_artifacts_for_plain_text(text: str) -> str:
     """

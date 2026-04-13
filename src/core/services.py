@@ -1125,7 +1125,7 @@ def get_latest_news_text(max_items: int = 3) -> str:
         lines.append(f"<blockquote>[{escaped_category}] <b>{escaped_title}</b></blockquote>")
         lines.append(escaped_summary)
         lines.append("")
-        lines.append(f'Source: <a href="{item.link}">{escaped_source}</a>')
+        lines.append(f'Sources: <a href="{item.link}">{escaped_source}</a>')
         lines.append("────────────")  # Visual separator between items
 
     # Remove trailing separator before final join
@@ -1391,7 +1391,7 @@ def get_latest_news_text_for_user(
 
                 lines.append(f"<blockquote>[{escaped_category}] <b>{escaped_title}</b></blockquote>")
                 lines.append(escaped_summary)
-                lines.append(f'<a href="{item.link}">{escaped_source}</a>')
+                lines.append(f'Sources: <a href="{item.link}">{escaped_source}</a>')
                 lines.append("────────────")
 
             if lines and lines[-1] == "────────────":
@@ -1441,7 +1441,7 @@ def get_latest_news_text_for_user(
 
             lines.append(f"<blockquote>[{escaped_category}] <b>{escaped_title}</b></blockquote>")
             lines.append(escaped_summary)
-            lines.append(f'<a href="{art.link}">{escaped_source}</a>')
+            lines.append(f'Sources: <a href="{art.link}">{escaped_source}</a>')
             lines.append("────────────")
 
         if lines and lines[-1] == "────────────":

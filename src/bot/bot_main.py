@@ -37,6 +37,7 @@ from src.core.config import (
     SCHEDULED_PUSH_QUIET_TIMEZONE,
     TELEGRAM_SOURCE_CHANNELS,
     is_scheduled_push_quiet_hours_now,
+    print_ollama_config_banner,
     require_bot_token,
 )
 from src.core.cleanup_service import cleanup_old_news_data
@@ -252,6 +253,7 @@ def main() -> None:
             f"{DB_CLEANUP_INTERVAL_HOURS} hours (retention={DB_RETENTION_DAYS} days)"
         )
 
+    print_ollama_config_banner()
     print("Bot is starting... Press Ctrl+C to stop.")
     application.run_polling()
 

@@ -106,7 +106,7 @@ WELCOME_TEXT: Final[str] = (
     "Welcome! 👋\n\n"
     "I am an *AI Local News Summarization Bot*.\n"
     "I automatically gather local Sarawak news, use a local AI model to summarize "
-    "lengthy articles into short ~30-word briefs, and send them directly to your Telegram "
+    "lengthy articles into short briefs, and send them directly to your Telegram "
     "as push notifications.\n\n"
     "*Quick start (30 seconds):*\n"
     "1) Tap /settings to choose categories/location/frequency\n"
@@ -196,8 +196,7 @@ async def latest_demo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def test_push_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Send one message that matches the scheduled job: get_latest_news_text_for_user(..., 1).
-    Unlike the job, this always delivers the text (no skip when there is no news) so you can
-    inspect formatting and empty states.
+    Mirrors the scheduled job (including waiting for AI summaries—no raw body in the digest).
     """
     if not update.message or not update.effective_user:
         return
@@ -218,7 +217,11 @@ async def test_push_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     from src.core.services import get_latest_news_text_for_user
 
     try:
-        text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id, 1)
+        text = await asyncio.to_thread(
+            lambda tid=telegram_id: get_latest_news_text_for_user(
+                tid, 1, scheduled_push=True
+            )
+        )
     except OperationalError:
         logger.exception("Database busy while serving /testpush")
         await update.message.reply_text(

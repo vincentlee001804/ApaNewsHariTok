@@ -1391,6 +1391,7 @@ def get_latest_news_text_for_user(
 
                 lines.append(f"<blockquote>[{escaped_category}] <b>{escaped_title}</b></blockquote>")
                 lines.append(escaped_summary)
+                lines.append("")
                 lines.append(f'Sources: <a href="{item.link}">{escaped_source}</a>')
                 lines.append("────────────")
 
@@ -1441,6 +1442,7 @@ def get_latest_news_text_for_user(
 
             lines.append(f"<blockquote>[{escaped_category}] <b>{escaped_title}</b></blockquote>")
             lines.append(escaped_summary)
+            lines.append("")
             lines.append(f'Sources: <a href="{art.link}">{escaped_source}</a>')
             lines.append("────────────")
 

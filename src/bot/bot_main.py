@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram.constants import ParseMode
+from telegram.error import Forbidden
 
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
@@ -44,7 +45,11 @@ from src.core.services import (
     SCHEDULED_PUSH_SUMMARY_PENDING_SKIP_MARKER,
     get_latest_news_text_for_user,
 )
-from src.core.user_service import list_active_user_preferences, touch_last_scheduled_push_at
+from src.core.user_service import (
+    list_active_user_preferences,
+    set_user_active,
+    touch_last_scheduled_push_at,
+)
 from src.storage.database import init_db
 
 
@@ -160,27 +165,34 @@ def main() -> None:
             now = datetime.utcnow()
             grace_after_start = timedelta(minutes=SCHEDULED_PUSH_GRACE_MINUTES_AFTER_FIRST_SEEN)
             for telegram_id, preference, first_seen_at in users:
-                if first_seen_at and (now - first_seen_at) < grace_after_start:
-                    continue
-                interval_hours = _frequency_interval_hours(preference.frequency)
-                last_sent = preference.last_scheduled_push_at
-                if last_sent and (now - last_sent) < timedelta(hours=interval_hours):
-                    continue
+                try:
+                    if first_seen_at and (now - first_seen_at) < grace_after_start:
+                        continue
+                    interval_hours = _frequency_interval_hours(preference.frequency)
+                    last_sent = preference.last_scheduled_push_at
+                    if last_sent and (now - last_sent) < timedelta(hours=interval_hours):
+                        continue
 
-                text = await asyncio.to_thread(
-                    lambda tid=telegram_id: get_latest_news_text_for_user(
-                        tid, 1, scheduled_push=True
+                    text = await asyncio.to_thread(
+                        lambda tid=telegram_id: get_latest_news_text_for_user(
+                            tid, 1, scheduled_push=True
+                        )
                     )
-                )
-                if _should_skip_push_message(text):
-                    continue
+                    if _should_skip_push_message(text):
+                        continue
 
-                await application.bot.send_message(
-                    chat_id=telegram_id,
-                    text=text,
-                    parse_mode=ParseMode.HTML,
-                )
-                await asyncio.to_thread(touch_last_scheduled_push_at, telegram_id, now)
+                    await application.bot.send_message(
+                        chat_id=telegram_id,
+                        text=text,
+                        parse_mode=ParseMode.HTML,
+                    )
+                    await asyncio.to_thread(touch_last_scheduled_push_at, telegram_id, now)
+                except Forbidden as e:
+                    # User blocked the bot or chat is otherwise unavailable — stop scheduled pushes for them.
+                    await asyncio.to_thread(set_user_active, telegram_id, False)
+                    print(f"[push] deactivated user {telegram_id} (cannot deliver: {e})")
+                except Exception as e:
+                    print(f"[push] user {telegram_id} failed: {e}")
         except Exception as e:
             print(f"[push] error: {e}")
 

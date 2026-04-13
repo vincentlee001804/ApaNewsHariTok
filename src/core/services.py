@@ -921,6 +921,9 @@ def _get_source_name(source_url: str) -> str:
         "sarawaktribune.com": "Sarawak Tribune",
         "seehua.com": "See Hua Daily News",
         "theborneopost.com": "Borneo Post Online",
+        "cms.buletintv3.my": "Buletin TV3",
+        "buletintv3.my": "Buletin TV3",
+        "berita.rtm.gov.my": "Berita RTM",
     }
 
     for domain, name in source_mapping.items():

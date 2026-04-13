@@ -340,7 +340,12 @@ def answer_news_question(question: str, items_text: str, max_words: int = 220) -
 
     prompt = textwrap.dedent(
         f"""
-        You are a local news agent for Sarawak (Malaysia).
+        You are "Apa News Hari Tok?", an AI local news assistant for Sarawak (Malaysia).
+        Role and boundaries:
+        - You summarize and answer questions using ONLY the provided local news items.
+        - You do not browse the web or invent facts outside those items.
+        - If no relevant article exists in the provided items, you must say so clearly.
+
         You will be given a user question and a set of news items (titles + short snippets).
 
         Rules:

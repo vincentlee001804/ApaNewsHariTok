@@ -43,6 +43,29 @@ def _starts_with_any_alias(title_lower: str) -> Optional[str]:
     return None
 
 
+def _first_alias_mention(text_lower: str) -> Optional[str]:
+    """
+    Return canonical location for the earliest whole-word alias mention in text.
+    Prefer explicit mentions in title/body over dictionary order.
+    """
+    if not text_lower:
+        return None
+
+    best: tuple[int, str] | None = None
+    for canonical, aliases in SARAWAK_LOCATION_ALIASES.items():
+        for alias in aliases:
+            token = alias.lower().strip()
+            if not token:
+                continue
+            m = re.search(rf"\b{re.escape(token)}\b", text_lower)
+            if not m:
+                continue
+            idx = m.start()
+            if best is None or idx < best[0]:
+                best = (idx, canonical)
+    return best[1] if best else None
+
+
 def extract_location_and_state(title: str, text: str | None = None) -> Tuple[Optional[str], str]:
     """
     Extract a coarse location for prioritization.
@@ -62,12 +85,17 @@ def extract_location_and_state(title: str, text: str | None = None) -> Tuple[Opt
     if canonical:
         return canonical, "sarawak"
 
-    # Fallback: if Sarawak alias appears anywhere (less strict than prefix),
-    # still mark as Sarawak related.
-    combined = f"{title or ''}\n{text or ''}".lower()
-    for canonical, aliases in SARAWAK_LOCATION_ALIASES.items():
-        if any(alias.lower() in combined for alias in aliases):
-            return canonical, "sarawak"
+    # Next priority: explicit location mention anywhere in title.
+    # This avoids body-text noise overriding a clear city in the headline.
+    canonical = _first_alias_mention(title_lower)
+    if canonical:
+        return canonical, "sarawak"
+
+    # Last fallback: body text.
+    combined = (text or "").lower()
+    canonical = _first_alias_mention(combined)
+    if canonical:
+        return canonical, "sarawak"
 
     return None, "other"
 

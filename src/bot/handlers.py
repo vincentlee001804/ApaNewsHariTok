@@ -958,6 +958,28 @@ def _looks_like_todays_summary_request(message_text: str) -> bool:
     return (has_summary and has_today) or (has_summary and has_news and has_today)
 
 
+def _requested_latest_count(message_text: str) -> int:
+    """
+    Conversational "latest" requests:
+    - "one latest news", "1 latest", "latest satu" -> 1
+    - default -> 3
+    """
+    lowered = (message_text or "").strip().lower()
+    if not lowered:
+        return 3
+    single_markers = [
+        " one ",
+        " 1 ",
+        "satu",
+        "a latest",
+        "single",
+    ]
+    padded = f" {lowered} "
+    if any(marker in padded for marker in single_markers):
+        return 1
+    return 3
+
+
 async def conversational_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Option B: conversational mode.
@@ -1040,7 +1062,8 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
     if "latest" in lowered:
         from src.core.services import get_latest_news_text_for_user
 
-        text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id, 3)
+        max_items = _requested_latest_count(message_text)
+        text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id, max_items)
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
         return
 

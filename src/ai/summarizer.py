@@ -328,7 +328,7 @@ def summarize_digest(items_text: str, max_words: int = 160) -> Optional[str]:
         return None
 
 
-def answer_news_question(question: str, items_text: str, max_words: int = 220) -> Optional[str]:
+def answer_news_question(question: str, items_text: str, max_words: int = 90) -> Optional[str]:
     """
     Answer a user question using only the provided news items.
     items_text should be a compact list of "- title\\n  snippet" blocks.
@@ -352,11 +352,10 @@ def answer_news_question(question: str, items_text: str, max_words: int = 220) -
         - Answer the user's question ONLY using the provided items.
         - If the provided items do not contain enough relevant information, say:
           "I couldn't find relevant information in the news items I have."
-        - Keep the answer concise (<= {max_words} words).
+        - Keep the answer short (<= {max_words} words).
         - Use plain text only (no HTML, no Markdown).
         - Use simple, easy-to-understand words.
-        - Prefer bullet points when there are multiple facts.
-        - Optionally end with a short "Related headlines:" line listing 2-4 titles.
+        - Use 1 short paragraph. Avoid long lists.
 
         User question:
         {question.strip()}

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from datetime import datetime, timedelta
 from typing import Final
 
@@ -1004,13 +1003,36 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
             )
         return
 
-    # Friendly shortcuts (word-boundary match avoids false positives like "kuching" containing "hi").
-    if re.search(r"\b(hi|hello|hey|good morning|good night)\b", lowered):
+    # Friendly shortcut only for pure greeting messages.
+    pure_greetings = {"hi", "hello", "hey", "good morning", "good night", "yo", "hai"}
+    if lowered.strip() in pure_greetings:
         await update.message.reply_text(
             "Ask me for:\n"
             "- `today summary` (or `ringkasan berita hari ini`)\n"
             "- `latest`\n"
             "- or ask a question like: 'What happened with water supply today?'\n",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    if any(
+        phrase in lowered
+        for phrase in [
+            "who are you",
+            "what are you",
+            "what can you do",
+            "who r u",
+            "siapa kamu",
+            "awak siapa",
+        ]
+    ):
+        await update.message.reply_text(
+            "I am *Apa News Hari Tok?* — your Sarawak local news assistant.\n\n"
+            "I can:\n"
+            "• summarize latest local news\n"
+            "• answer questions based on news in my database\n"
+            "• send personalized scheduled updates\n\n"
+            "Try `/latest` or ask: `Any water disruption in Kuching today?`",
             parse_mode=ParseMode.MARKDOWN,
         )
         return

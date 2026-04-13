@@ -107,7 +107,6 @@ WELCOME_TEXT: Final[str] = (
     "I am *Apa News Hari Tok?* — your AI local news assistant for Sarawak.\n\n"
     "*What I do:*\n"
     "• Collect local news from RSS and approved Telegram sources\n"
-    "• Summarize long reports into short, readable updates\n"
     "• Answer your questions based on the latest stored news in my database\n"
     "• Send scheduled personalized updates based on your preferences\n\n"
     "*What I don't do:*\n"
@@ -121,7 +120,7 @@ WELCOME_TEXT: Final[str] = (
     "*Main commands:*\n"
     "• /latest – latest personalized news with summaries\n"
     "• /settings – edit preferences and subscribe/unsubscribe scheduled pushes\n"
-    "• /help – command guide"
+    "• /help – command guide and contact"
 )
 
 
@@ -1007,10 +1006,12 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
     pure_greetings = {"hi", "hello", "hey", "good morning", "good night", "yo", "hai"}
     if lowered.strip() in pure_greetings:
         await update.message.reply_text(
-            "Ask me for:\n"
-            "- `today summary` (or `ringkasan berita hari ini`)\n"
-            "- `latest`\n"
-            "- or ask a question like: 'What happened with water supply today?'\n",
+            "Hello! I am *Apa News Hari Tok?* 👋\n\n"
+            "I can help you with Sarawak local news.\n"
+            "Try one of these:\n"
+            "• `/latest`\n"
+            "• `today summary` (or `ringkasan berita hari ini`)\n"
+            "• `Any water disruption in Kuching today?`\n",
             parse_mode=ParseMode.MARKDOWN,
         )
         return

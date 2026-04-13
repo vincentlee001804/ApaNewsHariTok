@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Final
 
@@ -104,10 +105,17 @@ def _display_area_keywords_raw(raw: str) -> str:
 
 WELCOME_TEXT: Final[str] = (
     "Welcome! 👋\n\n"
-    "I am an *AI Local News Summarization Bot*.\n"
-    "I automatically gather local Sarawak news, use a local AI model to summarize "
-    "lengthy articles into short briefs, and send them directly to your Telegram "
-    "as push notifications.\n\n"
+    "I am *Apa News Hari Tok?* — your AI local news assistant for Sarawak.\n\n"
+    "*What I do:*\n"
+    "• Collect local news from RSS and approved Telegram sources\n"
+    "• Summarize long reports into short, readable updates\n"
+    "• Answer your questions based on the latest stored news in my database\n"
+    "• Send scheduled personalized updates based on your preferences\n\n"
+    "*What I don't do:*\n"
+    "• I may miss items not available in my configured sources\n"
+    "• If no relevant article exists in my database, I will tell you directly\n\n"
+    "*Privacy note:*\n"
+    "• I only store your Telegram ID and news preferences to deliver this service.\n\n"
     "*Quick start (30 seconds):*\n"
     "1) Tap /settings to choose categories/location/frequency\n"
     "2) Then use /latest to test\n\n"
@@ -996,8 +1004,8 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
             )
         return
 
-    # Friendly shortcuts.
-    if any(greet in lowered for greet in ["hi", "hello", "hey", "good morning", "good night"]):
+    # Friendly shortcuts (word-boundary match avoids false positives like "kuching" containing "hi").
+    if re.search(r"\b(hi|hello|hey|good morning|good night)\b", lowered):
         await update.message.reply_text(
             "Ask me for:\n"
             "- `today summary` (or `ringkasan berita hari ini`)\n"

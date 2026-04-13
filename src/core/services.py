@@ -15,6 +15,9 @@ from src.ai.summarizer import (
 )
 from src.core.config import (
     DEDUPLICATION_ENABLED,
+    RAG_ENABLED,
+    RAG_NEWS_CANDIDATE_POOL,
+    RAG_NEWS_TOP_K,
     RSS_FEEDS,
     TELEGRAM_SOURCE_CHANNELS,
     WAZE_BBOX_BOTTOM,
@@ -25,7 +28,7 @@ from src.core.config import (
     waze_allowed_type_set,
 )
 from src.core.local_keywords import local_keyword_filter_enabled, matches_local_interest
-from src.core.location_extractor import extract_location_and_state
+from src.core.location_extractor import SARAWAK_LOCATION_ALIASES, extract_location_and_state
 from src.core.models import NewsArticle, User, UserArticleDelivery
 from src.core.rss_limits import effective_rss_limit_per_feed
 from src.scrapers.rss_reader import RssItem, fetch_latest_items
@@ -930,10 +933,16 @@ def _get_source_name(source_url: str) -> str:
         if domain in source_url.lower():
             return name
 
+    raw = (source_url or "").strip()
+    if not raw:
+        return "Unknown Source"
+    if not (raw.startswith("http://") or raw.startswith("https://")):
+        return raw
+
     # Fallback: extract domain name
     try:
         from urllib.parse import urlparse
-        parsed = urlparse(source_url)
+        parsed = urlparse(raw)
         domain = parsed.netloc.replace("www.", "")
         return domain.split(".")[0].title() if domain else "Unknown Source"
     except Exception:
@@ -1633,6 +1642,150 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
     )
 
 
+def _question_intent_keywords(user_text: str) -> list[str]:
+    text = (user_text or "").lower()
+    intent_map = {
+        "crime": ["crime", "rob", "theft", "murder", "assault", "police"],
+        "weather": ["weather", "rain", "storm", "flood", "hot", "temperature"],
+        "politics": ["politic", "election", "minister", "policy", "government"],
+        "transport": ["traffic", "road", "jam", "accident", "transport", "closure"],
+    }
+    out: list[str] = []
+    for _, keys in intent_map.items():
+        if any(k in text for k in keys):
+            out.extend(keys)
+    return out
+
+
+def _article_matches_question_intent(art: NewsArticle, user_text: str) -> bool:
+    keys = _question_intent_keywords(user_text)
+    if not keys:
+        return True
+    blob = (
+        f"{art.title or ''} {art.ai_summary or ''} {art.raw_summary or ''} {art.category or ''}"
+    ).lower()
+    return any(k in blob for k in keys)
+
+
+def _question_location_keywords(user_text: str) -> list[str]:
+    text = f" {(user_text or '').lower()} "
+    matched: list[str] = []
+    for canonical, aliases in SARAWAK_LOCATION_ALIASES.items():
+        for alias in aliases:
+            alias_token = alias.strip().lower()
+            if not alias_token:
+                continue
+            if f" {alias_token} " in text:
+                matched.append(canonical)
+                break
+    return list(dict.fromkeys(matched))
+
+
+def _article_matches_question_location(art: NewsArticle, user_text: str) -> bool:
+    loc_keys = _question_location_keywords(user_text)
+    if not loc_keys:
+        return True
+    derived_loc, _state = extract_location_and_state(
+        art.title or "",
+        art.ai_summary or art.raw_summary or "",
+    )
+    # Prefer freshly derived location from title/summary (handles stale DB values).
+    if derived_loc:
+        return derived_loc in loc_keys
+
+    art_loc = (getattr(art, "location", None) or "").strip().lower()
+    return bool(art_loc and art_loc in loc_keys)
+
+
+def _article_is_relevant_to_question(art: NewsArticle, user_text: str) -> bool:
+    return _article_matches_question_intent(art, user_text) and _article_matches_question_location(
+        art, user_text
+    )
+
+
+def _format_news_agent_html(
+    *,
+    answer: str,
+    evidence_rows: list[dict[str, str]],
+) -> str:
+    def escape_html(text: str) -> str:
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    lines: list[str] = [
+        "<b>🗞️ News agent</b>",
+        escape_html(strip_markdown_artifacts_for_plain_text(answer)),
+    ]
+    if evidence_rows:
+        lines.append("")
+        lines.append("<b>Relevant news:</b>")
+        for row in evidence_rows[:2]:
+            title = escape_html((row.get("title") or "").strip())
+            summary = escape_html(
+                _truncate_text(
+                    normalize_stored_ai_summary(row.get("summary") or ""),
+                    max_chars=260,
+                )
+            )
+            source = escape_html((row.get("source") or "").strip())
+            link = escape_html((row.get("link") or "").strip())
+            category = escape_html((row.get("category") or "Local").strip() or "Local")
+            if not title:
+                continue
+            lines.append(f"<blockquote>[{category}] <b>{title}</b></blockquote>")
+            if summary:
+                lines.append(summary)
+            lines.append("")
+            if source and link:
+                lines.append(f'Sources: <a href="{link}">{source}</a>')
+            elif link:
+                lines.append(f"URL: {link}")
+            lines.append("────────────")
+        if lines and lines[-1] == "────────────":
+            lines.pop()
+    return "\n".join(lines).strip()
+
+
+def _format_no_related_news_html(
+    *,
+    fallback_rows: list[dict[str, str]],
+) -> str:
+    def escape_html(text: str) -> str:
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    lines = [
+        "<b>🗞️ News agent</b>",
+        "I couldn't find related news for your question in the current database.",
+    ]
+    if fallback_rows:
+        lines.append("")
+        lines.append("<b>Other recent news (optional):</b>")
+        for row in fallback_rows[:2]:
+            title = escape_html((row.get("title") or "").strip())
+            summary = escape_html(
+                _truncate_text(
+                    normalize_stored_ai_summary(row.get("summary") or ""),
+                    max_chars=220,
+                )
+            )
+            source = escape_html((row.get("source") or "").strip())
+            link = escape_html((row.get("link") or "").strip())
+            category = escape_html((row.get("category") or "Local").strip() or "Local")
+            if not title:
+                continue
+            lines.append(f"<blockquote>[{category}] <b>{title}</b></blockquote>")
+            if summary:
+                lines.append(summary)
+            lines.append("")
+            if source and link:
+                lines.append(f'Sources: <a href="{link}">{source}</a>')
+            elif link:
+                lines.append(f"URL: {link}")
+            lines.append("────────────")
+        if lines and lines[-1] == "────────────":
+            lines.pop()
+    return "\n".join(lines).strip()
+
+
 def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     """
     "News agent" mode:
@@ -1641,8 +1794,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     """
     from src.core.user_service import get_user_preference
     from src.ai.summarizer import answer_news_question
-    from src.scrapers.rss_reader import fetch_latest_items
-    from src.core.config import RSS_FEEDS
+    from src.ai.retriever import semantic_rank_articles
 
     preference = get_user_preference(telegram_id)
     categories_filter = preference.categories if preference else ""
@@ -1704,16 +1856,30 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
 
         items_text = "\n".join(evidence_lines).strip()
         answer = answer_news_question(user_text, items_text)
-        if not answer:
-            return "<b>News agent</b>\nI couldn't find relevant information in the news items I have."
-
-        def escape_html(text: str) -> str:
-            return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-        return (
-            "<b>🗞️ News agent</b>\n"
-            f"{escape_html(strip_markdown_artifacts_for_plain_text(answer))}"
-        )
+        evidence_rows = []
+        fallback_rows = []
+        for it in items:
+            row = {
+                "title": it.title or "",
+                "summary": it.summary or it.title or "",
+                "source": _get_source_name(it.source),
+                "link": it.link or "",
+                "category": _get_category_with_llm_fallback(it.title or "", it.summary or ""),
+            }
+            fallback_rows.append(row)
+            pseudo = NewsArticle(
+                title=row["title"],
+                raw_summary=row["summary"],
+                ai_summary=row["summary"],
+                source=row["source"],
+                link=row["link"],
+                category=row["category"],
+            )
+            if _article_is_relevant_to_question(pseudo, user_text):
+                evidence_rows.append(row)
+        if not answer or not evidence_rows:
+            return _format_no_related_news_html(fallback_rows=fallback_rows)
+        return _format_news_agent_html(answer=answer, evidence_rows=evidence_rows)
 
     ranked: List[tuple[int, datetime, NewsArticle]] = []
     for art in candidates:
@@ -1736,9 +1902,34 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
         ranked.append((rank, art.created_at, art))
 
     ranked.sort(key=lambda t: (t[0], -t[1].timestamp()))
-    chosen = [t[2] for t in ranked[:10]]
+    intent_filtered = [t for t in ranked if _article_matches_question_intent(t[2], user_text)]
+    if intent_filtered:
+        ranked = intent_filtered
+
+    fallback_chosen = [t[2] for t in ranked[:10]]
+    candidate_pool = [t[2] for t in ranked[:RAG_NEWS_CANDIDATE_POOL]]
+    chosen = fallback_chosen
+    if RAG_ENABLED and candidate_pool:
+        semantic_hits = semantic_rank_articles(
+            query=user_text,
+            articles=candidate_pool,
+            top_k=RAG_NEWS_TOP_K,
+        )
+        if semantic_hits:
+            chosen = semantic_hits
     if not chosen:
-        return "<b>🗞️ News agent</b>\nI couldn't find relevant information in the news items I have."
+        fallback_rows = []
+        for art in fallback_chosen[:2]:
+            fallback_rows.append(
+                {
+                    "title": art.title or "",
+                    "summary": art.ai_summary or art.raw_summary or art.title or "",
+                    "source": _get_source_name(art.source),
+                    "link": art.link or "",
+                    "category": category_label_for_article(art),
+                }
+            )
+        return _format_no_related_news_html(fallback_rows=fallback_rows)
 
     evidence_lines: List[str] = []
     for art in chosen:
@@ -1750,13 +1941,30 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
 
     items_text = "\n".join(evidence_lines).strip()
     answer = answer_news_question(user_text, items_text)
-    if not answer:
-        return "<b>🗞️ News agent</b>\nI couldn't find relevant information in the news items I have."
-
-    def escape_html(text: str) -> str:
-        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-    return (
-        "<b>🗞️ News agent</b>\n"
-        f"{escape_html(strip_markdown_artifacts_for_plain_text(answer))}"
-    )
+    evidence_rows = []
+    for art in chosen:
+        if not _article_is_relevant_to_question(art, user_text):
+            continue
+        evidence_rows.append(
+            {
+                "title": art.title or "",
+                "summary": art.ai_summary or art.raw_summary or art.title or "",
+                "source": _get_source_name(art.source),
+                "link": art.link or "",
+                "category": category_label_for_article(art),
+            }
+        )
+    if not answer or not evidence_rows:
+        fallback_rows = []
+        for art in chosen[:2]:
+            fallback_rows.append(
+                {
+                    "title": art.title or "",
+                    "summary": art.ai_summary or art.raw_summary or art.title or "",
+                    "source": _get_source_name(art.source),
+                    "link": art.link or "",
+                    "category": category_label_for_article(art),
+                }
+            )
+        return _format_no_related_news_html(fallback_rows=fallback_rows)
+    return _format_news_agent_html(answer=answer, evidence_rows=evidence_rows)

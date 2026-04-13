@@ -20,6 +20,24 @@ _OLLAMA_API_BASE: Final[str] = (
 OLLAMA_GENERATE_URL: Final[str] = f"{_OLLAMA_API_BASE}/api/generate"
 OLLAMA_API_KEY: Final[str | None] = (os.getenv("OLLAMA_API_KEY") or "").strip() or None
 OLLAMA_MODEL: Final[str] = (os.getenv("OLLAMA_MODEL", "llama3.1").strip() or "llama3.1")
+OLLAMA_EMBED_MODEL: Final[str] = (
+    os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text").strip() or "nomic-embed-text"
+)
+RAG_ENABLED: Final[bool] = os.getenv("RAG_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+RAG_NEWS_TOP_K: Final[int] = max(
+    1,
+    int((os.getenv("RAG_NEWS_TOP_K", "6").strip() or "6")),
+)
+RAG_NEWS_CANDIDATE_POOL: Final[int] = max(
+    5,
+    int((os.getenv("RAG_NEWS_CANDIDATE_POOL", "15").strip() or "15")),
+)
 
 _fb_base_raw = (os.getenv("OLLAMA_API_BASE_FALLBACK") or "").strip().rstrip("/")
 OLLAMA_API_BASE_FALLBACK: Final[str | None] = _fb_base_raw or None

@@ -92,6 +92,36 @@ def ollama_request_headers() -> dict[str, str]:
     """Same as primary endpoint headers (backward compatible)."""
     return ollama_headers_for_endpoint(OLLAMA_GENERATE_URL, is_fallback=False)
 
+
+def print_ollama_config_banner() -> None:
+    """
+    One startup line for deploy logs (Fly, Docker). Per-request routing is not logged.
+    """
+    if _ollama_host_is_loopback(OLLAMA_GENERATE_URL):
+        primary_kind = "this host only (loopback)"
+    elif "ollama.com" in (urlparse(OLLAMA_GENERATE_URL).hostname or "").lower():
+        primary_kind = "Ollama Cloud"
+    else:
+        primary_kind = "remote URL"
+
+    parts = [f"primary={_OLLAMA_API_BASE} model={OLLAMA_MODEL} ({primary_kind})"]
+    if OLLAMA_API_BASE_FALLBACK:
+        parts.append(f"fallback={OLLAMA_API_BASE_FALLBACK} model={OLLAMA_MODEL_FALLBACK}")
+    print(f"[ollama] configured: {'; '.join(parts)}", flush=True)
+
+    if (
+        _ollama_host_is_loopback(OLLAMA_GENERATE_URL)
+        and OLLAMA_API_BASE_FALLBACK
+        and (os.getenv("FLY_APP_NAME") or "").strip()
+    ):
+        print(
+            "[ollama] Fly.io: primary localhost is this machine, not your laptop—primary usually "
+            "fails and requests use cloud fallback. For local Llama, run the bot on the same PC as "
+            "Ollama, or expose Ollama via tunnel/public URL and set OLLAMA_API_BASE.",
+            flush=True,
+        )
+
+
 DEFAULT_RSS_FEEDS: Final[List[str]] = [
     "https://www.sarawaktribune.com/feed/",
     "https://news.seehua.com/feed/",

@@ -1126,6 +1126,7 @@ def _get_source_name(source_url: str) -> str:
         return f"Telegram (@{handle.lstrip('@')})"
 
     source_mapping = {
+        "news.google.com": "Google News",
         "sarawaktribune.com": "Sarawak Tribune",
         "seehua.com": "See Hua Daily News",
         "theborneopost.com": "Borneo Post Online",

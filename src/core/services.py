@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import logging
+import re
 from typing import Any, Final, List
 
 from sqlalchemy import exists, func, select
@@ -14,6 +16,11 @@ from src.ai.summarizer import (
     waze_alerts_to_news_sentences,
 )
 from src.core.config import (
+    CROSS_SOURCE_DEDUP_BODY_JACCARD_THRESHOLD,
+    CROSS_SOURCE_DEDUP_DEBUG,
+    CROSS_SOURCE_DEDUP_ENABLED,
+    CROSS_SOURCE_DEDUP_MIN_BODY_TOKENS,
+    CROSS_SOURCE_DEDUP_TITLE_JACCARD_THRESHOLD,
     DEDUPLICATION_ENABLED,
     RAG_ENABLED,
     RAG_NEWS_CANDIDATE_POOL,
@@ -38,6 +45,176 @@ from src.scrapers.telegram_reader import (
 )
 from src.scrapers.waze_client import WazeGeoRssError, list_alerts_in_bbox
 from src.storage.database import SessionLocal
+
+logger = logging.getLogger(__name__)
+
+_DEDUP_STOPWORDS: Final[set[str]] = {
+    "a",
+    "an",
+    "and",
+    "at",
+    "breaking",
+    "for",
+    "from",
+    "in",
+    "of",
+    "on",
+    "the",
+    "to",
+    "update",
+    "with",
+}
+
+
+def _tokenize_for_story_dedup(text: str | None) -> set[str]:
+    raw = (text or "").strip().lower()
+    if not raw:
+        return set()
+    words = re.findall(r"[a-z0-9]+", raw)
+    return {
+        w
+        for w in words
+        if len(w) >= 3 and w not in _DEDUP_STOPWORDS and not w.isdigit()
+    }
+
+
+def _jaccard_similarity(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    union = len(a | b)
+    if union == 0:
+        return 0.0
+    return len(a & b) / union
+
+
+def _find_cross_source_duplicate_story_match(
+    *,
+    title_tokens: set[str],
+    body_tokens: set[str],
+    seen_signatures: list[tuple[set[str], set[str]]],
+) -> tuple[int, str, float] | None:
+    if not seen_signatures:
+        return None
+
+    for idx, (seen_title, seen_body) in enumerate(seen_signatures):
+        title_sim = _jaccard_similarity(title_tokens, seen_title)
+        if title_sim >= CROSS_SOURCE_DEDUP_TITLE_JACCARD_THRESHOLD:
+            return (idx, "title", title_sim)
+
+        # Body comparison is a fallback when title wording differs.
+        if (
+            len(body_tokens) >= CROSS_SOURCE_DEDUP_MIN_BODY_TOKENS
+            and len(seen_body) >= CROSS_SOURCE_DEDUP_MIN_BODY_TOKENS
+        ):
+            body_sim = _jaccard_similarity(body_tokens, seen_body)
+            if body_sim >= CROSS_SOURCE_DEDUP_BODY_JACCARD_THRESHOLD:
+                return (idx, "body", body_sim)
+
+    return None
+
+
+def _cluster_ranked_articles_cross_source(
+    ranked_articles: list[NewsArticle], *, max_items: int
+) -> list[tuple[NewsArticle, list[NewsArticle]]]:
+    if not ranked_articles:
+        return []
+    if not CROSS_SOURCE_DEDUP_ENABLED:
+        return [(art, [art]) for art in ranked_articles[:max_items]]
+
+    clusters: list[tuple[NewsArticle, list[NewsArticle]]] = []
+    seen_signatures: list[tuple[set[str], set[str]]] = []
+    seen_links: set[str] = set()
+
+    for art in ranked_articles:
+        link = canonical_link_for_news_item(
+            RssItem(
+                title=art.title or "",
+                link=art.link or "",
+                summary=art.raw_summary or art.ai_summary or "",
+                source=art.source or "",
+                published=art.created_at,
+            )
+        )
+        dedup_link = link.lower() if link.lower().startswith("https://t.me/") else link
+        if dedup_link in seen_links:
+            continue
+
+        title_tokens = _tokenize_for_story_dedup(art.title)
+        body_tokens = _tokenize_for_story_dedup(
+            f"{art.raw_summary or ''} {art.ai_summary or ''}"
+        )
+
+        duplicate_match = _find_cross_source_duplicate_story_match(
+            title_tokens=title_tokens,
+            body_tokens=body_tokens,
+            seen_signatures=seen_signatures,
+        )
+        if duplicate_match is not None:
+            cluster_idx, match_by, score = duplicate_match
+            clusters[cluster_idx][1].append(art)
+            seen_links.add(dedup_link)
+            if CROSS_SOURCE_DEDUP_DEBUG:
+                logger.info(
+                    "[cross-source-dedup] group article_id=%s into_cluster=%s by=%s score=%.3f title=%r",
+                    art.id,
+                    cluster_idx,
+                    match_by,
+                    score,
+                    (art.title or "")[:160],
+                )
+            continue
+
+        seen_links.add(dedup_link)
+        seen_signatures.append((title_tokens, body_tokens))
+        clusters.append((art, [art]))
+        if CROSS_SOURCE_DEDUP_DEBUG:
+            logger.info(
+                "[cross-source-dedup] keep article_id=%s cluster=%s title_tokens=%d body_tokens=%d title=%r",
+                art.id,
+                len(clusters) - 1,
+                len(title_tokens),
+                len(body_tokens),
+                (art.title or "")[:160],
+            )
+        if len(clusters) >= max_items:
+            break
+
+    return clusters
+
+
+def _dedup_ranked_articles_cross_source(
+    ranked_articles: list[NewsArticle], *, max_items: int
+) -> list[NewsArticle]:
+    clusters = _cluster_ranked_articles_cross_source(
+        ranked_articles, max_items=max_items
+    )
+    return [primary for primary, _members in clusters]
+
+
+def _format_sources_html_from_article_cluster(
+    cluster: list[NewsArticle], *, escape_html
+) -> str:
+    rendered: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for art in cluster:
+        source_name = (art.source or "").strip()
+        if source_name.lower().startswith("http"):
+            source_name = _get_source_name(source_name)
+        if not source_name:
+            source_name = "Unknown Source"
+        link = (art.link or "").strip()
+        key = (source_name, link)
+        if key in seen:
+            continue
+        seen.add(key)
+        safe_source = escape_html(source_name)
+        if link:
+            rendered.append(f'<a href="{link}">{safe_source}</a>')
+        else:
+            rendered.append(safe_source)
+    if not rendered:
+        return "Sources: Unknown Source"
+    return f"Sources: {', '.join(rendered)}"
 
 
 def _record_deliveries_for_user(
@@ -94,18 +271,46 @@ def _get_or_create_article_for_rss_item(session, item: RssItem) -> NewsArticle:
 
 def _deduplicate_items(items: List[RssItem], max_items: int) -> List[RssItem]:
     """
-    Deduplicate items by link, keeping the first occurrence.
+    Deduplicate items by canonical link first, then near-duplicate story text.
     Items should be pre-sorted by date (newest first) to ensure latest news is prioritized.
     """
     seen_links = set()
+    seen_story_signatures: list[tuple[set[str], set[str]]] = []
     unique_items: List[RssItem] = []
     for item in items:
         link = canonical_link_for_news_item(item)
         dedup_key = link.lower() if link.lower().startswith("https://t.me/") else link
         if dedup_key in seen_links:
             continue
+        title_tokens = _tokenize_for_story_dedup(item.title)
+        body_tokens = _tokenize_for_story_dedup(item.summary)
+        duplicate_match = None
+        if CROSS_SOURCE_DEDUP_ENABLED:
+            duplicate_match = _find_cross_source_duplicate_story_match(
+                title_tokens=title_tokens,
+                body_tokens=body_tokens,
+                seen_signatures=seen_story_signatures,
+            )
+        if duplicate_match is not None:
+            if CROSS_SOURCE_DEDUP_DEBUG:
+                _cluster_idx, match_by, score = duplicate_match
+                logger.info(
+                    "[cross-source-dedup] skip rss_item by=%s score=%.3f title=%r",
+                    match_by,
+                    score,
+                    (item.title or "")[:160],
+                )
+            continue
         seen_links.add(dedup_key)
+        seen_story_signatures.append((title_tokens, body_tokens))
         unique_items.append(item)
+        if CROSS_SOURCE_DEDUP_DEBUG:
+            logger.info(
+                "[cross-source-dedup] keep rss_item title_tokens=%d body_tokens=%d title=%r",
+                len(title_tokens),
+                len(body_tokens),
+                (item.title or "")[:160],
+            )
         if len(unique_items) >= max_items:
             break
     return unique_items
@@ -1250,7 +1455,11 @@ def get_latest_news_text_for_user(
         if scheduled_push:
             ranked_pick = [t for t in ranked if (t[2].ai_summary or "").strip()]
 
-        chosen: List[NewsArticle] = [t[2] for t in ranked_pick[:max_items]]
+        ranked_articles: List[NewsArticle] = [t[2] for t in ranked_pick]
+        chosen_clusters = _cluster_ranked_articles_cross_source(
+            ranked_articles, max_items=max_items
+        )
+        chosen: List[NewsArticle] = [primary for primary, _members in chosen_clusters]
 
         if not chosen:
             if scheduled_push:
@@ -1428,17 +1637,17 @@ def get_latest_news_text_for_user(
                 art.ai_summary = normalize_stored_ai_summary(art.ai_summary)
 
         if DEDUPLICATION_ENABLED and user_id is not None:
-            _record_deliveries_for_user(session, user_id, chosen, now)
+            delivered_all_members = [
+                member for _primary, members in chosen_clusters for member in members
+            ]
+            _record_deliveries_for_user(session, user_id, delivered_all_members, now)
 
         session.commit()
 
         lines: List[str] = list(_latest_news_heading_lines(max_items))
-        for art in chosen:
+        for primary_art, members in chosen_clusters:
+            art = primary_art
             category = category_label_for_article(art)
-
-            source_name = art.source
-            if source_name.lower().startswith("http"):
-                source_name = _get_source_name(source_name)
 
             escaped_title = escape_html(art.title)
             if scheduled_push:
@@ -1449,13 +1658,17 @@ def get_latest_news_text_for_user(
                     art.raw_summary or art.title, max_words=80
                 )
                 escaped_summary = escape_html(normalize_stored_ai_summary(raw_sum or ""))
-            escaped_source = escape_html(source_name)
             escaped_category = escape_html(category)
 
             lines.append(f"<blockquote>[{escaped_category}] <b>{escaped_title}</b></blockquote>")
             lines.append(escaped_summary)
             lines.append("")
-            lines.append(f'Sources: <a href="{art.link}">{escaped_source}</a>')
+            lines.append(
+                _format_sources_html_from_article_cluster(
+                    members,
+                    escape_html=escape_html,
+                )
+            )
             lines.append("────────────")
 
         if lines and lines[-1] == "────────────":
@@ -1559,7 +1772,8 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
             ranked.append((rank, published_ts, it))
 
         ranked.sort(key=lambda t: (t[0], -t[1].timestamp()))
-        chosen_items = [t[2] for t in ranked[:max_articles]]
+        ranked_items = [t[2] for t in ranked]
+        chosen_items = _deduplicate_items(ranked_items, max_items=max_articles)
         if not chosen_items:
             return ""
 
@@ -1609,7 +1823,10 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
         ranked.append((rank, art.created_at, art))
 
     ranked.sort(key=lambda t: (t[0], -t[1].timestamp()))
-    chosen: List[NewsArticle] = [t[2] for t in ranked[:max_articles]]
+    ranked_articles: List[NewsArticle] = [t[2] for t in ranked]
+    chosen: List[NewsArticle] = _dedup_ranked_articles_cross_source(
+        ranked_articles, max_items=max_articles
+    )
 
     if not chosen:
         return ""

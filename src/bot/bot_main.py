@@ -177,9 +177,12 @@ def main() -> None:
             elif legacy == "digest_7am_8pm":
                 morning_enabled, evening_enabled = True, True
 
+        # Product policy: digest is evening-only.
+        morning_enabled = False
+        if not evening_enabled:
+            evening_enabled = True
+
         slots: list[int] = []
-        if morning_enabled:
-            slots.append(max(0, min(23, morning_hour)))
         if evening_enabled:
             slots.append(max(0, min(23, evening_hour)))
         return slots

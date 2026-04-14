@@ -76,10 +76,10 @@ def get_or_create_user(telegram_id: int, username: Optional[str] = None) -> User
                 user_id=user.id,
                 categories="",  # Empty means all categories
                 locations="",  # Empty means all Sarawak locations
-                frequency="digest_7am_8pm",
+                frequency="digest_8pm",
                 delivery_mode="digest",
                 frequent_interval_minutes=60,
-                digest_morning_enabled=True,
+                digest_morning_enabled=False,
                 digest_evening_enabled=True,
                 digest_morning_hour=6,
                 digest_evening_hour=21,
@@ -152,10 +152,10 @@ def update_user_preference(
                 user_id=user.id,
                 categories="",
                 locations="",
-                frequency="digest_7am_8pm",
+                frequency="digest_8pm",
                 delivery_mode="digest",
                 frequent_interval_minutes=60,
-                digest_morning_enabled=True,
+                digest_morning_enabled=False,
                 digest_evening_enabled=True,
                 digest_morning_hour=6,
                 digest_evening_hour=21,
@@ -204,9 +204,9 @@ def update_user_preference(
             elif e_on:
                 preference.frequency = "digest_8pm"
             else:
-                # Avoid empty digest schedule by defaulting to morning.
-                preference.digest_morning_enabled = True
-                preference.frequency = "digest_7am"
+                # Avoid empty digest schedule by defaulting to evening.
+                preference.digest_evening_enabled = True
+                preference.frequency = "digest_8pm"
         elif preference.delivery_mode == "frequent":
             iv = int(preference.frequent_interval_minutes or 60)
             map_back = {

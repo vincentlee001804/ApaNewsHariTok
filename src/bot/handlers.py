@@ -7,11 +7,14 @@ from typing import Final
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatType, ParseMode
+from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import OperationalError
 
 from src.core.config import (
+    DIGEST_EVENING_HOUR_LOCAL,
+    DIGEST_MORNING_HOUR_LOCAL,
     SCHEDULED_PUSH_GRACE_MINUTES_AFTER_FIRST_SEEN,
     SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL,
     SCHEDULED_PUSH_QUIET_HOURS_ENABLED,
@@ -141,6 +144,11 @@ HELP_TEXT: Final[str] = (
 
 def _format_frequency(value: str | None) -> str:
     mapping = {
+        "digest_7am": f"Digest mode ({DIGEST_MORNING_HOUR_LOCAL:02d}:00)",
+        "digest_8pm": f"Digest mode ({DIGEST_EVENING_HOUR_LOCAL:02d}:00)",
+        "digest_7am_8pm": (
+            f"Digest mode ({DIGEST_MORNING_HOUR_LOCAL:02d}:00 + {DIGEST_EVENING_HOUR_LOCAL:02d}:00)"
+        ),
         "every_15m": "Every 15 mins",
         "every_30m": "Every 30 mins",
         "every_1h": "Every 1 hour",
@@ -539,6 +547,206 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     data = query.data
 
+    def _refresh_preference() -> bool:
+        nonlocal preference
+        preference = get_user_preference(telegram_id)
+        return preference is not None
+
+    async def _safe_edit_message_text(*, text: str, reply_markup: InlineKeyboardMarkup) -> None:
+        try:
+            await query.edit_message_text(
+                text,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=reply_markup,
+            )
+        except BadRequest as e:
+            if "message is not modified" in str(e).lower():
+                return
+            raise
+
+    def _normalized_frequency(value: str | None) -> str:
+        key = (value or "").strip().lower()
+        if key == "instant":
+            return "every_1h"
+        if key == "daily":
+            return "every_12h"
+        return key
+
+    def _current_frequency_label() -> str:
+        mode = (getattr(preference, "delivery_mode", "") or "").strip().lower()
+        if mode == "digest":
+            m_on = bool(getattr(preference, "digest_morning_enabled", False))
+            e_on = bool(getattr(preference, "digest_evening_enabled", False))
+            mh = int(getattr(preference, "digest_morning_hour", DIGEST_MORNING_HOUR_LOCAL) or DIGEST_MORNING_HOUR_LOCAL)
+            eh = int(getattr(preference, "digest_evening_hour", DIGEST_EVENING_HOUR_LOCAL) or DIGEST_EVENING_HOUR_LOCAL)
+            if m_on and e_on:
+                return f"Digest mode ({mh:02d}:00 + {eh:02d}:00)"
+            if m_on:
+                return f"Digest mode ({mh:02d}:00)"
+            if e_on:
+                return f"Digest mode ({eh:02d}:00)"
+            return "Digest mode (no slot selected)"
+        if mode == "frequent":
+            iv = int(getattr(preference, "frequent_interval_minutes", 60) or 60)
+            mapping = {
+                15: "Every 15 mins",
+                30: "Every 30 mins",
+                60: "Every 1 hour",
+                180: "Every 3 hours",
+                360: "Every 6 hours",
+                720: "Every 12 hours",
+            }
+            return mapping.get(iv, "Every 1 hour")
+        return _format_frequency(preference.frequency)
+
+    async def _show_frequency_root_menu() -> None:
+        mode = (getattr(preference, "delivery_mode", "") or "").strip().lower()
+        current_freq = _normalized_frequency(preference.frequency)
+        is_digest = mode == "digest" or current_freq in {"digest_7am", "digest_8pm", "digest_7am_8pm"}
+        is_frequent = mode == "frequent" or current_freq in {
+            "every_15m", "every_30m", "every_1h", "every_3h", "every_6h", "every_12h"
+        }
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "🗞️ Digest mode" + (" ✓" if is_digest else ""),
+                    callback_data="settings_frequency_digest",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "⏱️ Frequent mode" + (" ✓" if is_frequent else ""),
+                    callback_data="settings_frequency_frequent",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "✅ Subscribe scheduled push" if not is_user_active(telegram_id) else "🔔 Subscribed",
+                    callback_data="freq_subscribe",
+                ),
+                InlineKeyboardButton(
+                    "⏸️ Unsubscribe",
+                    callback_data="freq_unsubscribe",
+                ),
+            ],
+            [InlineKeyboardButton("◀️ Back", callback_data="settings_back")],
+        ]
+        body = (
+            "*Frequency settings*\n\n"
+            "1) Choose a delivery mode below.\n"
+            "2) Then choose the time option in the next screen.\n\n"
+            "• *Digest mode*: fixed recap times\n"
+            "• *Frequent mode*: interval updates while bot is running\n\n"
+            f"Current: {_current_frequency_label()}"
+        )
+        if SCHEDULED_PUSH_QUIET_HOURS_ENABLED:
+            body += (
+                f"\n\n_Scheduled pushes are paused from "
+                f"{SCHEDULED_PUSH_QUIET_START_HOUR_LOCAL:02d}:00 to "
+                f"{SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL:02d}:00 "
+                f"({SCHEDULED_PUSH_QUIET_TIMEZONE})._ "
+                "_Urgent alerts are still sent._"
+            )
+        await _safe_edit_message_text(
+            text=body,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
+    async def _show_digest_frequency_menu() -> None:
+        mh = int(getattr(preference, "digest_morning_hour", DIGEST_MORNING_HOUR_LOCAL) or DIGEST_MORNING_HOUR_LOCAL)
+        eh = int(getattr(preference, "digest_evening_hour", DIGEST_EVENING_HOUR_LOCAL) or DIGEST_EVENING_HOUR_LOCAL)
+        m_on = bool(getattr(preference, "digest_morning_enabled", False))
+        e_on = bool(getattr(preference, "digest_evening_enabled", False))
+        morning_options = [6, 7, 8]
+        evening_options = [19, 20, 21]
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    ("✅ Morning digest ON" if m_on else "⬜ Morning digest OFF"),
+                    callback_data="freq_digest_toggle_morning",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    f"{h:02d}:00" + (" ✓" if m_on and mh == h else ""),
+                    callback_data=f"freq_digest_morning_{h:02d}",
+                )
+                for h in morning_options
+            ],
+            [
+                InlineKeyboardButton(
+                    ("✅ Evening digest ON" if e_on else "⬜ Evening digest OFF"),
+                    callback_data="freq_digest_toggle_evening",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    f"{h:02d}:00" + (" ✓" if e_on and eh == h else ""),
+                    callback_data=f"freq_digest_evening_{h:02d}",
+                )
+                for h in evening_options
+            ],
+            [InlineKeyboardButton("◀️ Back to Frequency", callback_data="settings_frequency")],
+        ]
+        await _safe_edit_message_text(
+            text=(
+                "*Digest mode*\n\n"
+                "Choose morning/evening digest slots and preset times.\n\n"
+                f"Current: {_current_frequency_label()}"
+            ),
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
+    async def _show_frequent_frequency_menu() -> None:
+        current_freq = _normalized_frequency(preference.frequency)
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "⏱️ Every 15 mins" + (" ✓" if current_freq == "every_15m" else ""),
+                    callback_data="freq_every_15m",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "⏱️ Every 30 mins" + (" ✓" if current_freq == "every_30m" else ""),
+                    callback_data="freq_every_30m",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "⏱️ Every 1 hour" + (" ✓" if current_freq == "every_1h" else ""),
+                    callback_data="freq_every_1h",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "⏱️ Every 3 hours" + (" ✓" if current_freq == "every_3h" else ""),
+                    callback_data="freq_every_3h",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "⏱️ Every 6 hours" + (" ✓" if current_freq == "every_6h" else ""),
+                    callback_data="freq_every_6h",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "⏱️ Every 12 hours" + (" ✓" if current_freq == "every_12h" else ""),
+                    callback_data="freq_every_12h",
+                ),
+            ],
+            [InlineKeyboardButton("◀️ Back to Frequency", callback_data="settings_frequency")],
+        ]
+        await _safe_edit_message_text(
+            text=(
+                "*Frequent mode*\n\n"
+                "Choose how often interval updates should be sent.\n\n"
+                f"Current: {_current_frequency_label()}"
+            ),
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
     if data != "settings_area_keywords":
         context.user_data.pop(AWAITING_AREA_KEYWORDS_UD_KEY, None)
 
@@ -736,75 +944,22 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await settings_callback_refresh(query, telegram_id)
 
     elif data == "settings_frequency":
-        # Show frequency selection
-        current_freq = (preference.frequency or "").strip().lower()
-        if current_freq == "instant":
-            current_freq = "every_1h"
-        elif current_freq == "daily":
-            current_freq = "every_12h"
+        if not _refresh_preference():
+            await query.edit_message_text("Error: Could not load your preferences.")
+            return
+        await _show_frequency_root_menu()
 
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "⏱️ Every 15 mins" + (" ✓" if current_freq == "every_15m" else ""),
-                    callback_data="freq_every_15m",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    "⏱️ Every 30 mins" + (" ✓" if current_freq == "every_30m" else ""),
-                    callback_data="freq_every_30m",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    "⏱️ Every 1 hour" + (" ✓" if current_freq == "every_1h" else ""),
-                    callback_data="freq_every_1h",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    "⏱️ Every 3 hours" + (" ✓" if current_freq == "every_3h" else ""),
-                    callback_data="freq_every_3h",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    "⏱️ Every 6 hours" + (" ✓" if current_freq == "every_6h" else ""),
-                    callback_data="freq_every_6h",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    "⏱️ Every 12 hours" + (" ✓" if current_freq == "every_12h" else ""),
-                    callback_data="freq_every_12h",
-                ),
-            ],
-            [
-                InlineKeyboardButton("✅ Subscribe scheduled push", callback_data="freq_subscribe"),
-                InlineKeyboardButton("⏸️ Unsubscribe", callback_data="freq_unsubscribe"),
-            ],
-            [InlineKeyboardButton("◀️ Back", callback_data="settings_back")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        freq_body = (
-            "*Select Frequency:*\n\n"
-            "Choose how often you want push notifications while the bot is running.\n\n"
-            "Use Subscribe/Unsubscribe below to turn scheduled pushes ON/OFF."
-        )
-        if SCHEDULED_PUSH_QUIET_HOURS_ENABLED:
-            freq_body += (
-                f"\n\n_Scheduled pushes are paused from "
-                f"{SCHEDULED_PUSH_QUIET_START_HOUR_LOCAL:02d}:00 to "
-                f"{SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL:02d}:00 "
-                f"({SCHEDULED_PUSH_QUIET_TIMEZONE})._ "
-                "_Urgent alerts are still sent._"
-            )
-        await query.edit_message_text(
-            freq_body + f"\n\nCurrent: {_format_frequency(preference.frequency)}",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup,
-        )
+    elif data == "settings_frequency_digest":
+        if not _refresh_preference():
+            await query.edit_message_text("Error: Could not load your preferences.")
+            return
+        await _show_digest_frequency_menu()
+
+    elif data == "settings_frequency_frequent":
+        if not _refresh_preference():
+            await query.edit_message_text("Error: Could not load your preferences.")
+            return
+        await _show_frequent_frequency_menu()
 
     elif data == "settings_toggle_urgent":
         # Toggle urgent alerts
@@ -855,28 +1010,109 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if data == "freq_every_15m":
             update_user_preference(telegram_id, frequency="every_15m")
             await query.answer("Frequency set to: Every 15 mins")
+            _refresh_preference()
+            await _show_frequent_frequency_menu()
+        elif data == "freq_digest_7am":
+            update_user_preference(telegram_id, frequency="digest_7am")
+            await query.answer(f"Frequency set to: Digest {DIGEST_MORNING_HOUR_LOCAL:02d}:00")
+            _refresh_preference()
+            await _show_digest_frequency_menu()
+        elif data == "freq_digest_8pm":
+            update_user_preference(telegram_id, frequency="digest_8pm")
+            await query.answer(f"Frequency set to: Digest {DIGEST_EVENING_HOUR_LOCAL:02d}:00")
+            _refresh_preference()
+            await _show_digest_frequency_menu()
+        elif data == "freq_digest_toggle_morning":
+            cur = bool(getattr(preference, "digest_morning_enabled", False))
+            update_user_preference(
+                telegram_id,
+                delivery_mode="digest",
+                digest_morning_enabled=not cur,
+            )
+            await query.answer("Morning digest " + ("enabled" if not cur else "disabled"))
+            _refresh_preference()
+            await _show_digest_frequency_menu()
+        elif data == "freq_digest_toggle_evening":
+            cur = bool(getattr(preference, "digest_evening_enabled", False))
+            update_user_preference(
+                telegram_id,
+                delivery_mode="digest",
+                digest_evening_enabled=not cur,
+            )
+            await query.answer("Evening digest " + ("enabled" if not cur else "disabled"))
+            _refresh_preference()
+            await _show_digest_frequency_menu()
+        elif data.startswith("freq_digest_morning_"):
+            try:
+                hour = int(data.rsplit("_", 1)[1])
+            except Exception:
+                hour = DIGEST_MORNING_HOUR_LOCAL
+            update_user_preference(
+                telegram_id,
+                delivery_mode="digest",
+                digest_morning_enabled=True,
+                digest_morning_hour=hour,
+            )
+            await query.answer(f"Morning digest time set to {hour:02d}:00")
+            _refresh_preference()
+            await _show_digest_frequency_menu()
+        elif data.startswith("freq_digest_evening_"):
+            try:
+                hour = int(data.rsplit("_", 1)[1])
+            except Exception:
+                hour = DIGEST_EVENING_HOUR_LOCAL
+            update_user_preference(
+                telegram_id,
+                delivery_mode="digest",
+                digest_evening_enabled=True,
+                digest_evening_hour=hour,
+            )
+            await query.answer(f"Evening digest time set to {hour:02d}:00")
+            _refresh_preference()
+            await _show_digest_frequency_menu()
+        elif data == "freq_digest_7am_8pm":
+            update_user_preference(telegram_id, frequency="digest_7am_8pm")
+            await query.answer(
+                "Frequency set to: "
+                f"Digest {DIGEST_MORNING_HOUR_LOCAL:02d}:00 + {DIGEST_EVENING_HOUR_LOCAL:02d}:00"
+            )
+            _refresh_preference()
+            await _show_digest_frequency_menu()
         elif data == "freq_every_30m":
             update_user_preference(telegram_id, frequency="every_30m")
             await query.answer("Frequency set to: Every 30 mins")
+            _refresh_preference()
+            await _show_frequent_frequency_menu()
         elif data == "freq_every_1h":
             update_user_preference(telegram_id, frequency="every_1h")
             await query.answer("Frequency set to: Every 1 hour")
+            _refresh_preference()
+            await _show_frequent_frequency_menu()
         elif data == "freq_every_3h":
             update_user_preference(telegram_id, frequency="every_3h")
             await query.answer("Frequency set to: Every 3 hours")
+            _refresh_preference()
+            await _show_frequent_frequency_menu()
         elif data == "freq_every_6h":
             update_user_preference(telegram_id, frequency="every_6h")
             await query.answer("Frequency set to: Every 6 hours")
+            _refresh_preference()
+            await _show_frequent_frequency_menu()
         elif data == "freq_every_12h":
             update_user_preference(telegram_id, frequency="every_12h")
             await query.answer("Frequency set to: Every 12 hours")
+            _refresh_preference()
+            await _show_frequent_frequency_menu()
         elif data == "freq_subscribe":
             set_user_active(telegram_id, True)
             await query.answer("Subscribed: scheduled pushes ON")
+            _refresh_preference()
+            await _show_frequency_root_menu()
         elif data == "freq_unsubscribe":
             set_user_active(telegram_id, False)
             await query.answer("Unsubscribed: scheduled pushes OFF")
-        await settings_callback_refresh(query, telegram_id)
+            _refresh_preference()
+            await _show_frequency_root_menu()
 
     elif data == "settings_back":
         # Return to main settings

@@ -337,6 +337,171 @@ def backfill_news_article_category() -> None:
         pass
 
 
+def migrate_add_delivery_schedule_columns() -> None:
+    """
+    Add structured delivery schedule columns to user_preferences.
+    Backward compatible with legacy `frequency`.
+    """
+    try:
+        insp = inspect(engine)
+        if "user_preferences" not in insp.get_table_names():
+            return
+        with SessionLocal() as session:
+            if engine.dialect.name == "postgresql":
+                # Safer for repeated deploys on Postgres.
+                session.execute(
+                    text(
+                        "ALTER TABLE user_preferences "
+                        "ADD COLUMN IF NOT EXISTS delivery_mode VARCHAR(20)"
+                    )
+                )
+                session.execute(
+                    text(
+                        "ALTER TABLE user_preferences "
+                        "ADD COLUMN IF NOT EXISTS frequent_interval_minutes INTEGER"
+                    )
+                )
+                session.execute(
+                    text(
+                        "ALTER TABLE user_preferences "
+                        "ADD COLUMN IF NOT EXISTS digest_morning_enabled BOOLEAN"
+                    )
+                )
+                session.execute(
+                    text(
+                        "ALTER TABLE user_preferences "
+                        "ADD COLUMN IF NOT EXISTS digest_evening_enabled BOOLEAN"
+                    )
+                )
+                session.execute(
+                    text(
+                        "ALTER TABLE user_preferences "
+                        "ADD COLUMN IF NOT EXISTS digest_morning_hour INTEGER"
+                    )
+                )
+                session.execute(
+                    text(
+                        "ALTER TABLE user_preferences "
+                        "ADD COLUMN IF NOT EXISTS digest_evening_hour INTEGER"
+                    )
+                )
+                session.execute(
+                    text(
+                        "ALTER TABLE user_preferences "
+                        "ADD COLUMN IF NOT EXISTS delivery_timezone VARCHAR(64)"
+                    )
+                )
+            else:
+                cols = {c["name"] for c in insp.get_columns("user_preferences")}
+                if "delivery_mode" not in cols:
+                    session.execute(
+                        text("ALTER TABLE user_preferences ADD COLUMN delivery_mode VARCHAR(20)")
+                    )
+                if "frequent_interval_minutes" not in cols:
+                    session.execute(
+                        text("ALTER TABLE user_preferences ADD COLUMN frequent_interval_minutes INTEGER")
+                    )
+                if "digest_morning_enabled" not in cols:
+                    session.execute(
+                        text("ALTER TABLE user_preferences ADD COLUMN digest_morning_enabled BOOLEAN")
+                    )
+                if "digest_evening_enabled" not in cols:
+                    session.execute(
+                        text("ALTER TABLE user_preferences ADD COLUMN digest_evening_enabled BOOLEAN")
+                    )
+                if "digest_morning_hour" not in cols:
+                    session.execute(
+                        text("ALTER TABLE user_preferences ADD COLUMN digest_morning_hour INTEGER")
+                    )
+                if "digest_evening_hour" not in cols:
+                    session.execute(
+                        text("ALTER TABLE user_preferences ADD COLUMN digest_evening_hour INTEGER")
+                    )
+                if "delivery_timezone" not in cols:
+                    session.execute(
+                        text("ALTER TABLE user_preferences ADD COLUMN delivery_timezone VARCHAR(64)")
+                    )
+
+            # Safe defaults for both new and existing rows.
+            session.execute(
+                text(
+                    """
+                    UPDATE user_preferences
+                    SET
+                      delivery_mode = COALESCE(NULLIF(delivery_mode, ''), 'frequent'),
+                      frequent_interval_minutes = COALESCE(frequent_interval_minutes, 60),
+                      digest_morning_enabled = COALESCE(digest_morning_enabled, false),
+                      digest_evening_enabled = COALESCE(digest_evening_enabled, false),
+                      digest_morning_hour = COALESCE(digest_morning_hour, 7),
+                      digest_evening_hour = COALESCE(digest_evening_hour, 20),
+                      delivery_timezone = COALESCE(NULLIF(delivery_timezone, ''), 'Asia/Kuching')
+                    """
+                )
+            )
+
+            # Backfill from existing frequency values.
+            session.execute(
+                text(
+                    """
+                    UPDATE user_preferences
+                    SET
+                      delivery_mode = 'digest',
+                      digest_morning_enabled = true,
+                      digest_evening_enabled = false
+                    WHERE LOWER(COALESCE(frequency, '')) = 'digest_7am'
+                    """
+                )
+            )
+            session.execute(
+                text(
+                    """
+                    UPDATE user_preferences
+                    SET
+                      delivery_mode = 'digest',
+                      digest_morning_enabled = false,
+                      digest_evening_enabled = true
+                    WHERE LOWER(COALESCE(frequency, '')) = 'digest_8pm'
+                    """
+                )
+            )
+            session.execute(
+                text(
+                    """
+                    UPDATE user_preferences
+                    SET
+                      delivery_mode = 'digest',
+                      digest_morning_enabled = true,
+                      digest_evening_enabled = true
+                    WHERE LOWER(COALESCE(frequency, '')) = 'digest_7am_8pm'
+                    """
+                )
+            )
+            session.execute(
+                text(
+                    """
+                    UPDATE user_preferences
+                    SET
+                      delivery_mode = 'frequent',
+                      frequent_interval_minutes = CASE LOWER(COALESCE(frequency, ''))
+                        WHEN 'every_15m' THEN 15
+                        WHEN 'every_30m' THEN 30
+                        WHEN 'every_1h' THEN 60
+                        WHEN 'every_3h' THEN 180
+                        WHEN 'every_6h' THEN 360
+                        WHEN 'every_12h' THEN 720
+                        WHEN 'instant' THEN 60
+                        WHEN 'daily' THEN 720
+                        ELSE COALESCE(frequent_interval_minutes, 60)
+                      END
+                    WHERE LOWER(COALESCE(frequency, '')) NOT IN ('digest_7am', 'digest_8pm', 'digest_7am_8pm')
+                    """
+                )
+            )
+            session.commit()
+    except Exception as e:
+        print(f"Migration warning (delivery schedule columns): {e}")
+
+
 if __name__ == "__main__":
     migrate_users_telegram_id_to_bigint()
     migrate_add_locations_column()
@@ -344,6 +509,7 @@ if __name__ == "__main__":
     migrate_add_ai_summary_column()
     migrate_add_news_article_location_and_state_columns()
     migrate_add_news_article_category_column()
+    migrate_add_delivery_schedule_columns()
     migrate_create_user_article_delivery_table()
     migrate_add_last_scheduled_push_at_column()
     backfill_news_article_location_and_state()

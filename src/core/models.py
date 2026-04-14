@@ -59,6 +59,14 @@ class UserPreference(Base):
     # - every_15m, every_30m, every_1h, every_3h, every_6h, every_12h
     # Legacy values (instant/daily) are still accepted in runtime mapping.
     frequency = Column(String(50), nullable=False, default="every_1h")
+    # Structured delivery settings (Track A/B ready). Keep `frequency` for backward compatibility.
+    delivery_mode = Column(String(20), nullable=False, default="frequent")  # frequent|digest
+    frequent_interval_minutes = Column(Integer, nullable=True, default=60)
+    digest_morning_enabled = Column(Boolean, nullable=False, default=False)
+    digest_evening_enabled = Column(Boolean, nullable=False, default=False)
+    digest_morning_hour = Column(Integer, nullable=False, default=7)
+    digest_evening_hour = Column(Integer, nullable=False, default=20)
+    delivery_timezone = Column(String(64), nullable=False, default="Asia/Kuching")
     wants_urgent_alerts = Column(Boolean, default=True, nullable=False)
     # Last time a scheduled push was successfully sent (persists across restarts; see bot_main).
     last_scheduled_push_at = Column(DateTime, nullable=True)

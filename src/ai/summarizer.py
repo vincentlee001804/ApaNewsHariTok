@@ -328,6 +328,118 @@ def summarize_digest(items_text: str, max_words: int = 160) -> Optional[str]:
         return None
 
 
+def summarize_digest_overview(
+    items_text: str, *, story_count: int, max_words: int = 60
+) -> Optional[str]:
+    """
+    Create one short overview paragraph for a digest header.
+    """
+    if not items_text or not items_text.strip():
+        return None
+
+    prompt = textwrap.dedent(
+        f"""
+        You are preparing a Sarawak local-news digest intro.
+
+        Write ONE short paragraph (no bullets) for Telegram that:
+        - mentions there are about {story_count} relevant stories,
+        - highlights key themes and likely places involved (if clear from input),
+        - stays within {max_words} words,
+        - uses plain text only (no HTML/Markdown),
+        - uses simple, reader-friendly language.
+
+        Strict output rules:
+        - Output ONLY the paragraph content.
+        - Do NOT add labels like "Today's highlights", "Here is...", or "Intro paragraph".
+        - Do NOT wrap the paragraph in quotes.
+        - Do NOT use placeholders like [location], [theme], etc.
+        - Avoid generic openings like "Sarawak takes centre stage" or "in today's local news".
+        - Start with concrete developments from the provided items.
+
+        Items (titles + snippets):
+        \"\"\"{items_text.strip()}\"\"\"
+        """
+    ).strip()
+
+    try:
+        response = _ollama_post(
+            {
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"num_predict": max(OLLAMA_SUMMARY_NUM_PREDICT, 256)},
+            },
+            timeout=45,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = (data.get("response", "") or "").strip()
+        if not text:
+            return None
+        text = strip_markdown_artifacts_for_plain_text(text)
+        # Remove common meta wrappers if the model still adds them.
+        text = re.sub(
+            r'(?i)^(today[\'’]?s highlights|highlights|intro(?:ductory)? paragraph|here is (?:the )?(?:intro|summary|paragraph))\s*[:\-]\s*',
+            "",
+            text,
+        ).strip()
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1].strip()
+        if text.startswith("'") and text.endswith("'"):
+            text = text[1:-1].strip()
+        text = clip_plain_text_to_word_limit(text, max_words)
+        text = finalize_summary_plain_text(text)
+        return text or None
+    except Exception:
+        return None
+
+
+def generate_digest_greeting(period: str) -> Optional[str]:
+    """
+    Generate a short one-line greeting for digest pushes.
+    """
+    p = (period or "").strip().lower()
+    if p not in {"morning", "evening"}:
+        p = "day"
+
+    prompt = textwrap.dedent(
+        f"""
+        You are a friendly Sarawak local news assistant.
+        Write exactly ONE short greeting line for a Telegram digest push.
+        Context: It is {p}.
+
+        Rules:
+        - 8 to 16 words only.
+        - Warm and natural tone.
+        - Mention this is the user's local news digest.
+        - Plain text only (no Markdown, no HTML).
+        - No quotes, no bullet points, no emojis.
+        """
+    ).strip()
+
+    try:
+        response = _ollama_post(
+            {
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"num_predict": 64},
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = (data.get("response", "") or "").strip()
+        if not text:
+            return None
+        text = strip_markdown_artifacts_for_plain_text(text)
+        text = clip_plain_text_to_word_limit(text, 16)
+        text = finalize_summary_plain_text(text)
+        return text or None
+    except Exception:
+        return None
+
+
 def answer_news_question(question: str, items_text: str, max_words: int = 90) -> Optional[str]:
     """
     Answer a user question using only the provided news items.

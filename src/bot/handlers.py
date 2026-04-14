@@ -638,6 +638,62 @@ async def test_push_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
 
 
+async def test_digest_push_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Developer-only: send the digest push as two messages (greeting + digest body).
+    Mirrors the new scheduled digest UX for quick manual testing.
+    """
+    if not update.message or not update.effective_user:
+        return
+
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await update.message.reply_text("Use /testdigestpush in a private chat with the bot.")
+        return
+
+    telegram_id = update.effective_user.id
+    if not is_test_push_allowed(telegram_id):
+        await update.message.reply_text(
+            "Developer commands are disabled or your Telegram user ID is not on the allow list."
+        )
+        return
+
+    get_or_create_user(telegram_id, update.effective_user.username)
+
+    from src.ai.summarizer import generate_digest_greeting
+    from src.core.services import get_todays_news_digest_for_user
+
+    period_name = "morning" if datetime.utcnow().hour < 12 else "evening"
+    greeting = await asyncio.to_thread(generate_digest_greeting, period_name)
+    if not greeting:
+        greeting = (
+            "Good morning! Here is your Sarawak local news digest."
+            if period_name == "morning"
+            else "Good evening! Here is your Sarawak local news digest."
+        )
+
+    try:
+        digest = await asyncio.to_thread(get_todays_news_digest_for_user, telegram_id, 6)
+    except OperationalError:
+        logger.exception("Database busy while serving /testdigestpush")
+        await update.message.reply_text(
+            "The news database is busy right now. Please try /testdigestpush again in a few seconds."
+        )
+        return
+
+    if not digest:
+        await update.message.reply_text(
+            "No digest is ready right now for your current filters. Try again in a bit."
+        )
+        return
+
+    await update.message.reply_text(greeting)
+    await update.message.reply_text(
+        digest,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+
+
 async def dev_waze_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Developer-only: show Waze block for the user's Area Keywords (403/errors allowed).

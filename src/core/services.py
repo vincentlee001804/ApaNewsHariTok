@@ -1714,7 +1714,13 @@ def _truncate_text(text: str, max_chars: int) -> str:
     return cleaned[:max_chars].rstrip(" ,.;:!?") + "..."
 
 
-def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> str:
+def get_todays_news_digest_for_user(
+    telegram_id: int,
+    max_articles: int = 6,
+    *,
+    scheduled_push: bool = False,
+    mark_delivery: bool = False,
+) -> str:
     """
     Conversational mode: generate ONE digest for "today's news" from local DB (SQLite).
     Uses Ollama to create a bullet-point digest from per-article snippets.
@@ -1760,16 +1766,32 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
     now = datetime.utcnow()
     start_of_today = datetime(now.year, now.month, now.day)
 
+    user_id: int | None = None
     with SessionLocal() as session:
-        candidates: List[NewsArticle] = list(
-            session.execute(
-                select(NewsArticle)
-                .where(NewsArticle.created_at >= start_of_today)
-                .order_by(NewsArticle.created_at.desc())
-            ).scalars().all()
+        user_row = session.execute(
+            select(User).where(User.telegram_id == telegram_id)
+        ).scalar_one_or_none()
+        user_id = user_row.id if user_row else None
+
+        stmt = (
+            select(NewsArticle)
+            .where(NewsArticle.created_at >= start_of_today)
+            .order_by(NewsArticle.created_at.desc())
         )
+        if scheduled_push and DEDUPLICATION_ENABLED and user_id is not None:
+            already_delivered = exists(
+                select(UserArticleDelivery.id).where(
+                    UserArticleDelivery.article_id == NewsArticle.id,
+                    UserArticleDelivery.user_id == user_id,
+                )
+            )
+            stmt = stmt.where(~already_delivered)
+
+        candidates: List[NewsArticle] = list(session.execute(stmt).scalars().all())
 
     if not candidates:
+        if scheduled_push:
+            return ""
         # DB might not be warmed up yet; fall back to RSS for a "today" digest.
         from src.core.config import RSS_FEEDS
         from src.scrapers.rss_reader import fetch_latest_items
@@ -1914,6 +1936,25 @@ def get_todays_news_digest_for_user(telegram_id: int, max_articles: int = 6) -> 
 
     if not chosen:
         return ""
+
+    if (
+        scheduled_push
+        and mark_delivery
+        and DEDUPLICATION_ENABLED
+        and user_id is not None
+        and chosen_clusters
+    ):
+        delivered_ids = {m.id for _p, members in chosen_clusters for m in members if m.id}
+        if delivered_ids:
+            now_sent = datetime.utcnow()
+            with SessionLocal() as session:
+                rows = list(
+                    session.execute(
+                        select(NewsArticle).where(NewsArticle.id.in_(delivered_ids))
+                    ).scalars().all()
+                )
+                _record_deliveries_for_user(session, user_id, rows, now_sent)
+                session.commit()
 
     # Build compact input for the LLM (titles + already-stored snippets).
     items_text_lines: List[str] = []

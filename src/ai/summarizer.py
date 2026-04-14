@@ -413,7 +413,10 @@ def generate_digest_greeting(period: str) -> Optional[str]:
         - Warm and natural tone.
         - Mention this is the user's local news digest.
         - Plain text only (no Markdown, no HTML).
-        - No quotes, no bullet points, no emojis.
+        - No quotes and no bullet points.
+        - You may include at most ONE friendly emoji (optional).
+        - End as one complete sentence.
+        - Do NOT add labels like "Greeting:" or "Message:".
         """
     ).strip()
 
@@ -433,8 +436,19 @@ def generate_digest_greeting(period: str) -> Optional[str]:
         if not text:
             return None
         text = strip_markdown_artifacts_for_plain_text(text)
+        # Remove wrappers and labels if the model still emits them.
+        text = re.sub(r"(?i)^(greeting|message)\s*[:\-]\s*", "", text).strip()
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1].strip()
+        if text.startswith("'") and text.endswith("'"):
+            text = text[1:-1].strip()
+        # Keep only the first line in case the model spills extra lines.
+        text = text.splitlines()[0].strip()
         text = clip_plain_text_to_word_limit(text, 16)
         text = finalize_summary_plain_text(text)
+        # Avoid overly short, awkward output.
+        if len(text.split()) < 6:
+            return None
         return text or None
     except Exception:
         return None

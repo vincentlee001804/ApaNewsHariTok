@@ -282,7 +282,11 @@ def main() -> None:
                         safe_greeting = html.escape(greeting)
 
                         text = await asyncio.to_thread(
-                            get_todays_news_digest_for_user, telegram_id, 6
+                            get_todays_news_digest_for_user,
+                            telegram_id,
+                            6,
+                            scheduled_push=True,
+                            mark_delivery=True,
                         )
                     else:
                         safe_greeting = ""

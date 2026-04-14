@@ -223,6 +223,23 @@ def _format_frequency_from_preference(preference) -> str:
     return _format_frequency(getattr(preference, "frequency", None))
 
 
+def _normalize_evening_only_digest_preference(telegram_id: int, preference):
+    mode = (getattr(preference, "delivery_mode", "") or "").strip().lower()
+    if mode != "digest":
+        return preference
+    morning_enabled = bool(getattr(preference, "digest_morning_enabled", False))
+    evening_enabled = bool(getattr(preference, "digest_evening_enabled", False))
+    if not morning_enabled and evening_enabled:
+        return preference
+    updated = update_user_preference(
+        telegram_id,
+        delivery_mode="digest",
+        digest_morning_enabled=False,
+        digest_evening_enabled=True,
+    )
+    return updated or preference
+
+
 def _onboarding_categories_keyboard(page: int, current_categories: str | None) -> InlineKeyboardMarkup:
     selected = {
         token.strip().lower()
@@ -365,28 +382,12 @@ def _onboarding_frequency_mode_keyboard(delivery_mode: str | None) -> InlineKeyb
 
 
 def _onboarding_digest_time_keyboard(preference) -> InlineKeyboardMarkup:
-    mh = int(getattr(preference, "digest_morning_hour", DIGEST_MORNING_HOUR_LOCAL) or DIGEST_MORNING_HOUR_LOCAL)
     eh = int(getattr(preference, "digest_evening_hour", DIGEST_EVENING_HOUR_LOCAL) or DIGEST_EVENING_HOUR_LOCAL)
-    morning_enabled = bool(getattr(preference, "digest_morning_enabled", False))
     evening_enabled = bool(getattr(preference, "digest_evening_enabled", False))
-    morning_options = [6, 7, 8]
     evening_options = [19, 20, 21]
 
     return InlineKeyboardMarkup(
         [
-            [
-                InlineKeyboardButton(
-                    "✅ Morning digest ON" if morning_enabled else "⬜ Morning digest OFF",
-                    callback_data="onb_freq_digest_toggle_morning",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    f"{h:02d}:00" + (" ✓" if morning_enabled and mh == h else ""),
-                    callback_data=f"onb_freq_digest_morning_{h:02d}",
-                )
-                for h in morning_options
-            ],
             [
                 InlineKeyboardButton(
                     "✅ Evening digest ON" if evening_enabled else "⬜ Evening digest OFF",
@@ -493,7 +494,7 @@ async def _show_onboarding_digest_time(query, telegram_id: int) -> None:
         return
     await query.edit_message_text(
         "*Step 5/6 - Digest time*\n\n"
-        "Choose morning/evening digest slots and preset times.",
+        "Digest updates are evening-only. Choose your evening digest time.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=_onboarding_digest_time_keyboard(preference),
     )
@@ -915,6 +916,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             parse_mode=ParseMode.MARKDOWN,
         )
         return
+    preference = _normalize_evening_only_digest_preference(telegram_id, preference)
 
     # Format current settings
     categories_display = preference.categories if preference.categories else "All categories"
@@ -986,6 +988,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not preference:
         await query.edit_message_text("Error: Could not load your preferences.")
         return
+    preference = _normalize_evening_only_digest_preference(telegram_id, preference)
 
     data = query.data
 
@@ -1156,34 +1159,13 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             update_user_preference(telegram_id, delivery_mode="frequent")
             await _show_onboarding_scheduled_time(query, telegram_id)
             return
-        if data == "onb_freq_digest_toggle_morning":
-            cur = bool(getattr(preference, "digest_morning_enabled", False))
-            update_user_preference(
-                telegram_id,
-                delivery_mode="digest",
-                digest_morning_enabled=not cur,
-            )
-            await _show_onboarding_digest_time(query, telegram_id)
-            return
         if data == "onb_freq_digest_toggle_evening":
             cur = bool(getattr(preference, "digest_evening_enabled", False))
             update_user_preference(
                 telegram_id,
                 delivery_mode="digest",
+                digest_morning_enabled=False,
                 digest_evening_enabled=not cur,
-            )
-            await _show_onboarding_digest_time(query, telegram_id)
-            return
-        if data.startswith("onb_freq_digest_morning_"):
-            try:
-                hour = int(data.rsplit("_", 1)[1])
-            except Exception:
-                hour = DIGEST_MORNING_HOUR_LOCAL
-            update_user_preference(
-                telegram_id,
-                delivery_mode="digest",
-                digest_morning_enabled=True,
-                digest_morning_hour=hour,
             )
             await _show_onboarding_digest_time(query, telegram_id)
             return
@@ -1195,6 +1177,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             update_user_preference(
                 telegram_id,
                 delivery_mode="digest",
+                digest_morning_enabled=False,
                 digest_evening_enabled=True,
                 digest_evening_hour=hour,
             )
@@ -1329,26 +1312,10 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
     async def _show_digest_frequency_menu() -> None:
-        mh = int(getattr(preference, "digest_morning_hour", DIGEST_MORNING_HOUR_LOCAL) or DIGEST_MORNING_HOUR_LOCAL)
         eh = int(getattr(preference, "digest_evening_hour", DIGEST_EVENING_HOUR_LOCAL) or DIGEST_EVENING_HOUR_LOCAL)
-        m_on = bool(getattr(preference, "digest_morning_enabled", False))
         e_on = bool(getattr(preference, "digest_evening_enabled", False))
-        morning_options = [6, 7, 8]
         evening_options = [19, 20, 21]
         keyboard = [
-            [
-                InlineKeyboardButton(
-                    ("✅ Morning digest ON" if m_on else "⬜ Morning digest OFF"),
-                    callback_data="freq_digest_toggle_morning",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    f"{h:02d}:00" + (" ✓" if m_on and mh == h else ""),
-                    callback_data=f"freq_digest_morning_{h:02d}",
-                )
-                for h in morning_options
-            ],
             [
                 InlineKeyboardButton(
                     ("✅ Evening digest ON" if e_on else "⬜ Evening digest OFF"),
@@ -1367,7 +1334,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await _safe_edit_message_text(
             text=(
                 "*Digest mode*\n\n"
-                "Choose morning/evening digest slots and preset times.\n\n"
+                "Digest updates are evening-only. Choose the evening time.\n\n"
                 f"Current: {_current_frequency_label()}"
             ),
             reply_markup=InlineKeyboardMarkup(keyboard),
@@ -1688,24 +1655,9 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await query.answer("Frequency set to: Every 15 mins")
             _refresh_preference()
             await _show_frequent_frequency_menu()
-        elif data == "freq_digest_7am":
-            update_user_preference(telegram_id, frequency="digest_7am")
-            await query.answer(f"Frequency set to: Digest {DIGEST_MORNING_HOUR_LOCAL:02d}:00")
-            _refresh_preference()
-            await _show_digest_frequency_menu()
         elif data == "freq_digest_8pm":
             update_user_preference(telegram_id, frequency="digest_8pm")
             await query.answer(f"Frequency set to: Digest {DIGEST_EVENING_HOUR_LOCAL:02d}:00")
-            _refresh_preference()
-            await _show_digest_frequency_menu()
-        elif data == "freq_digest_toggle_morning":
-            cur = bool(getattr(preference, "digest_morning_enabled", False))
-            update_user_preference(
-                telegram_id,
-                delivery_mode="digest",
-                digest_morning_enabled=not cur,
-            )
-            await query.answer("Morning digest " + ("enabled" if not cur else "disabled"))
             _refresh_preference()
             await _show_digest_frequency_menu()
         elif data == "freq_digest_toggle_evening":
@@ -1713,23 +1665,10 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             update_user_preference(
                 telegram_id,
                 delivery_mode="digest",
+                digest_morning_enabled=False,
                 digest_evening_enabled=not cur,
             )
             await query.answer("Evening digest " + ("enabled" if not cur else "disabled"))
-            _refresh_preference()
-            await _show_digest_frequency_menu()
-        elif data.startswith("freq_digest_morning_"):
-            try:
-                hour = int(data.rsplit("_", 1)[1])
-            except Exception:
-                hour = DIGEST_MORNING_HOUR_LOCAL
-            update_user_preference(
-                telegram_id,
-                delivery_mode="digest",
-                digest_morning_enabled=True,
-                digest_morning_hour=hour,
-            )
-            await query.answer(f"Morning digest time set to {hour:02d}:00")
             _refresh_preference()
             await _show_digest_frequency_menu()
         elif data.startswith("freq_digest_evening_"):
@@ -1740,18 +1679,11 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             update_user_preference(
                 telegram_id,
                 delivery_mode="digest",
+                digest_morning_enabled=False,
                 digest_evening_enabled=True,
                 digest_evening_hour=hour,
             )
             await query.answer(f"Evening digest time set to {hour:02d}:00")
-            _refresh_preference()
-            await _show_digest_frequency_menu()
-        elif data == "freq_digest_7am_8pm":
-            update_user_preference(telegram_id, frequency="digest_7am_8pm")
-            await query.answer(
-                "Frequency set to: "
-                f"Digest {DIGEST_MORNING_HOUR_LOCAL:02d}:00 + {DIGEST_EVENING_HOUR_LOCAL:02d}:00"
-            )
             _refresh_preference()
             await _show_digest_frequency_menu()
         elif data == "freq_every_30m":

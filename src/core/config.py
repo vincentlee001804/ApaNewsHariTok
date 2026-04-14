@@ -238,6 +238,55 @@ DEDUPLICATION_ENABLED: Final[bool] = os.getenv("DEDUPLICATION_ENABLED", "true").
     "on",
 }
 
+# Cross-source deduplication (same story from different publishers/URLs).
+# This runs in-memory during article selection and does not change DB schema.
+CROSS_SOURCE_DEDUP_ENABLED: Final[bool] = os.getenv(
+    "CROSS_SOURCE_DEDUP_ENABLED", "true"
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+CROSS_SOURCE_DEDUP_DEBUG: Final[bool] = os.getenv(
+    "CROSS_SOURCE_DEDUP_DEBUG", "false"
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+CROSS_SOURCE_DEDUP_TITLE_JACCARD_THRESHOLD: Final[float] = min(
+    1.0,
+    max(
+        0.0,
+        float(
+            (
+                os.getenv("CROSS_SOURCE_DEDUP_TITLE_JACCARD_THRESHOLD", "0.82").strip()
+                or "0.82"
+            )
+        ),
+    ),
+)
+CROSS_SOURCE_DEDUP_BODY_JACCARD_THRESHOLD: Final[float] = min(
+    1.0,
+    max(
+        0.0,
+        float(
+            (
+                os.getenv("CROSS_SOURCE_DEDUP_BODY_JACCARD_THRESHOLD", "0.72").strip()
+                or "0.72"
+            )
+        ),
+    ),
+)
+CROSS_SOURCE_DEDUP_MIN_BODY_TOKENS: Final[int] = max(
+    8,
+    int((os.getenv("CROSS_SOURCE_DEDUP_MIN_BODY_TOKENS", "18").strip() or "18")),
+)
+
 # Background RSS prefetch (store to DB while bot is running)
 PREFETCH_ENABLED: Final[bool] = os.getenv("PREFETCH_ENABLED", "true").strip().lower() in {
     "1",

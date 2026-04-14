@@ -115,7 +115,7 @@ def main() -> None:
     )
     application.add_handler(
         CallbackQueryHandler(
-            settings_callback, pattern="^settings_|^cat_|^freq_|^loc_|^area_kw_"
+            settings_callback, pattern="^settings_|^cat_|^freq_|^loc_|^area_kw_|^onb_"
         )
     )
 

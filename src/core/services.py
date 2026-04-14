@@ -87,16 +87,36 @@ def _jaccard_similarity(a: set[str], b: set[str]) -> float:
     return len(a & b) / union
 
 
+def _normalized_title_key_for_story_dedup(title: str | None) -> str:
+    tokens = sorted(_tokenize_for_story_dedup(title))
+    if not tokens:
+        return ""
+    # Stable key to catch same-story reposts with different links from the same publisher.
+    return " ".join(tokens[:18])
+
+
 def _find_cross_source_duplicate_story_match(
     *,
     title_tokens: set[str],
     body_tokens: set[str],
-    seen_signatures: list[tuple[set[str], set[str]]],
+    source_name: str,
+    title_key: str,
+    seen_signatures: list[tuple[set[str], set[str], str, str]],
 ) -> tuple[int, str, float] | None:
     if not seen_signatures:
         return None
 
-    for idx, (seen_title, seen_body) in enumerate(seen_signatures):
+    for idx, (seen_title, seen_body, seen_source, seen_title_key) in enumerate(seen_signatures):
+        # Same publisher with normalized title match: treat as duplicate immediately.
+        if (
+            source_name
+            and seen_source
+            and source_name == seen_source
+            and title_key
+            and seen_title_key
+            and title_key == seen_title_key
+        ):
+            return (idx, "same_source_title_key", 1.0)
         title_sim = _jaccard_similarity(title_tokens, seen_title)
         if title_sim >= CROSS_SOURCE_DEDUP_TITLE_JACCARD_THRESHOLD:
             return (idx, "title", title_sim)
@@ -122,7 +142,7 @@ def _cluster_ranked_articles_cross_source(
         return [(art, [art]) for art in ranked_articles[:max_items]]
 
     clusters: list[tuple[NewsArticle, list[NewsArticle]]] = []
-    seen_signatures: list[tuple[set[str], set[str]]] = []
+    seen_signatures: list[tuple[set[str], set[str], str, str]] = []
     seen_links: set[str] = set()
 
     for art in ranked_articles:
@@ -143,10 +163,14 @@ def _cluster_ranked_articles_cross_source(
         body_tokens = _tokenize_for_story_dedup(
             f"{art.raw_summary or ''} {art.ai_summary or ''}"
         )
+        source_norm = (art.source or "").strip().lower()
+        title_key = _normalized_title_key_for_story_dedup(art.title)
 
         duplicate_match = _find_cross_source_duplicate_story_match(
             title_tokens=title_tokens,
             body_tokens=body_tokens,
+            source_name=source_norm,
+            title_key=title_key,
             seen_signatures=seen_signatures,
         )
         if duplicate_match is not None:
@@ -165,7 +189,7 @@ def _cluster_ranked_articles_cross_source(
             continue
 
         seen_links.add(dedup_link)
-        seen_signatures.append((title_tokens, body_tokens))
+        seen_signatures.append((title_tokens, body_tokens, source_norm, title_key))
         clusters.append((art, [art]))
         if CROSS_SOURCE_DEDUP_DEBUG:
             logger.info(
@@ -275,7 +299,7 @@ def _deduplicate_items(items: List[RssItem], max_items: int) -> List[RssItem]:
     Items should be pre-sorted by date (newest first) to ensure latest news is prioritized.
     """
     seen_links = set()
-    seen_story_signatures: list[tuple[set[str], set[str]]] = []
+    seen_story_signatures: list[tuple[set[str], set[str], str, str]] = []
     unique_items: List[RssItem] = []
     for item in items:
         link = canonical_link_for_news_item(item)
@@ -284,11 +308,15 @@ def _deduplicate_items(items: List[RssItem], max_items: int) -> List[RssItem]:
             continue
         title_tokens = _tokenize_for_story_dedup(item.title)
         body_tokens = _tokenize_for_story_dedup(item.summary)
+        source_norm = _get_source_name(item.source).strip().lower()
+        title_key = _normalized_title_key_for_story_dedup(item.title)
         duplicate_match = None
         if CROSS_SOURCE_DEDUP_ENABLED:
             duplicate_match = _find_cross_source_duplicate_story_match(
                 title_tokens=title_tokens,
                 body_tokens=body_tokens,
+                source_name=source_norm,
+                title_key=title_key,
                 seen_signatures=seen_story_signatures,
             )
         if duplicate_match is not None:
@@ -302,7 +330,7 @@ def _deduplicate_items(items: List[RssItem], max_items: int) -> List[RssItem]:
                 )
             continue
         seen_links.add(dedup_key)
-        seen_story_signatures.append((title_tokens, body_tokens))
+        seen_story_signatures.append((title_tokens, body_tokens, source_norm, title_key))
         unique_items.append(item)
         if CROSS_SOURCE_DEDUP_DEBUG:
             logger.info(

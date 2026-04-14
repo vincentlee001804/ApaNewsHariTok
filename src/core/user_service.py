@@ -17,8 +17,8 @@ def _apply_delivery_schedule_from_frequency(preference: UserPreference, frequenc
         key = "every_12h"
 
     preference.frequency = key or "every_1h"
-    preference.digest_morning_hour = preference.digest_morning_hour or 7
-    preference.digest_evening_hour = preference.digest_evening_hour or 20
+    preference.digest_morning_hour = preference.digest_morning_hour or 6
+    preference.digest_evening_hour = preference.digest_evening_hour or 21
     preference.delivery_timezone = (preference.delivery_timezone or "").strip() or "Asia/Kuching"
 
     if key == "digest_7am":
@@ -76,13 +76,13 @@ def get_or_create_user(telegram_id: int, username: Optional[str] = None) -> User
                 user_id=user.id,
                 categories="",  # Empty means all categories
                 locations="",  # Empty means all Sarawak locations
-                frequency="every_1h",
-                delivery_mode="frequent",
+                frequency="digest_7am_8pm",
+                delivery_mode="digest",
                 frequent_interval_minutes=60,
-                digest_morning_enabled=False,
-                digest_evening_enabled=False,
-                digest_morning_hour=7,
-                digest_evening_hour=20,
+                digest_morning_enabled=True,
+                digest_evening_enabled=True,
+                digest_morning_hour=6,
+                digest_evening_hour=21,
                 delivery_timezone="Asia/Kuching",
                 wants_urgent_alerts=True,
             )
@@ -152,13 +152,13 @@ def update_user_preference(
                 user_id=user.id,
                 categories="",
                 locations="",
-                frequency="every_1h",
-                delivery_mode="frequent",
+                frequency="digest_7am_8pm",
+                delivery_mode="digest",
                 frequent_interval_minutes=60,
-                digest_morning_enabled=False,
-                digest_evening_enabled=False,
-                digest_morning_hour=7,
-                digest_evening_hour=20,
+                digest_morning_enabled=True,
+                digest_evening_enabled=True,
+                digest_morning_hour=6,
+                digest_evening_hour=21,
                 delivery_timezone="Asia/Kuching",
                 wants_urgent_alerts=True,
             )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import os
 import threading
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,7 @@ from src.bot.handlers import (
     settings_callback,
     settings_command,
     start,
+    test_digest_push_command,
     test_push_command,
     dev_waze_command,
 )
@@ -50,6 +52,7 @@ from src.core.services import (
     SCHEDULED_PUSH_SUMMARY_PENDING_SKIP_MARKER,
     get_latest_news_text_for_user,
 )
+from src.ai.summarizer import generate_digest_greeting
 from src.core.user_service import (
     list_active_user_preferences,
     set_user_active,
@@ -102,6 +105,7 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("latest", latest_demo))
     application.add_handler(CommandHandler("testpush", test_push_command))
+    application.add_handler(CommandHandler("testdigestpush", test_digest_push_command))
     application.add_handler(CommandHandler("devwaze", dev_waze_command))
     application.add_handler(CommandHandler("setareas", setareas_command))
     application.add_handler(CommandHandler("cancel", cancel_awaiting_area_keywords))
@@ -213,6 +217,18 @@ def main() -> None:
                 return True
         return False
 
+    def _digest_period_name(preference, now_utc: datetime) -> str:
+        tz_name = (
+            getattr(preference, "delivery_timezone", None)
+            or SCHEDULED_PUSH_QUIET_TIMEZONE
+        )
+        try:
+            tz = ZoneInfo(str(tz_name))
+        except Exception:
+            tz = ZoneInfo(SCHEDULED_PUSH_QUIET_TIMEZONE)
+        hour_local = now_utc.replace(tzinfo=timezone.utc).astimezone(tz).hour
+        return "morning" if hour_local < 12 else "evening"
+
     async def _prefetch_db_job(context) -> None:
         """RSS + Telegram → database (and optional ai_summary backfill)."""
         try:
@@ -250,10 +266,23 @@ def main() -> None:
                             continue
                         from src.core.services import get_todays_news_digest_for_user
 
+                        period_name = _digest_period_name(preference, now)
+                        greeting = await asyncio.to_thread(
+                            generate_digest_greeting, period_name
+                        )
+                        if not greeting:
+                            greeting = (
+                                "Good morning! Here is your Sarawak local news digest."
+                                if period_name == "morning"
+                                else "Good evening! Here is your Sarawak local news digest."
+                            )
+                        safe_greeting = html.escape(greeting)
+
                         text = await asyncio.to_thread(
                             get_todays_news_digest_for_user, telegram_id, 6
                         )
                     else:
+                        safe_greeting = ""
                         interval_min = getattr(preference, "frequent_interval_minutes", None)
                         if interval_min is not None:
                             try:
@@ -272,6 +301,12 @@ def main() -> None:
                     if _should_skip_push_message(text):
                         continue
 
+                    if safe_greeting:
+                        await application.bot.send_message(
+                            chat_id=telegram_id,
+                            text=safe_greeting,
+                            parse_mode=ParseMode.HTML,
+                        )
                     await application.bot.send_message(
                         chat_id=telegram_id,
                         text=text,

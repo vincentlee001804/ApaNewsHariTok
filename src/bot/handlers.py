@@ -163,6 +163,40 @@ def _format_frequency(value: str | None) -> str:
     return mapping.get(key, "Every 1 hour")
 
 
+def _format_frequency_from_preference(preference) -> str:
+    mode = (getattr(preference, "delivery_mode", "") or "").strip().lower()
+    if mode == "digest":
+        m_on = bool(getattr(preference, "digest_morning_enabled", False))
+        e_on = bool(getattr(preference, "digest_evening_enabled", False))
+        mh = int(
+            getattr(preference, "digest_morning_hour", DIGEST_MORNING_HOUR_LOCAL)
+            or DIGEST_MORNING_HOUR_LOCAL
+        )
+        eh = int(
+            getattr(preference, "digest_evening_hour", DIGEST_EVENING_HOUR_LOCAL)
+            or DIGEST_EVENING_HOUR_LOCAL
+        )
+        if m_on and e_on:
+            return f"Digest mode ({mh:02d}:00 + {eh:02d}:00)"
+        if m_on:
+            return f"Digest mode ({mh:02d}:00)"
+        if e_on:
+            return f"Digest mode ({eh:02d}:00)"
+        return "Digest mode (no slot selected)"
+    if mode == "frequent":
+        iv = int(getattr(preference, "frequent_interval_minutes", 60) or 60)
+        mapping = {
+            15: "Every 15 mins",
+            30: "Every 30 mins",
+            60: "Every 1 hour",
+            180: "Every 3 hours",
+            360: "Every 6 hours",
+            720: "Every 12 hours",
+        }
+        return mapping.get(iv, "Every 1 hour")
+    return _format_frequency(getattr(preference, "frequency", None))
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command. Register user if new."""
     if not update.message:
@@ -484,7 +518,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     else:
         locations_display = "All Sarawak"
     
-    frequency_display = _format_frequency(preference.frequency)
+    frequency_display = _format_frequency_from_preference(preference)
     urgent_display = "Yes" if preference.wants_urgent_alerts else "No"
     subscription_display = "ON" if is_user_active(telegram_id) else "OFF"
     area_keywords_display = (
@@ -1134,7 +1168,7 @@ async def settings_callback_refresh(query, telegram_id: int) -> None:
     else:
         locations_display = "All Sarawak"
     
-    frequency_display = _format_frequency(preference.frequency)
+    frequency_display = _format_frequency_from_preference(preference)
     urgent_display = "Yes" if preference.wants_urgent_alerts else "No"
     subscription_display = "ON" if is_user_active(telegram_id) else "OFF"
     area_keywords_display = (

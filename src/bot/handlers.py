@@ -223,22 +223,55 @@ def _format_frequency_from_preference(preference) -> str:
     return _format_frequency(getattr(preference, "frequency", None))
 
 
-def _onboarding_categories_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
+def _onboarding_categories_keyboard(page: int, current_categories: str | None) -> InlineKeyboardMarkup:
+    selected = {
+        token.strip().lower()
+        for token in (current_categories or "").split(",")
+        if token.strip()
+    }
+
+    def _with_tick(slug: str, label: str) -> str:
+        return label + (" ✓" if slug in selected else "")
+
+    rows: list[list[InlineKeyboardButton]] = []
+    if page == 1:
+        rows.append(
             [
-                InlineKeyboardButton("All Categories", callback_data="onb_cat_all"),
-                InlineKeyboardButton("Sarawak Only", callback_data="onb_cat_sarawak"),
-            ],
+                InlineKeyboardButton(
+                    "All Categories" + (" ✓" if not selected else ""),
+                    callback_data="onb_cat_all",
+                ),
+                InlineKeyboardButton(
+                    _with_tick("sarawak", "Sarawak Only"),
+                    callback_data="onb_cat_sarawak",
+                ),
+            ]
+        )
+        labels = _CAT_SETTINGS_PAGE1
+    else:
+        labels = _CAT_SETTINGS_PAGE2
+
+    for i in range(0, len(labels), 2):
+        pair = labels[i : i + 2]
+        rows.append(
             [
-                InlineKeyboardButton("Crime", callback_data="onb_cat_crime"),
-                InlineKeyboardButton("Traffic", callback_data="onb_cat_traffic"),
-            ],
-            [InlineKeyboardButton("Next ▶️", callback_data="onb_step4")],
-            [InlineKeyboardButton("◀️ Back", callback_data="onb_step2")],
-            [InlineKeyboardButton("Skip Setup", callback_data="onb_skip")],
-        ]
-    )
+                InlineKeyboardButton(
+                    _with_tick(slug_for_callback(lab), lab),
+                    callback_data=f"onb_cat_toggle_{slug_for_callback(lab)}",
+                )
+                for lab in pair
+            ]
+        )
+
+    if page == 1:
+        rows.append([InlineKeyboardButton("More categories…", callback_data="onb_cat_page2")])
+    else:
+        rows.append([InlineKeyboardButton("◀️ Page 1", callback_data="onb_step3")])
+
+    rows.append([InlineKeyboardButton("Next ▶️", callback_data="onb_step4")])
+    rows.append([InlineKeyboardButton("◀️ Back", callback_data="onb_step2")])
+    rows.append([InlineKeyboardButton("Skip Setup", callback_data="onb_skip")])
+    return InlineKeyboardMarkup(rows)
 
 
 def _onboarding_locations_keyboard(current_locations: str | None) -> InlineKeyboardMarkup:
@@ -258,6 +291,14 @@ def _onboarding_locations_keyboard(current_locations: str | None) -> InlineKeybo
                 InlineKeyboardButton("Miri" + _tick("miri"), callback_data="onb_loc_miri"),
                 InlineKeyboardButton("Bintulu" + _tick("bintulu"), callback_data="onb_loc_bintulu"),
             ],
+            [
+                InlineKeyboardButton("Kota Samarahan" + _tick("kota samarahan"), callback_data="onb_loc_kota_samarahan"),
+                InlineKeyboardButton("Serian" + _tick("serian"), callback_data="onb_loc_serian"),
+            ],
+            [
+                InlineKeyboardButton("Sarikei" + _tick("sarikei"), callback_data="onb_loc_sarikei"),
+                InlineKeyboardButton("More Cities...", callback_data="onb_loc_more"),
+            ],
             [InlineKeyboardButton("Next ▶️", callback_data="onb_step5")],
             [InlineKeyboardButton("◀️ Back", callback_data="onb_step3")],
             [InlineKeyboardButton("Skip Setup", callback_data="onb_skip")],
@@ -265,7 +306,108 @@ def _onboarding_locations_keyboard(current_locations: str | None) -> InlineKeybo
     )
 
 
-def _onboarding_frequency_keyboard(current_frequency: str | None) -> InlineKeyboardMarkup:
+def _onboarding_locations_more_keyboard(current_locations: str | None) -> InlineKeyboardMarkup:
+    chosen = {loc.strip().lower() for loc in (current_locations or "").split(",") if loc.strip()}
+
+    def _tick(name: str) -> str:
+        return " ✓" if name in chosen else ""
+
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Sri Aman" + _tick("sri aman"), callback_data="onb_loc_sri_aman"),
+                InlineKeyboardButton("Mukah" + _tick("mukah"), callback_data="onb_loc_mukah"),
+            ],
+            [
+                InlineKeyboardButton("Limbang" + _tick("limbang"), callback_data="onb_loc_limbang"),
+                InlineKeyboardButton("Lawas" + _tick("lawas"), callback_data="onb_loc_lawas"),
+            ],
+            [
+                InlineKeyboardButton("Betong" + _tick("betong"), callback_data="onb_loc_betong"),
+                InlineKeyboardButton("Saratok" + _tick("saratok"), callback_data="onb_loc_saratok"),
+            ],
+            [
+                InlineKeyboardButton("Kapit" + _tick("kapit"), callback_data="onb_loc_kapit"),
+                InlineKeyboardButton("Marudi" + _tick("marudi"), callback_data="onb_loc_marudi"),
+            ],
+            [
+                InlineKeyboardButton("Belaga" + _tick("belaga"), callback_data="onb_loc_belaga"),
+            ],
+            [InlineKeyboardButton("◀️ Back to Locations", callback_data="onb_step4")],
+            [InlineKeyboardButton("Next ▶️", callback_data="onb_step5")],
+            [InlineKeyboardButton("Skip Setup", callback_data="onb_skip")],
+        ]
+    )
+
+
+def _onboarding_frequency_mode_keyboard(delivery_mode: str | None) -> InlineKeyboardMarkup:
+    mode = (delivery_mode or "").strip().lower()
+    digest_selected = mode == "digest"
+    scheduled_selected = mode == "frequent"
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Digest mode" + (" ✓" if digest_selected else ""),
+                    callback_data="onb_freq_mode_digest",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "Scheduled mode" + (" ✓" if scheduled_selected else ""),
+                    callback_data="onb_freq_mode_scheduled",
+                )
+            ],
+            [InlineKeyboardButton("◀️ Back", callback_data="onb_step4")],
+            [InlineKeyboardButton("Skip Setup", callback_data="onb_skip")],
+        ]
+    )
+
+
+def _onboarding_digest_time_keyboard(preference) -> InlineKeyboardMarkup:
+    mh = int(getattr(preference, "digest_morning_hour", DIGEST_MORNING_HOUR_LOCAL) or DIGEST_MORNING_HOUR_LOCAL)
+    eh = int(getattr(preference, "digest_evening_hour", DIGEST_EVENING_HOUR_LOCAL) or DIGEST_EVENING_HOUR_LOCAL)
+    morning_enabled = bool(getattr(preference, "digest_morning_enabled", False))
+    evening_enabled = bool(getattr(preference, "digest_evening_enabled", False))
+    morning_options = [6, 7, 8]
+    evening_options = [19, 20, 21]
+
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "✅ Morning digest ON" if morning_enabled else "⬜ Morning digest OFF",
+                    callback_data="onb_freq_digest_toggle_morning",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"{h:02d}:00" + (" ✓" if morning_enabled and mh == h else ""),
+                    callback_data=f"onb_freq_digest_morning_{h:02d}",
+                )
+                for h in morning_options
+            ],
+            [
+                InlineKeyboardButton(
+                    "✅ Evening digest ON" if evening_enabled else "⬜ Evening digest OFF",
+                    callback_data="onb_freq_digest_toggle_evening",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"{h:02d}:00" + (" ✓" if evening_enabled and eh == h else ""),
+                    callback_data=f"onb_freq_digest_evening_{h:02d}",
+                )
+                for h in evening_options
+            ],
+            [InlineKeyboardButton("Next ▶️", callback_data="onb_step6")],
+            [InlineKeyboardButton("◀️ Back", callback_data="onb_step5")],
+            [InlineKeyboardButton("Skip Setup", callback_data="onb_skip")],
+        ]
+    )
+
+
+def _onboarding_scheduled_time_keyboard(current_frequency: str | None) -> InlineKeyboardMarkup:
     key = (current_frequency or "").strip().lower()
 
     def _tick(freq: str) -> str:
@@ -273,11 +415,14 @@ def _onboarding_frequency_keyboard(current_frequency: str | None) -> InlineKeybo
 
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("Every 1 hour" + _tick("every_1h"), callback_data="onb_freq_every_1h")],
-            [InlineKeyboardButton("Every 3 hours" + _tick("every_3h"), callback_data="onb_freq_every_3h")],
-            [InlineKeyboardButton("Digest 07:00 + 20:00" + _tick("digest_7am_8pm"), callback_data="onb_freq_digest_7am_8pm")],
+            [InlineKeyboardButton("Every 15 mins" + _tick("every_15m"), callback_data="onb_freq_sched_every_15m")],
+            [InlineKeyboardButton("Every 30 mins" + _tick("every_30m"), callback_data="onb_freq_sched_every_30m")],
+            [InlineKeyboardButton("Every 1 hour" + _tick("every_1h"), callback_data="onb_freq_sched_every_1h")],
+            [InlineKeyboardButton("Every 3 hours" + _tick("every_3h"), callback_data="onb_freq_sched_every_3h")],
+            [InlineKeyboardButton("Every 6 hours" + _tick("every_6h"), callback_data="onb_freq_sched_every_6h")],
+            [InlineKeyboardButton("Every 12 hours" + _tick("every_12h"), callback_data="onb_freq_sched_every_12h")],
             [InlineKeyboardButton("Next ▶️", callback_data="onb_step6")],
-            [InlineKeyboardButton("◀️ Back", callback_data="onb_step4")],
+            [InlineKeyboardButton("◀️ Back", callback_data="onb_step5")],
             [InlineKeyboardButton("Skip Setup", callback_data="onb_skip")],
         ]
     )
@@ -292,7 +437,7 @@ async def _show_onboarding_categories(query, telegram_id: int) -> None:
         "What kind of news should I prioritize for you?\n\n"
         f"Current: {current_display}",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=_onboarding_categories_keyboard(),
+        reply_markup=_onboarding_categories_keyboard(1, current_categories),
     )
 
 
@@ -314,14 +459,54 @@ async def _show_onboarding_locations(query, telegram_id: int) -> None:
     )
 
 
+async def _show_onboarding_locations_more(query, telegram_id: int) -> None:
+    preference = get_user_preference(telegram_id)
+    current_locations = preference.locations if preference else ""
+    current_display = (
+        ", ".join([loc.strip().title() for loc in (current_locations or "").split(",") if loc.strip()])
+        if (current_locations or "").strip()
+        else "All Sarawak"
+    )
+    await query.edit_message_text(
+        "*Step 4/6 - Choose location (more cities)*\n\n"
+        "Select additional Sarawak cities.\n\n"
+        f"Current: {current_display}",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=_onboarding_locations_more_keyboard(current_locations),
+    )
+
+
 async def _show_onboarding_frequency(query, telegram_id: int) -> None:
+    preference = get_user_preference(telegram_id)
+    delivery_mode = getattr(preference, "delivery_mode", "frequent") if preference else "frequent"
+    await query.edit_message_text(
+        "*Step 5/6 - Choose update type*\n\n"
+        "First, choose how you want me to send updates.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=_onboarding_frequency_mode_keyboard(delivery_mode),
+    )
+
+
+async def _show_onboarding_digest_time(query, telegram_id: int) -> None:
+    preference = get_user_preference(telegram_id)
+    if not preference:
+        return
+    await query.edit_message_text(
+        "*Step 5/6 - Digest time*\n\n"
+        "Choose morning/evening digest slots and preset times.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=_onboarding_digest_time_keyboard(preference),
+    )
+
+
+async def _show_onboarding_scheduled_time(query, telegram_id: int) -> None:
     preference = get_user_preference(telegram_id)
     current_frequency = preference.frequency if preference else "every_1h"
     await query.edit_message_text(
-        "*Step 5/5 - Choose update frequency*\n\n"
-        "How often should I send scheduled updates?",
+        "*Step 5/6 - Scheduled interval*\n\n"
+        "Great. Choose how often I should send scheduled updates.",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=_onboarding_frequency_keyboard(current_frequency),
+        reply_markup=_onboarding_scheduled_time_keyboard(current_frequency),
     )
 
 
@@ -779,6 +964,18 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if data == "onb_step3":
             await _show_onboarding_categories(query, telegram_id)
             return
+        if data == "onb_cat_page2":
+            preference = get_user_preference(telegram_id)
+            current_categories = preference.categories if preference else ""
+            current_display = current_categories if current_categories else "All categories"
+            await query.edit_message_text(
+                "*Step 3/6 - Choose category (more)*\n\n"
+                "Pick one or more categories.\n\n"
+                f"Current: {current_display}",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=_onboarding_categories_keyboard(2, current_categories),
+            )
+            return
         if data == "onb_step4":
             await _show_onboarding_locations(query, telegram_id)
             return
@@ -812,18 +1009,36 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if data == "onb_finish":
             await _show_onboarding_help(query, telegram_id)
             return
-        if data.startswith("onb_cat_"):
-            cat_value = data.removeprefix("onb_cat_")
-            mapping = {
-                "all": "",
-                "sarawak": "sarawak",
-                "crime": "crime",
-                "traffic": "traffic",
-            }
-            selected = mapping.get(cat_value)
-            if selected is not None:
-                update_user_preference(telegram_id, categories=selected)
+        if data == "onb_cat_all":
+            update_user_preference(telegram_id, categories="")
             await _show_onboarding_categories(query, telegram_id)
+            return
+        if data == "onb_cat_sarawak":
+            update_user_preference(telegram_id, categories="sarawak")
+            await _show_onboarding_categories(query, telegram_id)
+            return
+        if data.startswith("onb_cat_toggle_"):
+            slug = data.removeprefix("onb_cat_toggle_")
+            if not label_from_slug(slug):
+                await _show_onboarding_categories(query, telegram_id)
+                return
+            latest_pref = get_user_preference(telegram_id)
+            selected = [
+                token.strip().lower()
+                for token in (latest_pref.categories if latest_pref else "").split(",")
+                if token.strip()
+            ]
+            if slug in selected:
+                selected.remove(slug)
+            else:
+                selected.append(slug)
+            # Keep stable output and "All Categories" semantics for empty.
+            new_value = ",".join(sorted(set(selected)))
+            update_user_preference(telegram_id, categories=new_value)
+            await _show_onboarding_categories(query, telegram_id)
+            return
+        if data == "onb_loc_more":
+            await _show_onboarding_locations_more(query, telegram_id)
             return
         if data.startswith("onb_loc_"):
             loc_key = data.removeprefix("onb_loc_")
@@ -833,6 +1048,18 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 "sibu": "sibu",
                 "miri": "miri",
                 "bintulu": "bintulu",
+                "kota_samarahan": "kota samarahan",
+                "serian": "serian",
+                "sarikei": "sarikei",
+                "sri_aman": "sri aman",
+                "mukah": "mukah",
+                "limbang": "limbang",
+                "lawas": "lawas",
+                "betong": "betong",
+                "saratok": "saratok",
+                "kapit": "kapit",
+                "marudi": "marudi",
+                "belaga": "belaga",
             }
             if loc_key == "all":
                 update_user_preference(telegram_id, locations="")
@@ -850,9 +1077,89 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     else:
                         current_locations.append(selected)
                     update_user_preference(telegram_id, locations=",".join(sorted(current_locations)))
-            await _show_onboarding_locations(query, telegram_id)
+            if loc_key in {
+                "sri_aman",
+                "mukah",
+                "limbang",
+                "lawas",
+                "betong",
+                "saratok",
+                "kapit",
+                "marudi",
+                "belaga",
+            }:
+                await _show_onboarding_locations_more(query, telegram_id)
+            else:
+                await _show_onboarding_locations(query, telegram_id)
+            return
+        if data == "onb_freq_mode_digest":
+            update_user_preference(telegram_id, delivery_mode="digest")
+            await _show_onboarding_digest_time(query, telegram_id)
+            return
+        if data == "onb_freq_mode_scheduled":
+            update_user_preference(telegram_id, delivery_mode="frequent")
+            await _show_onboarding_scheduled_time(query, telegram_id)
+            return
+        if data == "onb_freq_digest_toggle_morning":
+            cur = bool(getattr(preference, "digest_morning_enabled", False))
+            update_user_preference(
+                telegram_id,
+                delivery_mode="digest",
+                digest_morning_enabled=not cur,
+            )
+            await _show_onboarding_digest_time(query, telegram_id)
+            return
+        if data == "onb_freq_digest_toggle_evening":
+            cur = bool(getattr(preference, "digest_evening_enabled", False))
+            update_user_preference(
+                telegram_id,
+                delivery_mode="digest",
+                digest_evening_enabled=not cur,
+            )
+            await _show_onboarding_digest_time(query, telegram_id)
+            return
+        if data.startswith("onb_freq_digest_morning_"):
+            try:
+                hour = int(data.rsplit("_", 1)[1])
+            except Exception:
+                hour = DIGEST_MORNING_HOUR_LOCAL
+            update_user_preference(
+                telegram_id,
+                delivery_mode="digest",
+                digest_morning_enabled=True,
+                digest_morning_hour=hour,
+            )
+            await _show_onboarding_digest_time(query, telegram_id)
+            return
+        if data.startswith("onb_freq_digest_evening_"):
+            try:
+                hour = int(data.rsplit("_", 1)[1])
+            except Exception:
+                hour = DIGEST_EVENING_HOUR_LOCAL
+            update_user_preference(
+                telegram_id,
+                delivery_mode="digest",
+                digest_evening_enabled=True,
+                digest_evening_hour=hour,
+            )
+            await _show_onboarding_digest_time(query, telegram_id)
+            return
+        if data.startswith("onb_freq_digest_"):
+            freq = data.removeprefix("onb_freq_")
+            allowed = {"digest_7am", "digest_8pm", "digest_7am_8pm"}
+            if freq in allowed:
+                update_user_preference(telegram_id, frequency=freq)
+            await _show_onboarding_digest_time(query, telegram_id)
+            return
+        if data.startswith("onb_freq_sched_"):
+            freq = data.removeprefix("onb_freq_sched_")
+            allowed = {"every_15m", "every_30m", "every_1h", "every_3h", "every_6h", "every_12h"}
+            if freq in allowed:
+                update_user_preference(telegram_id, frequency=freq)
+            await _show_onboarding_scheduled_time(query, telegram_id)
             return
         if data.startswith("onb_freq_"):
+            # Backward compatibility for older onboarding callback payloads.
             freq = data.removeprefix("onb_freq_")
             allowed = {"every_1h", "every_3h", "digest_7am_8pm"}
             if freq in allowed:

@@ -9,6 +9,48 @@ from src.core.models import User, UserPreference
 from src.storage.database import SessionLocal
 
 
+def _apply_delivery_schedule_from_frequency(preference: UserPreference, frequency: str) -> None:
+    key = (frequency or "").strip().lower()
+    if key == "instant":
+        key = "every_1h"
+    elif key == "daily":
+        key = "every_12h"
+
+    preference.frequency = key or "every_1h"
+    preference.digest_morning_hour = preference.digest_morning_hour or 7
+    preference.digest_evening_hour = preference.digest_evening_hour or 20
+    preference.delivery_timezone = (preference.delivery_timezone or "").strip() or "Asia/Kuching"
+
+    if key == "digest_7am":
+        preference.delivery_mode = "digest"
+        preference.digest_morning_enabled = True
+        preference.digest_evening_enabled = False
+        return
+    if key == "digest_8pm":
+        preference.delivery_mode = "digest"
+        preference.digest_morning_enabled = False
+        preference.digest_evening_enabled = True
+        return
+    if key == "digest_7am_8pm":
+        preference.delivery_mode = "digest"
+        preference.digest_morning_enabled = True
+        preference.digest_evening_enabled = True
+        return
+
+    interval_map = {
+        "every_15m": 15,
+        "every_30m": 30,
+        "every_1h": 60,
+        "every_3h": 180,
+        "every_6h": 360,
+        "every_12h": 720,
+    }
+    preference.delivery_mode = "frequent"
+    preference.digest_morning_enabled = False
+    preference.digest_evening_enabled = False
+    preference.frequent_interval_minutes = interval_map.get(key, 60)
+
+
 def get_or_create_user(telegram_id: int, username: Optional[str] = None) -> User:
     """
     Get an existing user by telegram_id, or create a new one if not found.
@@ -35,6 +77,13 @@ def get_or_create_user(telegram_id: int, username: Optional[str] = None) -> User
                 categories="",  # Empty means all categories
                 locations="",  # Empty means all Sarawak locations
                 frequency="every_1h",
+                delivery_mode="frequent",
+                frequent_interval_minutes=60,
+                digest_morning_enabled=False,
+                digest_evening_enabled=False,
+                digest_morning_hour=7,
+                digest_evening_hour=20,
+                delivery_timezone="Asia/Kuching",
                 wants_urgent_alerts=True,
             )
             session.add(preference)
@@ -74,6 +123,13 @@ def update_user_preference(
     area_keywords: Optional[str] = None,
     frequency: Optional[str] = None,
     wants_urgent_alerts: Optional[bool] = None,
+    delivery_mode: Optional[str] = None,
+    frequent_interval_minutes: Optional[int] = None,
+    digest_morning_enabled: Optional[bool] = None,
+    digest_evening_enabled: Optional[bool] = None,
+    digest_morning_hour: Optional[int] = None,
+    digest_evening_hour: Optional[int] = None,
+    delivery_timezone: Optional[str] = None,
 ) -> Optional[UserPreference]:
     """
     Update user preferences. Returns the updated UserPreference or None if user doesn't exist.
@@ -97,6 +153,13 @@ def update_user_preference(
                 categories="",
                 locations="",
                 frequency="every_1h",
+                delivery_mode="frequent",
+                frequent_interval_minutes=60,
+                digest_morning_enabled=False,
+                digest_evening_enabled=False,
+                digest_morning_hour=7,
+                digest_evening_hour=20,
+                delivery_timezone="Asia/Kuching",
                 wants_urgent_alerts=True,
             )
             session.add(preference)
@@ -108,9 +171,53 @@ def update_user_preference(
         if area_keywords is not None:
             preference.area_keywords = area_keywords
         if frequency is not None:
-            preference.frequency = frequency
+            _apply_delivery_schedule_from_frequency(preference, frequency)
+        if delivery_mode is not None:
+            mode = (delivery_mode or "").strip().lower()
+            if mode in {"digest", "frequent"}:
+                preference.delivery_mode = mode
+        if frequent_interval_minutes is not None:
+            preference.frequent_interval_minutes = max(15, int(frequent_interval_minutes))
+        if digest_morning_enabled is not None:
+            preference.digest_morning_enabled = bool(digest_morning_enabled)
+        if digest_evening_enabled is not None:
+            preference.digest_evening_enabled = bool(digest_evening_enabled)
+        if digest_morning_hour is not None:
+            preference.digest_morning_hour = max(0, min(23, int(digest_morning_hour)))
+        if digest_evening_hour is not None:
+            preference.digest_evening_hour = max(0, min(23, int(digest_evening_hour)))
+        if delivery_timezone is not None:
+            tz = (delivery_timezone or "").strip()
+            if tz:
+                preference.delivery_timezone = tz
         if wants_urgent_alerts is not None:
             preference.wants_urgent_alerts = wants_urgent_alerts
+
+        # Keep old `frequency` string usable for legacy views/paths.
+        if preference.delivery_mode == "digest":
+            m_on = bool(preference.digest_morning_enabled)
+            e_on = bool(preference.digest_evening_enabled)
+            if m_on and e_on:
+                preference.frequency = "digest_7am_8pm"
+            elif m_on:
+                preference.frequency = "digest_7am"
+            elif e_on:
+                preference.frequency = "digest_8pm"
+            else:
+                # Avoid empty digest schedule by defaulting to morning.
+                preference.digest_morning_enabled = True
+                preference.frequency = "digest_7am"
+        elif preference.delivery_mode == "frequent":
+            iv = int(preference.frequent_interval_minutes or 60)
+            map_back = {
+                15: "every_15m",
+                30: "every_30m",
+                60: "every_1h",
+                180: "every_3h",
+                360: "every_6h",
+                720: "every_12h",
+            }
+            preference.frequency = map_back.get(iv, "every_1h")
 
         preference.updated_at = datetime.utcnow()
         session.commit()

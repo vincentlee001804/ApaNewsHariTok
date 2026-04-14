@@ -328,6 +328,15 @@ SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL: Final[int] = _env_hour(
     "SCHEDULED_PUSH_QUIET_END_HOUR", 6
 )
 
+# Digest mode local send times (Track A).
+DIGEST_MORNING_HOUR_LOCAL: Final[int] = _env_hour("DIGEST_MORNING_HOUR", 7)
+DIGEST_EVENING_HOUR_LOCAL: Final[int] = _env_hour("DIGEST_EVENING_HOUR", 20)
+# Scheduler poll window to fire digest slots safely (job runs every 60s by default).
+DIGEST_TRIGGER_WINDOW_MINUTES: Final[int] = max(
+    1,
+    min(30, int((os.getenv("DIGEST_TRIGGER_WINDOW_MINUTES", "10").strip() or "10"))),
+)
+
 
 def is_scheduled_push_quiet_hours_now() -> bool:
     """

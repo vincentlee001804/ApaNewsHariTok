@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from zoneinfo import ZoneInfo
 
 from telegram.constants import ParseMode
 from telegram.error import Forbidden
@@ -28,6 +29,9 @@ from src.core.config import (
     DB_CLEANUP_ENABLED,
     DB_CLEANUP_INTERVAL_HOURS,
     DB_RETENTION_DAYS,
+    DIGEST_EVENING_HOUR_LOCAL,
+    DIGEST_MORNING_HOUR_LOCAL,
+    DIGEST_TRIGGER_WINDOW_MINUTES,
     PREFETCH_ENABLED,
     PREFETCH_INTERVAL_MINUTES,
     SCHEDULED_PUSH_GRACE_MINUTES_AFTER_FIRST_SEEN,
@@ -117,6 +121,8 @@ def main() -> None:
 
     def _should_skip_push_message(text: str) -> bool:
         lowered = (text or "").lower()
+        if not lowered.strip():
+            return True
         skip_markers = [
             "no new headlines since your last request",
             "no news items match your current filters",
@@ -139,6 +145,73 @@ def main() -> None:
         }
         key = (value or "").strip().lower()
         return mapping.get(key, 1)
+
+    def _is_digest_mode_preference(preference) -> bool:
+        mode = (getattr(preference, "delivery_mode", "") or "").strip().lower()
+        if mode in {"digest", "frequent"}:
+            return mode == "digest"
+        key = (getattr(preference, "frequency", "") or "").strip().lower()
+        return key in {"digest_7am", "digest_8pm", "digest_7am_8pm"}
+
+    def _digest_slots_for_preference(preference) -> list[int]:
+        morning_hour = int(
+            getattr(preference, "digest_morning_hour", None) or DIGEST_MORNING_HOUR_LOCAL
+        )
+        evening_hour = int(
+            getattr(preference, "digest_evening_hour", None) or DIGEST_EVENING_HOUR_LOCAL
+        )
+        morning_enabled = bool(getattr(preference, "digest_morning_enabled", False))
+        evening_enabled = bool(getattr(preference, "digest_evening_enabled", False))
+
+        mode = (getattr(preference, "delivery_mode", "") or "").strip().lower()
+        if mode not in {"digest", "frequent"}:
+            legacy = (getattr(preference, "frequency", "") or "").strip().lower()
+            if legacy == "digest_7am":
+                morning_enabled, evening_enabled = True, False
+            elif legacy == "digest_8pm":
+                morning_enabled, evening_enabled = False, True
+            elif legacy == "digest_7am_8pm":
+                morning_enabled, evening_enabled = True, True
+
+        slots: list[int] = []
+        if morning_enabled:
+            slots.append(max(0, min(23, morning_hour)))
+        if evening_enabled:
+            slots.append(max(0, min(23, evening_hour)))
+        return slots
+
+    def _digest_slot_due_now(
+        preference,
+        *,
+        now_utc: datetime,
+        last_sent_utc: datetime | None,
+    ) -> bool:
+        slots = _digest_slots_for_preference(preference)
+        if not slots:
+            return False
+        tz_name = (
+            getattr(preference, "delivery_timezone", None)
+            or SCHEDULED_PUSH_QUIET_TIMEZONE
+        )
+        try:
+            tz = ZoneInfo(str(tz_name))
+        except Exception:
+            tz = ZoneInfo(SCHEDULED_PUSH_QUIET_TIMEZONE)
+
+        now_local = now_utc.replace(tzinfo=timezone.utc).astimezone(tz)
+        for slot_hour in slots:
+            slot_dt_local = now_local.replace(
+                hour=slot_hour, minute=0, second=0, microsecond=0
+            )
+            minutes_since_slot = (now_local - slot_dt_local).total_seconds() / 60.0
+            if minutes_since_slot < 0 or minutes_since_slot >= DIGEST_TRIGGER_WINDOW_MINUTES:
+                continue
+            if last_sent_utc is None:
+                return True
+            last_local = last_sent_utc.replace(tzinfo=timezone.utc).astimezone(tz)
+            if last_local < slot_dt_local:
+                return True
+        return False
 
     async def _prefetch_db_job(context) -> None:
         """RSS + Telegram → database (and optional ai_summary backfill)."""
@@ -169,16 +242,33 @@ def main() -> None:
                 try:
                     if first_seen_at and (now - first_seen_at) < grace_after_start:
                         continue
-                    interval_hours = _frequency_interval_hours(preference.frequency)
                     last_sent = preference.last_scheduled_push_at
-                    if last_sent and (now - last_sent) < timedelta(hours=interval_hours):
-                        continue
+                    if _is_digest_mode_preference(preference):
+                        if not _digest_slot_due_now(
+                            preference, now_utc=now, last_sent_utc=last_sent
+                        ):
+                            continue
+                        from src.core.services import get_todays_news_digest_for_user
 
-                    text = await asyncio.to_thread(
-                        lambda tid=telegram_id: get_latest_news_text_for_user(
-                            tid, 1, scheduled_push=True
+                        text = await asyncio.to_thread(
+                            get_todays_news_digest_for_user, telegram_id, 6
                         )
-                    )
+                    else:
+                        interval_min = getattr(preference, "frequent_interval_minutes", None)
+                        if interval_min is not None:
+                            try:
+                                interval_hours = max(1, int(interval_min)) / 60.0
+                            except Exception:
+                                interval_hours = _frequency_interval_hours(preference.frequency)
+                        else:
+                            interval_hours = _frequency_interval_hours(preference.frequency)
+                        if last_sent and (now - last_sent) < timedelta(hours=interval_hours):
+                            continue
+                        text = await asyncio.to_thread(
+                            lambda tid=telegram_id: get_latest_news_text_for_user(
+                                tid, 1, scheduled_push=True
+                            )
+                        )
                     if _should_skip_push_message(text):
                         continue
 

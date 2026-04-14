@@ -126,6 +126,32 @@ WELCOME_TEXT: Final[str] = (
     "• /help – command guide and contact"
 )
 
+ONBOARDING_WELCOME_TEXT: Final[str] = (
+    "Hello! 👋\n\n"
+    "I am *Apa News Hari Tok?*.\n"
+    "I can help you stay updated with Sarawak local news in a personalized way.\n\n"
+    "Let me guide you in a quick setup."
+)
+
+ONBOARDING_OFFER_TEXT: Final[str] = (
+    "*Step 2/5 - What I can do for you*\n\n"
+    "I can:\n"
+    "• collect local news from RSS and approved Telegram sources\n"
+    "• answer your questions using the latest stored news\n"
+    "• send scheduled updates based on your preferences\n\n"
+    "Now I will help you set your preferences."
+)
+
+ONBOARDING_HELP_TEXT: Final[str] = (
+    "*Step 6/6 - Need help?*\n\n"
+    "If you need any help or want to share feedback, you can contact my developer:\n"
+    "• Email: [bcs24020018@student.uts.edu.my](mailto:bcs24020018@student.uts.edu.my)\n"
+    "• Telegram: [https://t.me/VincentLee\\_4966](https://t.me/VincentLee_4966)\n"
+    "• WhatsApp: [https://wa.me/601114004966](https://wa.me/601114004966)\n\n"
+    "You can also edit your preferences anytime using `/settings`.\n\n"
+    "Enjoy the bot! 🙌"
+)
+
 
 HELP_TEXT: Final[str] = (
     "*Command guide:*\n"
@@ -197,6 +223,124 @@ def _format_frequency_from_preference(preference) -> str:
     return _format_frequency(getattr(preference, "frequency", None))
 
 
+def _onboarding_categories_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("All Categories", callback_data="onb_cat_all"),
+                InlineKeyboardButton("Sarawak Only", callback_data="onb_cat_sarawak"),
+            ],
+            [
+                InlineKeyboardButton("Crime", callback_data="onb_cat_crime"),
+                InlineKeyboardButton("Traffic", callback_data="onb_cat_traffic"),
+            ],
+            [InlineKeyboardButton("Next ▶️", callback_data="onb_step4")],
+            [InlineKeyboardButton("◀️ Back", callback_data="onb_step2")],
+            [InlineKeyboardButton("Skip Setup", callback_data="onb_skip")],
+        ]
+    )
+
+
+def _onboarding_locations_keyboard(current_locations: str | None) -> InlineKeyboardMarkup:
+    chosen = {loc.strip().lower() for loc in (current_locations or "").split(",") if loc.strip()}
+
+    def _tick(name: str) -> str:
+        return " ✓" if name in chosen else ""
+
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("All Sarawak" + (" ✓" if not chosen else ""), callback_data="onb_loc_all")],
+            [
+                InlineKeyboardButton("Kuching" + _tick("kuching"), callback_data="onb_loc_kuching"),
+                InlineKeyboardButton("Sibu" + _tick("sibu"), callback_data="onb_loc_sibu"),
+            ],
+            [
+                InlineKeyboardButton("Miri" + _tick("miri"), callback_data="onb_loc_miri"),
+                InlineKeyboardButton("Bintulu" + _tick("bintulu"), callback_data="onb_loc_bintulu"),
+            ],
+            [InlineKeyboardButton("Next ▶️", callback_data="onb_step5")],
+            [InlineKeyboardButton("◀️ Back", callback_data="onb_step3")],
+            [InlineKeyboardButton("Skip Setup", callback_data="onb_skip")],
+        ]
+    )
+
+
+def _onboarding_frequency_keyboard(current_frequency: str | None) -> InlineKeyboardMarkup:
+    key = (current_frequency or "").strip().lower()
+
+    def _tick(freq: str) -> str:
+        return " ✓" if key == freq else ""
+
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("Every 1 hour" + _tick("every_1h"), callback_data="onb_freq_every_1h")],
+            [InlineKeyboardButton("Every 3 hours" + _tick("every_3h"), callback_data="onb_freq_every_3h")],
+            [InlineKeyboardButton("Digest 07:00 + 20:00" + _tick("digest_7am_8pm"), callback_data="onb_freq_digest_7am_8pm")],
+            [InlineKeyboardButton("Next ▶️", callback_data="onb_step6")],
+            [InlineKeyboardButton("◀️ Back", callback_data="onb_step4")],
+            [InlineKeyboardButton("Skip Setup", callback_data="onb_skip")],
+        ]
+    )
+
+
+async def _show_onboarding_categories(query, telegram_id: int) -> None:
+    preference = get_user_preference(telegram_id)
+    current_categories = preference.categories if preference else ""
+    current_display = current_categories if current_categories else "All categories"
+    await query.edit_message_text(
+        "*Step 3/5 - Choose category*\n\n"
+        "What kind of news should I prioritize for you?\n\n"
+        f"Current: {current_display}",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=_onboarding_categories_keyboard(),
+    )
+
+
+async def _show_onboarding_locations(query, telegram_id: int) -> None:
+    preference = get_user_preference(telegram_id)
+    current_locations = preference.locations if preference else ""
+    current_display = (
+        ", ".join([loc.strip().title() for loc in (current_locations or "").split(",") if loc.strip()])
+        if (current_locations or "").strip()
+        else "All Sarawak"
+    )
+    await query.edit_message_text(
+        "*Step 4/5 - Choose location*\n\n"
+        "Tell me where you want news from.\n"
+        "You can select multiple cities.\n\n"
+        f"Current: {current_display}",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=_onboarding_locations_keyboard(current_locations),
+    )
+
+
+async def _show_onboarding_frequency(query, telegram_id: int) -> None:
+    preference = get_user_preference(telegram_id)
+    current_frequency = preference.frequency if preference else "every_1h"
+    await query.edit_message_text(
+        "*Step 5/5 - Choose update frequency*\n\n"
+        "How often should I send scheduled updates?",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=_onboarding_frequency_keyboard(current_frequency),
+    )
+
+
+async def _show_onboarding_help(query, telegram_id: int) -> None:
+    set_user_active(telegram_id, True)
+    await query.edit_message_text(
+        ONBOARDING_HELP_TEXT,
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True,
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("Get My Latest News", callback_data="onb_latest")],
+                [InlineKeyboardButton("Finish ✅", callback_data="onb_open_settings")],
+                [InlineKeyboardButton("◀️ Back", callback_data="onb_step5")],
+            ]
+        ),
+    )
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command. Register user if new."""
     if not update.message:
@@ -205,10 +349,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     telegram_id = update.message.from_user.id
     username = update.message.from_user.username
 
+    is_new_user = get_user_preference(telegram_id) is None
+    force_onboarding_for_dev = is_test_push_allowed(telegram_id)
+
     # Register or get user
     get_or_create_user(telegram_id, username)
 
-    await update.message.reply_text(WELCOME_TEXT, parse_mode=ParseMode.MARKDOWN)
+    if is_new_user or force_onboarding_for_dev:
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("Next ▶️", callback_data="onb_step2")],
+                [InlineKeyboardButton("Skip Setup", callback_data="onb_skip")],
+            ]
+        )
+        await update.message.reply_text(
+            ONBOARDING_WELCOME_TEXT,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=keyboard,
+        )
+        return
+
+    await update.message.reply_text(
+        "Welcome back! 👋\n\n"
+        "I am *Apa News Hari Tok?*.\n"
+        "I can help with your latest personalized Sarawak updates.\n\n"
+        "Use `/latest` for your news or `/settings` to update preferences.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -580,6 +747,118 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     data = query.data
+
+    if data.startswith("onb_"):
+        if data == "onb_step1":
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("Next ▶️", callback_data="onb_step2")],
+                    [InlineKeyboardButton("Skip Setup", callback_data="onb_skip")],
+                ]
+            )
+            await query.edit_message_text(
+                ONBOARDING_WELCOME_TEXT,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=keyboard,
+            )
+            return
+        if data == "onb_step2":
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("Next ▶️", callback_data="onb_step3")],
+                    [InlineKeyboardButton("◀️ Back", callback_data="onb_step1")],
+                    [InlineKeyboardButton("Skip Setup", callback_data="onb_skip")],
+                ]
+            )
+            await query.edit_message_text(
+                ONBOARDING_OFFER_TEXT,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=keyboard,
+            )
+            return
+        if data == "onb_step3":
+            await _show_onboarding_categories(query, telegram_id)
+            return
+        if data == "onb_step4":
+            await _show_onboarding_locations(query, telegram_id)
+            return
+        if data == "onb_step5":
+            await _show_onboarding_frequency(query, telegram_id)
+            return
+        if data == "onb_step6":
+            await _show_onboarding_help(query, telegram_id)
+            return
+        if data == "onb_skip":
+            await query.edit_message_text(
+                "No problem. I am ready whenever you are.\n\n"
+                "Try:\n"
+                "• `/latest` for your current personalized news\n"
+                "• `/settings` to configure preferences anytime",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("Get My Latest News", callback_data="onb_latest")]]
+                ),
+            )
+            return
+        if data == "onb_latest":
+            from src.core.services import get_latest_news_text_for_user
+
+            text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id)
+            await query.message.reply_text(text, parse_mode=ParseMode.HTML)
+            return
+        if data == "onb_open_settings":
+            await settings_callback_refresh(query, telegram_id)
+            return
+        if data == "onb_finish":
+            await _show_onboarding_help(query, telegram_id)
+            return
+        if data.startswith("onb_cat_"):
+            cat_value = data.removeprefix("onb_cat_")
+            mapping = {
+                "all": "",
+                "sarawak": "sarawak",
+                "crime": "crime",
+                "traffic": "traffic",
+            }
+            selected = mapping.get(cat_value)
+            if selected is not None:
+                update_user_preference(telegram_id, categories=selected)
+            await _show_onboarding_categories(query, telegram_id)
+            return
+        if data.startswith("onb_loc_"):
+            loc_key = data.removeprefix("onb_loc_")
+            loc_map = {
+                "all": "",
+                "kuching": "kuching",
+                "sibu": "sibu",
+                "miri": "miri",
+                "bintulu": "bintulu",
+            }
+            if loc_key == "all":
+                update_user_preference(telegram_id, locations="")
+            else:
+                selected = loc_map.get(loc_key)
+                if selected:
+                    latest_pref = get_user_preference(telegram_id)
+                    current_locations = [
+                        loc.strip().lower()
+                        for loc in (latest_pref.locations if latest_pref else "").split(",")
+                        if loc.strip()
+                    ]
+                    if selected in current_locations:
+                        current_locations.remove(selected)
+                    else:
+                        current_locations.append(selected)
+                    update_user_preference(telegram_id, locations=",".join(sorted(current_locations)))
+            await _show_onboarding_locations(query, telegram_id)
+            return
+        if data.startswith("onb_freq_"):
+            freq = data.removeprefix("onb_freq_")
+            allowed = {"every_1h", "every_3h", "digest_7am_8pm"}
+            if freq in allowed:
+                update_user_preference(telegram_id, frequency=freq)
+            await _show_onboarding_frequency(query, telegram_id)
+            return
 
     def _refresh_preference() -> bool:
         nonlocal preference

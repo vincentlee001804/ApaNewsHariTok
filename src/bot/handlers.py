@@ -673,7 +673,13 @@ async def test_digest_push_command(update: Update, context: ContextTypes.DEFAULT
         )
 
     try:
-        digest = await asyncio.to_thread(get_todays_news_digest_for_user, telegram_id, 6)
+        digest = await asyncio.to_thread(
+            get_todays_news_digest_for_user,
+            telegram_id,
+            6,
+            scheduled_push=True,
+            mark_delivery=True,
+        )
     except OperationalError:
         logger.exception("Database busy while serving /testdigestpush")
         await update.message.reply_text(

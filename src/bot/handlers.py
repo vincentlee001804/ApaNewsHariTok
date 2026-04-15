@@ -9,6 +9,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatType, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import OperationalError
 
@@ -86,6 +87,7 @@ def _category_settings_keyboard_rows(page: int) -> list[list[InlineKeyboardButto
 
 # user_data flag: after tapping Area Keywords, next plain-text message updates area_keywords.
 AWAITING_AREA_KEYWORDS_UD_KEY: Final[str] = "awaiting_area_keywords"
+BACKFILL_TITLES_TASK_KEY: Final[str] = "backfill_titles_task"
 
 
 def _normalize_area_keywords_raw(raw: str) -> str:
@@ -753,6 +755,108 @@ async def dev_waze_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         full,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
+    )
+
+
+async def backfill_titles_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Developer-only: backfill missing ai_title/ai_summary for existing DB rows in batches.
+    Usage: /backfilltitles [limit]
+    """
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await update.message.reply_text("Use /backfilltitles in a private chat with the bot.")
+        return
+
+    telegram_id = update.effective_user.id
+    if not is_test_push_allowed(telegram_id):
+        await update.message.reply_text(
+            "Developer commands are disabled or your Telegram user ID is not on the allow list."
+        )
+        return
+
+    limit = 80
+    if context.args:
+        try:
+            parsed = int((context.args[0] or "").strip())
+            if parsed < 1:
+                raise ValueError("limit must be positive")
+            limit = min(parsed, 500)
+        except Exception:
+            await update.message.reply_text("Usage: /backfilltitles [limit], e.g. /backfilltitles 120")
+            return
+
+    with SessionLocal() as session:
+        ids = list(
+            session.execute(
+                select(NewsArticle.id)
+                .where((NewsArticle.ai_title.is_(None)) | (NewsArticle.ai_title == ""))
+                .order_by(NewsArticle.created_at.desc())
+                .limit(limit)
+            )
+            .scalars()
+            .all()
+        )
+        remaining_before = session.execute(
+            select(func.count())
+            .select_from(NewsArticle)
+            .where((NewsArticle.ai_title.is_(None)) | (NewsArticle.ai_title == ""))
+        ).scalar_one()
+
+    if not ids:
+        await update.message.reply_text("No rows need ai_title backfill. ✅")
+        return
+
+    existing_task = context.application.bot_data.get(BACKFILL_TITLES_TASK_KEY)
+    if isinstance(existing_task, asyncio.Task) and not existing_task.done():
+        await update.message.reply_text(
+            "A backfill job is already running.\n"
+            "Please wait for it to finish before starting another batch."
+        )
+        return
+
+    await update.message.reply_text(
+        f"Backfilling {len(ids)} article(s)...\n"
+        f"Remaining before this batch: {remaining_before}.\n\n"
+        "You can still use /latest while this runs."
+    )
+
+    chat_id = update.effective_chat.id
+
+    async def _run_backfill_job() -> None:
+        try:
+            from src.core.services import backfill_ai_summaries_for_article_ids
+
+            updated = await asyncio.to_thread(backfill_ai_summaries_for_article_ids, ids)
+
+            with SessionLocal() as session:
+                remaining_after = session.execute(
+                    select(func.count())
+                    .select_from(NewsArticle)
+                    .where((NewsArticle.ai_title.is_(None)) | (NewsArticle.ai_title == ""))
+                ).scalar_one()
+
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    f"Backfill finished.\n"
+                    f"- Requested: {len(ids)}\n"
+                    f"- Updated: {updated}\n"
+                    f"- Remaining: {remaining_after}"
+                ),
+            )
+        except Exception as e:
+            logger.exception("Backfill titles failed")
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"Backfill failed: {e}",
+            )
+        finally:
+            context.application.bot_data.pop(BACKFILL_TITLES_TASK_KEY, None)
+
+    context.application.bot_data[BACKFILL_TITLES_TASK_KEY] = asyncio.create_task(
+        _run_backfill_job()
     )
 
 

@@ -123,6 +123,21 @@ def normalize_stored_ai_summary(text: str | None, *, max_words: int | None = Non
     return finalize_summary_plain_text(s)
 
 
+def normalize_stored_ai_title(text: str | None, *, max_words: int = 14) -> str:
+    """
+    Normalize an AI-generated display title: plain text, one line, concise.
+    """
+    s = strip_markdown_artifacts_for_plain_text(text or "")
+    if not s:
+        return ""
+    s = " ".join(s.split()).strip()
+    s = clip_plain_text_to_word_limit(s, max_words)
+    s = s.rstrip(" ,;:")
+    if len(s) > 220:
+        s = s[:220].rstrip(" ,.;:!?") + "..."
+    return s
+
+
 def classify_category(text: str) -> Optional[str]:
     """
     Use the local Ollama model to classify a news item into exactly ONE category.
@@ -261,6 +276,75 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
         return summary or None
     except Exception:
         # For now, fail quietly and let the caller decide how to handle None.
+        return None
+
+
+def generate_display_title(
+    *,
+    text: str,
+    title_hint: str = "",
+    max_words: int = 14,
+) -> Optional[str]:
+    """
+    Generate a concise, reader-friendly display title in English.
+    Useful when sources mix Malay/English headlines.
+    """
+    clean_text = " ".join((text or "").split()).strip()
+    clean_title_hint = " ".join((title_hint or "").split()).strip()
+    if not clean_text and not clean_title_hint:
+        return None
+
+    prompt = textwrap.dedent(
+        f"""
+        You write ONE concise English display title for Sarawak local news.
+        Use the article summary/context as the primary source of truth.
+        Use headline hint only as secondary support if useful.
+
+        Rules:
+        - Output exactly one title line only (no bullets, no numbering, no labels).
+        - Keep meaning faithful to the provided summary/context.
+        - Use simple clear English.
+        - Keep under {max_words} words.
+        - No quotes around the title.
+        - No Markdown/HTML.
+        - Do not invent facts not present in the provided text.
+
+        Summary/context (primary):
+        \"\"\"{clean_text}\"\"\"
+
+        Headline hint (optional):
+        \"\"\"{clean_title_hint}\"\"\"
+        """
+    ).strip()
+
+    try:
+        response = _ollama_post(
+            {
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"num_predict": 96},
+            },
+            timeout=45,
+        )
+        response.raise_for_status()
+        data = response.json()
+        generated = (data.get("response", "") or "").strip()
+        if not generated:
+            return None
+
+        generated = generated.splitlines()[0].strip()
+        generated = re.sub(r"(?i)^(title|headline)\s*[:\-]\s*", "", generated).strip()
+        if generated.startswith('"') and generated.endswith('"'):
+            generated = generated[1:-1].strip()
+        if generated.startswith("'") and generated.endswith("'"):
+            generated = generated[1:-1].strip()
+
+        normalized = normalize_stored_ai_title(generated, max_words=max_words)
+        if not normalized:
+            return None
+        return normalized
+    except Exception:
         return None
 
 

@@ -10,6 +10,8 @@ from sqlalchemy import exists, func, select
 from src.ai.summarizer import (
     classify_category,
     clip_plain_text_to_word_limit,
+    generate_display_title,
+    normalize_stored_ai_title,
     normalize_stored_ai_summary,
     strip_markdown_artifacts_for_plain_text,
     summarize,
@@ -694,11 +696,25 @@ def _fallback_summary_from_text(text: str, max_words: int = 50) -> str:
     return clip_plain_text_to_word_limit(cleaned, max_words)
 
 
+def _fallback_display_title_from_text(text: str) -> str:
+    cleaned = strip_markdown_artifacts_for_plain_text(" ".join((text or "").split()))
+    if not cleaned:
+        return "Untitled"
+    return normalize_stored_ai_title(cleaned, max_words=14) or cleaned[:220]
+
+
+def _display_title_text(raw_title: str | None, ai_title: str | None) -> str:
+    preferred = normalize_stored_ai_title(ai_title, max_words=14)
+    if preferred:
+        return preferred
+    return _fallback_display_title_from_text(raw_title or "")
+
+
 def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
     """
-    Fill ai_summary for the given news_articles rows (same logic as get_latest_news_text_for_user:
-    optional full-page scrape, Ollama summarize, deterministic fallback). Commits per row so one
-    failure does not block the rest.
+    Fill missing ai_summary and/or ai_title for the given news_articles rows (same logic as
+    get_latest_news_text_for_user: optional full-page scrape, Ollama summarize, deterministic
+    fallback). Commits per row so one failure does not block the rest.
     """
     if not article_ids:
         return 0
@@ -711,25 +727,40 @@ def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
             art = session.get(NewsArticle, aid)
             if art is None:
                 continue
-            if (art.ai_summary or "").strip():
+            has_summary = bool((art.ai_summary or "").strip())
+            has_title = bool((art.ai_title or "").strip())
+            if has_summary and has_title:
                 continue
             try:
                 article_text = extract_article_content(art.link)
                 source_text = article_text or art.raw_summary or art.title or ""
-                ai = summarize(source_text, title=art.title or "")
-                if not ai:
-                    ai = _fallback_summary_from_text(art.raw_summary or art.title or "", max_words=80)
-                art.ai_summary = normalize_stored_ai_summary(ai)
+                if not has_summary:
+                    ai = summarize(source_text, title=art.title or "")
+                    if not ai:
+                        ai = _fallback_summary_from_text(art.raw_summary or art.title or "", max_words=80)
+                    art.ai_summary = normalize_stored_ai_summary(ai)
+                if not has_title:
+                    art.ai_title = (
+                        generate_display_title(
+                            text=art.ai_summary or art.raw_summary or source_text,
+                            title_hint=art.title or "",
+                            max_words=14,
+                        )
+                        or _fallback_display_title_from_text(art.title or "")
+                    )
                 session.commit()
                 updated += 1
             except Exception:
                 session.rollback()
                 try:
                     art2 = session.get(NewsArticle, aid)
-                    if art2 is not None and not (art2.ai_summary or "").strip():
-                        art2.ai_summary = _fallback_summary_from_text(
-                            art2.raw_summary or art2.title or "", max_words=80
-                        )
+                    if art2 is not None:
+                        if not (art2.ai_summary or "").strip():
+                            art2.ai_summary = _fallback_summary_from_text(
+                                art2.raw_summary or art2.title or "", max_words=80
+                            )
+                        if not (art2.ai_title or "").strip():
+                            art2.ai_title = _fallback_display_title_from_text(art2.title or "")
                         session.commit()
                         updated += 1
                 except Exception:
@@ -1260,7 +1291,7 @@ def get_recent_urgent_alert_items(
 
         results.append(
             {
-                "title": art.title,
+                "title": _display_title_text(art.title, art.ai_title),
                 "link": art.link,
                 "summary": build_urgent_preview(art.title, art.raw_summary, max_words=45),
                 "source": source_name,
@@ -1357,7 +1388,15 @@ def get_latest_news_text(max_items: int = 3) -> str:
         def escape_html(text: str) -> str:
             return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-        escaped_title = escape_html(item.title)
+        display_title = (
+            generate_display_title(
+                text=ai_summary or item.summary or source_text or item.title or "",
+                title_hint=item.title or "",
+                max_words=14,
+            )
+            or _fallback_display_title_from_text(item.title or "")
+        )
+        escaped_title = escape_html(display_title)
         escaped_summary = escape_html(
             normalize_stored_ai_summary(ai_summary or "")
         )
@@ -1632,7 +1671,15 @@ def get_latest_news_text_for_user(
                     )
                 source_name = _get_source_name(item.source)
 
-                escaped_title = escape_html(item.title)
+                display_title = (
+                    generate_display_title(
+                        text=ai_summary or item.summary or source_text or item.title or "",
+                        title_hint=item.title or "",
+                        max_words=14,
+                    )
+                    or _fallback_display_title_from_text(item.title or "")
+                )
+                escaped_title = escape_html(display_title)
                 escaped_summary = escape_html(
                     normalize_stored_ai_summary(ai_summary or "")
                 )
@@ -1654,16 +1701,26 @@ def get_latest_news_text_for_user(
 
         if not scheduled_push:
             for art in chosen:
-                if art.ai_summary:
+                if art.ai_summary and (art.ai_title or "").strip():
                     continue
                 article_text = extract_article_content(art.link)
                 source_text = article_text or art.raw_summary or art.title
-                art.ai_summary = summarize(source_text, title=art.title)
                 if not art.ai_summary:
-                    art.ai_summary = _fallback_summary_from_text(
-                        art.raw_summary or art.title, max_words=80
+                    art.ai_summary = summarize(source_text, title=art.title)
+                    if not art.ai_summary:
+                        art.ai_summary = _fallback_summary_from_text(
+                            art.raw_summary or art.title, max_words=80
+                        )
+                    art.ai_summary = normalize_stored_ai_summary(art.ai_summary)
+                if not (art.ai_title or "").strip():
+                    art.ai_title = (
+                        generate_display_title(
+                            text=art.ai_summary or art.raw_summary or source_text or art.title or "",
+                            title_hint=art.title or "",
+                            max_words=14,
+                        )
+                        or _fallback_display_title_from_text(art.title or "")
                     )
-                art.ai_summary = normalize_stored_ai_summary(art.ai_summary)
 
         if DEDUPLICATION_ENABLED and user_id is not None:
             delivered_all_members = [
@@ -1678,7 +1735,7 @@ def get_latest_news_text_for_user(
             art = primary_art
             category = category_label_for_article(art)
 
-            escaped_title = escape_html(art.title)
+            escaped_title = escape_html(_display_title_text(art.title, art.ai_title))
             if scheduled_push:
                 body = (art.ai_summary or "").strip()
                 escaped_summary = escape_html(normalize_stored_ai_summary(body))
@@ -1860,7 +1917,7 @@ def get_todays_news_digest_for_user(
 
         items_text_lines: List[str] = []
         for it in chosen_items:
-            title = (it.title or "").replace("\n", " ").strip()[:220]
+            title = _fallback_display_title_from_text(it.title or "").replace("\n", " ").strip()[:220]
             snippet = _truncate_text(it.summary or it.title or "", max_chars=550)
             if title:
                 items_text_lines.append(f"- {title}\n  {snippet}")
@@ -1888,7 +1945,16 @@ def get_todays_news_digest_for_user(
             "<b>Top stories for you</b>",
         ]
         for it in chosen_items[:4]:
-            title = escape_html((it.title or "").strip()[:220] or "Untitled")
+            display_title = (
+                getattr(it, "ai_title", None)
+                or generate_display_title(
+                    text=it.summary or it.title or "",
+                    title_hint=it.title or "",
+                    max_words=14,
+                )
+                or _fallback_display_title_from_text(it.title or "")
+            )
+            title = escape_html(display_title.strip()[:220] or "Untitled")
             snippet = clip_plain_text_to_word_limit(
                 strip_markdown_artifacts_for_plain_text(it.summary or it.title or ""),
                 34,
@@ -1959,7 +2025,7 @@ def get_todays_news_digest_for_user(
     # Build compact input for the LLM (titles + already-stored snippets).
     items_text_lines: List[str] = []
     for art in chosen:
-        title = (art.title or "").replace("\n", " ").strip()[:220]
+        title = _display_title_text(art.title, art.ai_title).replace("\n", " ").strip()[:220]
         snippet = (art.ai_summary or art.raw_summary or art.title or "")
         snippet = _truncate_text(snippet, max_chars=550)
         if not title:
@@ -1992,7 +2058,7 @@ def get_todays_news_digest_for_user(
     ]
     for art, members in chosen_clusters[:4]:
         category = escape_html((art.category or "General").strip())
-        title = escape_html((art.title or "").strip()[:220] or "Untitled")
+        title = escape_html(_display_title_text(art.title, art.ai_title).strip()[:220] or "Untitled")
         snippet = clip_plain_text_to_word_limit(
             strip_markdown_artifacts_for_plain_text(
                 art.ai_summary or art.raw_summary or art.title or ""
@@ -2232,7 +2298,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
         fallback_rows = []
         for it in items:
             row = {
-                "title": it.title or "",
+                "title": _fallback_display_title_from_text(it.title or ""),
                 "summary": it.summary or it.title or "",
                 "source": _get_source_name(it.source),
                 "link": it.link or "",
@@ -2294,7 +2360,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
         for art in fallback_chosen[:2]:
             fallback_rows.append(
                 {
-                    "title": art.title or "",
+                    "title": _display_title_text(art.title, art.ai_title),
                     "summary": art.ai_summary or art.raw_summary or art.title or "",
                     "source": _get_source_name(art.source),
                     "link": art.link or "",
@@ -2305,7 +2371,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
 
     evidence_lines: List[str] = []
     for art in chosen:
-        title = (art.title or "").replace("\n", " ").strip()[:220]
+        title = _display_title_text(art.title, art.ai_title).replace("\n", " ").strip()[:220]
         snippet = (art.ai_summary or art.raw_summary or art.title or "").strip()
         snippet = _truncate_text(snippet, max_chars=450)
         if title and snippet:
@@ -2319,7 +2385,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
             continue
         evidence_rows.append(
             {
-                "title": art.title or "",
+                "title": _display_title_text(art.title, art.ai_title),
                 "summary": art.ai_summary or art.raw_summary or art.title or "",
                 "source": _get_source_name(art.source),
                 "link": art.link or "",
@@ -2331,7 +2397,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
         for art in chosen[:2]:
             fallback_rows.append(
                 {
-                    "title": art.title or "",
+                    "title": _display_title_text(art.title, art.ai_title),
                     "summary": art.ai_summary or art.raw_summary or art.title or "",
                     "source": _get_source_name(art.source),
                     "link": art.link or "",

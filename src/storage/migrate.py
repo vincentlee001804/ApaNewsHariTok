@@ -129,6 +129,25 @@ def migrate_add_ai_summary_column() -> None:
         pass
 
 
+def migrate_add_ai_title_column() -> None:
+    """
+    Add the 'ai_title' column to news_articles table if it doesn't exist.
+    """
+    try:
+        insp = inspect(engine)
+        if "news_articles" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("news_articles")}
+        if "ai_title" in cols:
+            return
+        with SessionLocal() as session:
+            session.execute(text("ALTER TABLE news_articles ADD COLUMN ai_title VARCHAR(500)"))
+            session.commit()
+            print("✓ Added 'ai_title' column to news_articles.")
+    except Exception:
+        pass
+
+
 def migrate_add_news_article_location_and_state_columns() -> None:
     """
     Add `location` + `state` columns to `news_articles` if they don't exist.
@@ -507,6 +526,7 @@ if __name__ == "__main__":
     migrate_add_locations_column()
     migrate_add_area_keywords_column()
     migrate_add_ai_summary_column()
+    migrate_add_ai_title_column()
     migrate_add_news_article_location_and_state_columns()
     migrate_add_news_article_category_column()
     migrate_add_delivery_schedule_columns()

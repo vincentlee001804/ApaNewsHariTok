@@ -1972,8 +1972,14 @@ def get_todays_news_digest_for_user(
 
     ranked: List[tuple[int, datetime, NewsArticle]] = []
     for art in candidates:
+        if scheduled_push and not (art.ai_summary or "").strip():
+            # For digest pushes, only send articles with ready AI summaries.
+            continue
         raw_summary = art.raw_summary or ""
-        summary_for_rank = raw_summary or art.ai_summary or art.title or ""
+        if scheduled_push:
+            summary_for_rank = art.ai_summary or ""
+        else:
+            summary_for_rank = raw_summary or art.ai_summary or art.title or ""
 
         if not _db_article_eligible_for_user_pref(
             art,
@@ -2026,7 +2032,10 @@ def get_todays_news_digest_for_user(
     items_text_lines: List[str] = []
     for art in chosen:
         title = _display_title_text(art.title, art.ai_title).replace("\n", " ").strip()[:220]
-        snippet = (art.ai_summary or art.raw_summary or art.title or "")
+        if scheduled_push:
+            snippet = (art.ai_summary or "")
+        else:
+            snippet = (art.ai_summary or art.raw_summary or art.title or "")
         snippet = _truncate_text(snippet, max_chars=550)
         if not title:
             continue
@@ -2059,10 +2068,12 @@ def get_todays_news_digest_for_user(
     for art, members in chosen_clusters[:4]:
         category = escape_html((art.category or "General").strip())
         title = escape_html(_display_title_text(art.title, art.ai_title).strip()[:220] or "Untitled")
+        if scheduled_push:
+            summary_blob = art.ai_summary or ""
+        else:
+            summary_blob = art.ai_summary or art.raw_summary or art.title or ""
         snippet = clip_plain_text_to_word_limit(
-            strip_markdown_artifacts_for_plain_text(
-                art.ai_summary or art.raw_summary or art.title or ""
-            ),
+            strip_markdown_artifacts_for_plain_text(summary_blob),
             34,
         )
         safe_snippet = escape_html(snippet)

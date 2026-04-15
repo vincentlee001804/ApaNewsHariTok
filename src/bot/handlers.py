@@ -38,6 +38,7 @@ from src.core.services import (
     post_matches_user_locations_filter,
 )
 from src.core.user_service import (
+    digest_greeting_period_name,
     get_or_create_user,
     get_user_preference,
     is_user_active,
@@ -676,7 +677,8 @@ async def test_digest_push_command(update: Update, context: ContextTypes.DEFAULT
     from src.ai.summarizer import generate_digest_greeting
     from src.core.services import get_todays_news_digest_for_user
 
-    period_name = "morning" if datetime.utcnow().hour < 12 else "evening"
+    preference = get_user_preference(telegram_id)
+    period_name = digest_greeting_period_name(preference)
     greeting = await asyncio.to_thread(generate_digest_greeting, period_name)
     if not greeting:
         greeting = (

@@ -134,7 +134,7 @@ ONBOARDING_WELCOME_TEXT: Final[str] = (
 )
 
 ONBOARDING_OFFER_TEXT: Final[str] = (
-    "*Step 2/5 - What I can do for you*\n\n"
+    "*Step 1/6 - What I can do for you*\n\n"
     "I can:\n"
     "• collect local news from RSS and approved Telegram sources\n"
     "• answer your questions using the latest stored news\n"
@@ -150,6 +150,20 @@ ONBOARDING_HELP_TEXT: Final[str] = (
     "• WhatsApp: [https://wa.me/601114004966](https://wa.me/601114004966)\n\n"
     "You can also edit your preferences anytime using `/settings`.\n\n"
     "Enjoy the bot! 🙌"
+)
+
+ONBOARDING_FREQUENCY_MODE_TEXT: Final[str] = (
+    "These options only change *automatic* messages from me. "
+    "You can always tap `/latest` whenever you want a fresh check.\n\n"
+    "*Digest mode*\n"
+    "• One message in the *evening* with a short overview and your top matching stories in one place.\n"
+    "• Best if you prefer a calm daily recap and fewer notifications.\n\n"
+    "*Frequent mode*\n"
+    "• I look for new matching news on a *timer* (you choose how often) and message you when there is something to show.\n"
+    "• If nothing new matches your filters that round, I usually stay quiet so you are not spammed.\n"
+    "• Best if you want updates closer to when news is published.\n\n"
+    "If you do not want any push notifications, you can turn them off anytime in `/settings`.\n\n"
+    "Tap a button below to choose. On the next screen you will set the evening time or the check interval."
 )
 
 
@@ -257,10 +271,6 @@ def _onboarding_categories_keyboard(page: int, current_categories: str | None) -
                 InlineKeyboardButton(
                     "All Categories" + (" ✓" if not selected else ""),
                     callback_data="onb_cat_all",
-                ),
-                InlineKeyboardButton(
-                    _with_tick("sarawak", "Sarawak Only"),
-                    callback_data="onb_cat_sarawak",
                 ),
             ]
         )
@@ -371,7 +381,7 @@ def _onboarding_frequency_mode_keyboard(delivery_mode: str | None) -> InlineKeyb
             ],
             [
                 InlineKeyboardButton(
-                    "Scheduled mode" + (" ✓" if scheduled_selected else ""),
+                    "Frequent mode" + (" ✓" if scheduled_selected else ""),
                     callback_data="onb_freq_mode_scheduled",
                 )
             ],
@@ -434,7 +444,7 @@ async def _show_onboarding_categories(query, telegram_id: int) -> None:
     current_categories = preference.categories if preference else ""
     current_display = current_categories if current_categories else "All categories"
     await query.edit_message_text(
-        "*Step 3/5 - Choose category*\n\n"
+        "*Step 2/6 - Choose category*\n\n"
         "What kind of news should I prioritize for you?\n\n"
         f"Current: {current_display}",
         parse_mode=ParseMode.MARKDOWN,
@@ -451,7 +461,7 @@ async def _show_onboarding_locations(query, telegram_id: int) -> None:
         else "All Sarawak"
     )
     await query.edit_message_text(
-        "*Step 4/5 - Choose location*\n\n"
+        "*Step 3/6 - Choose location*\n\n"
         "Tell me where you want news from.\n"
         "You can select multiple cities.\n\n"
         f"Current: {current_display}",
@@ -469,7 +479,7 @@ async def _show_onboarding_locations_more(query, telegram_id: int) -> None:
         else "All Sarawak"
     )
     await query.edit_message_text(
-        "*Step 4/6 - Choose location (more cities)*\n\n"
+        "*Step 3/6 - Choose location (more cities)*\n\n"
         "Select additional Sarawak cities.\n\n"
         f"Current: {current_display}",
         parse_mode=ParseMode.MARKDOWN,
@@ -479,10 +489,12 @@ async def _show_onboarding_locations_more(query, telegram_id: int) -> None:
 
 async def _show_onboarding_frequency(query, telegram_id: int) -> None:
     preference = get_user_preference(telegram_id)
-    delivery_mode = getattr(preference, "delivery_mode", "frequent") if preference else "frequent"
+    delivery_mode = (
+        getattr(preference, "delivery_mode", "digest") if preference else "digest"
+    )
     await query.edit_message_text(
-        "*Step 5/6 - Choose update type*\n\n"
-        "First, choose how you want me to send updates.",
+        "*Step 4/6 - How should I send automatic updates?*\n\n"
+        + ONBOARDING_FREQUENCY_MODE_TEXT,
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=_onboarding_frequency_mode_keyboard(delivery_mode),
     )
@@ -493,8 +505,8 @@ async def _show_onboarding_digest_time(query, telegram_id: int) -> None:
     if not preference:
         return
     await query.edit_message_text(
-        "*Step 5/6 - Digest time*\n\n"
-        "Digest updates are evening-only. Choose your evening digest time.",
+        "*Step 5/6 - Evening digest time*\n\n"
+        "You chose *digest mode*. Pick one evening time for your daily recap.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=_onboarding_digest_time_keyboard(preference),
     )
@@ -504,8 +516,8 @@ async def _show_onboarding_scheduled_time(query, telegram_id: int) -> None:
     preference = get_user_preference(telegram_id)
     current_frequency = preference.frequency if preference else "every_1h"
     await query.edit_message_text(
-        "*Step 5/6 - Scheduled interval*\n\n"
-        "Great. Choose how often I should send scheduled updates.",
+        "*Step 5/6 - Check interval*\n\n"
+        "You chose *frequent mode*. Choose how often I should look for new matching news.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=_onboarding_scheduled_time_keyboard(current_frequency),
     )
@@ -519,8 +531,7 @@ async def _show_onboarding_help(query, telegram_id: int) -> None:
         disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton("Get My Latest News", callback_data="onb_latest")],
-                [InlineKeyboardButton("Finish ✅", callback_data="onb_open_settings")],
+                [InlineKeyboardButton("Finish & Get Latest News ✅", callback_data="onb_finish")],
                 [InlineKeyboardButton("◀️ Back", callback_data="onb_step5")],
             ]
         ),
@@ -1034,7 +1045,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             current_categories = preference.categories if preference else ""
             current_display = current_categories if current_categories else "All categories"
             await query.edit_message_text(
-                "*Step 3/6 - Choose category (more)*\n\n"
+                "*Step 2/6 - Choose category (more)*\n\n"
                 "Pick one or more categories.\n\n"
                 f"Current: {current_display}",
                 parse_mode=ParseMode.MARKDOWN,
@@ -1051,14 +1062,38 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await _show_onboarding_help(query, telegram_id)
             return
         if data == "onb_skip":
+            current_pref = get_user_preference(telegram_id)
+            if current_pref:
+                freq_label = _format_frequency_from_preference(current_pref)
+                locations_display = (
+                    ", ".join(
+                        [loc.strip().title() for loc in (current_pref.locations or "").split(",") if loc.strip()]
+                    )
+                    if (current_pref.locations or "").strip()
+                    else "All Sarawak"
+                )
+                categories_display = (
+                    current_pref.categories if (current_pref.categories or "").strip() else "All categories"
+                )
+            else:
+                freq_label = "Digest mode (21:00)"
+                locations_display = "All Sarawak"
+                categories_display = "All categories"
+            push_display = "ON" if is_user_active(telegram_id) else "OFF"
             await query.edit_message_text(
                 "No problem. I am ready whenever you are.\n\n"
-                "Try:\n"
-                "• `/latest` for your current personalized news\n"
-                "• `/settings` to configure preferences anytime",
+                "*Current default setup:*\n"
+                f"• Categories: {categories_display}\n"
+                f"• Locations: {locations_display}\n"
+                f"• Frequency: {freq_label}\n"
+                f"• Push subscription: {push_display}\n\n"
+                "You can change everything anytime in `/settings`.",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("Get My Latest News", callback_data="onb_latest")]]
+                    [
+                        [InlineKeyboardButton("Finish & Get Latest News ✅", callback_data="onb_finish")],
+                        [InlineKeyboardButton("Open Settings", callback_data="onb_open_settings")],
+                    ]
                 ),
             )
             return
@@ -1072,7 +1107,23 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await settings_callback_refresh(query, telegram_id)
             return
         if data == "onb_finish":
-            await _show_onboarding_help(query, telegram_id)
+            from src.core.services import get_latest_news_text_for_user
+
+            await query.edit_message_text(
+                "Setup is complete. I am fetching your latest personalized news now...",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("Open Settings", callback_data="onb_open_settings")]]
+                ),
+            )
+            text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id)
+            await query.message.reply_text(text, parse_mode=ParseMode.HTML)
+            return
+        if data == "onb_latest":
+            await query.edit_message_text(
+                "Tip: use the finish button to complete onboarding and get your latest news instantly.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
             return
         if data == "onb_cat_all":
             update_user_preference(telegram_id, categories="")

@@ -50,6 +50,19 @@ from src.storage.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
+
+async def _safe_query_edit_message_text(query, *args, **kwargs):
+    """
+    Ignore Telegram's 'Message is not modified' callback edit error.
+    """
+    try:
+        return await query.edit_message_text(*args, **kwargs)
+    except BadRequest as e:
+        if "message is not modified" in str(e).lower():
+            return None
+        raise
+
+
 # Category picker in /settings: first page = common filters; second = rest of taxonomy.
 _CAT_SETTINGS_PAGE1: tuple[str, ...] = NEWS_ARTICLE_CATEGORY_LABELS[:12]
 _CAT_SETTINGS_PAGE2: tuple[str, ...] = NEWS_ARTICLE_CATEGORY_LABELS[12:]
@@ -446,7 +459,7 @@ async def _show_onboarding_categories(query, telegram_id: int) -> None:
     preference = get_user_preference(telegram_id)
     current_categories = preference.categories if preference else ""
     current_display = current_categories if current_categories else "All categories"
-    await query.edit_message_text(
+    await _safe_query_edit_message_text(query, 
         "*Step 2/6 - Choose category*\n\n"
         "What kind of news should I prioritize for you?\n\n"
         f"Current: {current_display}",
@@ -463,7 +476,7 @@ async def _show_onboarding_locations(query, telegram_id: int) -> None:
         if (current_locations or "").strip()
         else "All Sarawak"
     )
-    await query.edit_message_text(
+    await _safe_query_edit_message_text(query, 
         "*Step 3/6 - Choose location*\n\n"
         "Tell me where you want news from.\n"
         "You can select multiple cities.\n\n"
@@ -481,7 +494,7 @@ async def _show_onboarding_locations_more(query, telegram_id: int) -> None:
         if (current_locations or "").strip()
         else "All Sarawak"
     )
-    await query.edit_message_text(
+    await _safe_query_edit_message_text(query, 
         "*Step 3/6 - Choose location (more cities)*\n\n"
         "Select additional Sarawak cities.\n\n"
         f"Current: {current_display}",
@@ -495,7 +508,7 @@ async def _show_onboarding_frequency(query, telegram_id: int) -> None:
     delivery_mode = (
         getattr(preference, "delivery_mode", "digest") if preference else "digest"
     )
-    await query.edit_message_text(
+    await _safe_query_edit_message_text(query, 
         "*Step 4/6 - How should I send automatic updates?*\n\n"
         + ONBOARDING_FREQUENCY_MODE_TEXT,
         parse_mode=ParseMode.MARKDOWN,
@@ -507,7 +520,7 @@ async def _show_onboarding_digest_time(query, telegram_id: int) -> None:
     preference = get_user_preference(telegram_id)
     if not preference:
         return
-    await query.edit_message_text(
+    await _safe_query_edit_message_text(query, 
         "*Step 5/6 - Evening digest time*\n\n"
         "You chose *digest mode*. Pick one evening time for your daily recap.",
         parse_mode=ParseMode.MARKDOWN,
@@ -518,7 +531,7 @@ async def _show_onboarding_digest_time(query, telegram_id: int) -> None:
 async def _show_onboarding_scheduled_time(query, telegram_id: int) -> None:
     preference = get_user_preference(telegram_id)
     current_frequency = preference.frequency if preference else "every_1h"
-    await query.edit_message_text(
+    await _safe_query_edit_message_text(query, 
         "*Step 5/6 - Check interval*\n\n"
         "You chose *frequent mode*. Choose how often I should look for new matching news.",
         parse_mode=ParseMode.MARKDOWN,
@@ -528,7 +541,7 @@ async def _show_onboarding_scheduled_time(query, telegram_id: int) -> None:
 
 async def _show_onboarding_help(query, telegram_id: int) -> None:
     set_user_active(telegram_id, True)
-    await query.edit_message_text(
+    await _safe_query_edit_message_text(query, 
         ONBOARDING_HELP_TEXT,
         parse_mode=ParseMode.MARKDOWN,
         disable_web_page_preview=True,
@@ -1109,7 +1122,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     preference = get_user_preference(telegram_id)
 
     if not preference:
-        await query.edit_message_text("Error: Could not load your preferences.")
+        await _safe_query_edit_message_text(query, "Error: Could not load your preferences.")
         return
     preference = _normalize_evening_only_digest_preference(telegram_id, preference)
 
@@ -1123,7 +1136,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     [InlineKeyboardButton("Skip Setup", callback_data="onb_skip")],
                 ]
             )
-            await query.edit_message_text(
+            await _safe_query_edit_message_text(query, 
                 ONBOARDING_WELCOME_TEXT,
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=keyboard,
@@ -1137,7 +1150,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     [InlineKeyboardButton("Skip Setup", callback_data="onb_skip")],
                 ]
             )
-            await query.edit_message_text(
+            await _safe_query_edit_message_text(query, 
                 ONBOARDING_OFFER_TEXT,
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=keyboard,
@@ -1150,7 +1163,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             preference = get_user_preference(telegram_id)
             current_categories = preference.categories if preference else ""
             current_display = current_categories if current_categories else "All categories"
-            await query.edit_message_text(
+            await _safe_query_edit_message_text(query, 
                 "*Step 2/6 - Choose category (more)*\n\n"
                 "Pick one or more categories.\n\n"
                 f"Current: {current_display}",
@@ -1186,7 +1199,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 locations_display = "All Sarawak"
                 categories_display = "All categories"
             push_display = "ON" if is_user_active(telegram_id) else "OFF"
-            await query.edit_message_text(
+            await _safe_query_edit_message_text(query, 
                 "No problem. I am ready whenever you are.\n\n"
                 "*Current default setup:*\n"
                 f"• Categories: {categories_display}\n"
@@ -1215,7 +1228,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if data == "onb_finish":
             from src.core.services import get_latest_news_text_for_user
 
-            await query.edit_message_text(
+            await _safe_query_edit_message_text(query, 
                 "Setup is complete. I am fetching your latest personalized news now...",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup(
@@ -1226,7 +1239,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await query.message.reply_text(text, parse_mode=ParseMode.HTML)
             return
         if data == "onb_latest":
-            await query.edit_message_text(
+            await _safe_query_edit_message_text(query, 
                 "Tip: use the finish button to complete onboarding and get your latest news instantly.",
                 parse_mode=ParseMode.MARKDOWN,
             )
@@ -1376,7 +1389,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     async def _safe_edit_message_text(*, text: str, reply_markup: InlineKeyboardMarkup) -> None:
         try:
-            await query.edit_message_text(
+            await _safe_query_edit_message_text(query, 
                 text,
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=reply_markup,
@@ -1558,7 +1571,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if data == "settings_categories":
         reply_markup = InlineKeyboardMarkup(_category_settings_keyboard_rows(1))
-        await query.edit_message_text(
+        await _safe_query_edit_message_text(query, 
             "*Select Categories* (1/2)\n\n"
             "Pick one category to filter by, or use *Custom* for several (comma-separated, lowercase tokens).\n\n"
             "Current: " + (preference.categories if preference.categories else "All"),
@@ -1577,7 +1590,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             [InlineKeyboardButton("🗑️ Clear all keywords", callback_data="area_kw_clear")],
             [InlineKeyboardButton("◀️ Back", callback_data="settings_back")],
         ]
-        await query.edit_message_text(
+        await _safe_query_edit_message_text(query, 
             "*Area Keywords*\n\n"
             "Type your roads or areas in *one message*, separated by commas, then send.\n"
             "Example:\n"
@@ -1643,7 +1656,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         current_display = ", ".join([loc.title() for loc in current_locations]) if current_locations else "All Sarawak"
-        await query.edit_message_text(
+        await _safe_query_edit_message_text(query, 
             "*Select Locations:*\n\n"
             "Choose which Sarawak cities you want news from. "
             "You can select multiple cities.\n\n"
@@ -1695,7 +1708,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         current_display = ", ".join([loc.title() for loc in current_locations]) if current_locations else "All Sarawak"
-        await query.edit_message_text(
+        await _safe_query_edit_message_text(query, 
             "*More Sarawak Cities:*\n\n"
             "Select additional cities for news filtering.\n\n"
             f"Current: {current_display}",
@@ -1751,19 +1764,19 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     elif data == "settings_frequency":
         if not _refresh_preference():
-            await query.edit_message_text("Error: Could not load your preferences.")
+            await _safe_query_edit_message_text(query, "Error: Could not load your preferences.")
             return
         await _show_frequency_root_menu()
 
     elif data == "settings_frequency_digest":
         if not _refresh_preference():
-            await query.edit_message_text("Error: Could not load your preferences.")
+            await _safe_query_edit_message_text(query, "Error: Could not load your preferences.")
             return
         await _show_digest_frequency_menu()
 
     elif data == "settings_frequency_frequent":
         if not _refresh_preference():
-            await query.edit_message_text("Error: Could not load your preferences.")
+            await _safe_query_edit_message_text(query, "Error: Could not load your preferences.")
             return
         await _show_frequent_frequency_menu()
 
@@ -1779,7 +1792,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         # Category selection
         if data == "cat_page2":
             reply_markup = InlineKeyboardMarkup(_category_settings_keyboard_rows(2))
-            await query.edit_message_text(
+            await _safe_query_edit_message_text(query, 
                 "*Select Categories* (2/2)\n\n"
                 "Pick one category to filter by, or use *Custom* for several.\n\n"
                 "Current: " + (preference.categories if preference.categories else "All"),
@@ -1794,7 +1807,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             update_user_preference(telegram_id, categories="sarawak")
             await query.answer("Categories set to: Sarawak only")
         elif data == "cat_custom":
-            await query.edit_message_text(
+            await _safe_query_edit_message_text(query, 
                 "Send a command like:\n"
                 "`/setcategories sarawak,infrastructure,weather`\n\n"
                 "Use lowercase tokens separated by commas (same names as the category buttons).",
@@ -1945,7 +1958,7 @@ async def settings_callback_refresh(query, telegram_id: int) -> None:
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(
+    await _safe_query_edit_message_text(query, 
         settings_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
     )
 

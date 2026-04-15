@@ -493,9 +493,12 @@ def generate_digest_greeting(period: str) -> Optional[str]:
         Context: It is {p}.
 
         Rules:
-        - 8 to 16 words only.
-        - Warm and natural tone.
+        - ENGLISH ONLY.
+        - 10 to 18 words only.
+        - Warm, supportive, and lightly emotional tone.
+        - Start with "Good morning" or "Good evening" according to the context.
         - Mention this is the user's local news digest.
+        - You may add a gentle closing like "rest well" or "have a peaceful night".
         - Plain text only (no Markdown, no HTML).
         - No quotes and no bullet points.
         - You may include at most ONE friendly emoji (optional).
@@ -530,6 +533,23 @@ def generate_digest_greeting(period: str) -> Optional[str]:
         text = text.splitlines()[0].strip()
         text = clip_plain_text_to_word_limit(text, 16)
         text = finalize_summary_plain_text(text)
+        lowered = text.lower()
+        malay_markers = [
+            "selamat",
+            "berita tempatan",
+            "berita",
+            "hari ini",
+            "untukmu",
+            "nikmati",
+            "rehat",
+            "mimpi",
+        ]
+        if any(marker in lowered for marker in malay_markers):
+            return None
+        if p == "morning" and not lowered.startswith("good morning"):
+            return None
+        if p == "evening" and not lowered.startswith("good evening"):
+            return None
         # Avoid overly short, awkward output.
         if len(text.split()) < 6:
             return None

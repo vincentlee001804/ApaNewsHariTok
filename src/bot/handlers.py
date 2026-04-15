@@ -695,9 +695,9 @@ async def test_digest_push_command(update: Update, context: ContextTypes.DEFAULT
     greeting = await asyncio.to_thread(generate_digest_greeting, period_name)
     if not greeting:
         greeting = (
-            "Good morning! Here is your Sarawak local news digest."
+            "Good morning! Here is your local Sarawak digest; have a steady and positive day ahead."
             if period_name == "morning"
-            else "Good evening! Here is your Sarawak local news digest."
+            else "Good evening! You have come to the end of today; rest well and have a peaceful night."
         )
 
     try:

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
+from src.core.config import SCHEDULED_PUSH_QUIET_TIMEZONE
 from src.core.models import User, UserPreference
 from src.storage.database import SessionLocal
 
@@ -114,6 +116,29 @@ def get_user_preference(telegram_id: int) -> Optional[UserPreference]:
         ).scalar_one_or_none()
 
         return preference
+
+
+def digest_greeting_period_name(
+    preference: Optional[UserPreference],
+    *,
+    now_utc: Optional[datetime] = None,
+) -> str:
+    """
+    Morning vs evening label for digest greetings: local clock hour (user delivery_timezone)
+    before noon => morning. Matches scheduled digest logic in bot_main.
+    """
+    tz_name = SCHEDULED_PUSH_QUIET_TIMEZONE
+    if preference is not None:
+        raw_tz = getattr(preference, "delivery_timezone", None) or ""
+        if str(raw_tz).strip():
+            tz_name = str(raw_tz).strip()
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo(SCHEDULED_PUSH_QUIET_TIMEZONE)
+    now = now_utc if now_utc is not None else datetime.utcnow()
+    hour_local = now.replace(tzinfo=timezone.utc).astimezone(tz).hour
+    return "morning" if hour_local < 12 else "evening"
 
 
 def update_user_preference(

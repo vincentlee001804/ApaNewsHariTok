@@ -55,6 +55,7 @@ from src.core.services import (
 )
 from src.ai.summarizer import generate_digest_greeting
 from src.core.user_service import (
+    digest_greeting_period_name,
     list_active_user_preferences,
     set_user_active,
     touch_last_scheduled_push_at,
@@ -222,18 +223,6 @@ def main() -> None:
                 return True
         return False
 
-    def _digest_period_name(preference, now_utc: datetime) -> str:
-        tz_name = (
-            getattr(preference, "delivery_timezone", None)
-            or SCHEDULED_PUSH_QUIET_TIMEZONE
-        )
-        try:
-            tz = ZoneInfo(str(tz_name))
-        except Exception:
-            tz = ZoneInfo(SCHEDULED_PUSH_QUIET_TIMEZONE)
-        hour_local = now_utc.replace(tzinfo=timezone.utc).astimezone(tz).hour
-        return "morning" if hour_local < 12 else "evening"
-
     async def _prefetch_db_job(context) -> None:
         """RSS + Telegram → database (and optional ai_summary backfill)."""
         try:
@@ -271,7 +260,9 @@ def main() -> None:
                             continue
                         from src.core.services import get_todays_news_digest_for_user
 
-                        period_name = _digest_period_name(preference, now)
+                        period_name = digest_greeting_period_name(
+                            preference, now_utc=now
+                        )
                         greeting = await asyncio.to_thread(
                             generate_digest_greeting, period_name
                         )

@@ -193,6 +193,7 @@ def fetch_latest_telegram_items(
     *,
     limit_per_source: int = 15,
     max_age_hours: int = 24,
+    session_name_override: str | None = None,
 ) -> List[RssItem]:
     """
     Fetch recent text/media-caption messages from Telegram sources (channels/chats/bots)
@@ -206,7 +207,11 @@ def fetch_latest_telegram_items(
     api_hash = (os.getenv("TELEGRAM_API_HASH") or "").strip()
     _phone = (os.getenv("TELEGRAM_PHONE") or "").strip()
     session_string = _normalize_telegram_session_string(os.getenv("TELEGRAM_SESSION_STRING"))
-    session_name = (os.getenv("TELEGRAM_SOURCE_SESSION_NAME") or "sibuwb_session").strip()
+    session_name = (
+        (session_name_override or "").strip()
+        or (os.getenv("TELEGRAM_SOURCE_SESSION_NAME") or "sibuwb_session").strip()
+        or "sibuwb_session"
+    )
     auto_join = (os.getenv("TELEGRAM_AUTO_JOIN_CHANNELS", "true").strip().lower() in {
         "1", "true", "yes", "y", "on",
     })

@@ -17,3 +17,7 @@ https://berita.rtm.gov.my/feed/
 https://news.google.com/rss/search?q=Sarawak%20water
 https://news.google.com/rss/search?q=Sarawak%20energy
 https://www.tvsarawak.my/feed/
+# Telegram source entries (optional):
+# TELEGRAM_SOURCE_SESSION_NAME=sibuwb_session
+# TELEGRAM_SOURCE_CHANNELS=swbnews,anotherchannel
+# telegram:@swbnews|sibuwb_session

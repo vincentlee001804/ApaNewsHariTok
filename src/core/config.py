@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Final, List
+from typing import Final, List, Tuple
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -147,37 +147,97 @@ DEFAULT_RSS_FEEDS: Final[List[str]] = [
 ]
 
 
-def _load_rss_feeds_from_file() -> List[str]:
+def _normalize_telegram_source_token(raw: str) -> str:
+    token = (raw or "").strip().lower()
+    if not token:
+        return ""
+    if token.startswith("@"):
+        token = token[1:]
+    return token
+
+
+def _parse_telegram_sources_env() -> List[Tuple[str, str]]:
     """
-    Load RSS feed URLs from `RSS_Sources.txt` in the project root.
+    Backward-compatible .env parser:
+    TELEGRAM_SOURCE_CHANNELS=swbnews,another_channel
+    TELEGRAM_SOURCE_SESSION_NAME=sibuwb_session
+    """
+    session_name = (os.getenv("TELEGRAM_SOURCE_SESSION_NAME") or "sibuwb_session").strip() or "sibuwb_session"
+    out: List[Tuple[str, str]] = []
+    for part in os.getenv("TELEGRAM_SOURCE_CHANNELS", "").split(","):
+        src = _normalize_telegram_source_token(part)
+        if not src:
+            continue
+        out.append((src, session_name))
+    return out
+
+
+def _load_sources_from_file() -> tuple[List[str], List[Tuple[str, str]]]:
+    """
+    Load RSS + Telegram sources from `RSS_Sources.txt` in the project root.
 
     File format:
     - One URL per line
     - Blank lines are ignored
     - Lines starting with '#' are ignored
+    - Optional Telegram lines:
+      - telegram:swbnews
+      - telegram:@swbnews|my_session_name
+      - TELEGRAM_SOURCE_CHANNELS=swbnews,another_channel
+      - TELEGRAM_SOURCE_SESSION_NAME=my_session_name   (default for lines below it)
     """
     # src/core/config.py -> project root is two levels up from `src/`
     project_root = Path(__file__).resolve().parents[2]
     sources_file = project_root / "RSS_Sources.txt"
     if not sources_file.exists():
-        return []
+        return ([], [])
 
     feeds: List[str] = []
+    telegram_pairs: List[Tuple[str, str]] = []
+    default_tg_session = "sibuwb_session"
     for raw_line in sources_file.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, value = line.split("=", 1)
+            key = key.strip().upper()
+            value = value.strip()
+            if key == "TELEGRAM_SOURCE_SESSION_NAME":
+                default_tg_session = value or "sibuwb_session"
+                continue
+            if key == "TELEGRAM_SOURCE_CHANNELS":
+                for tok in value.split(","):
+                    src = _normalize_telegram_source_token(tok)
+                    if not src:
+                        continue
+                    telegram_pairs.append((src, default_tg_session))
+                continue
+        if line.lower().startswith("telegram:"):
+            payload = line.split(":", 1)[1].strip()
+            src_part, session_part = payload, ""
+            if "|" in payload:
+                src_part, session_part = payload.split("|", 1)
+            src = _normalize_telegram_source_token(src_part)
+            if not src:
+                continue
+            sess = (session_part.strip() or default_tg_session or "sibuwb_session")
+            telegram_pairs.append((src, sess))
             continue
         if not (line.startswith("http://") or line.startswith("https://")):
             continue
         feeds.append(line)
 
-    # de-duplicate while preserving order
-    return list(dict.fromkeys(feeds))
+    # De-duplicate while preserving order.
+    unique_feeds = list(dict.fromkeys(feeds))
+    unique_tg = list(dict.fromkeys(telegram_pairs))
+    return (unique_feeds, unique_tg)
 
 
 # RSS feeds are loaded from `RSS_Sources.txt` (project root) if present;
 # otherwise we fall back to a small default list.
-RSS_FEEDS: Final[List[str]] = _load_rss_feeds_from_file() or DEFAULT_RSS_FEEDS
+_rss_file_feeds, _rss_file_telegram_sources = _load_sources_from_file()
+RSS_FEEDS: Final[List[str]] = _rss_file_feeds or DEFAULT_RSS_FEEDS
 
 
 def _load_local_interest_keywords() -> tuple[str, ...]:
@@ -215,17 +275,18 @@ FIRST_BOOT_RSS_MAX_PER_FEED: Final[int] = max(
 # Requires TELEGRAM_API_ID, TELEGRAM_API_HASH and either:
 # - TELEGRAM_SESSION_STRING (recommended on Fly.io: no sqlite3 / .session file). Obtain by running
 #   `python test_sibuwb_bot.py` locally after login; the script prints the string at the end.
-# - TELEGRAM_PHONE plus an authorized Telethon session file (default: sibuwb_session).
-# Set PREFETCH_INTERVAL_MINUTES=60 for hourly RSS + Telegram fetch.
+# - TELEGRAM_PHONE plus an authorized Telethon session file.
 #
-# Comma-separated values in .env, each can be:
-# - channel username without @, e.g. swbnews
-# - numeric chat id, e.g. -1001234567890
-TELEGRAM_SOURCE_CHANNELS: Final[List[str]] = [
-    x.strip().lower()
-    for x in os.getenv("TELEGRAM_SOURCE_CHANNELS", "").split(",")
-    if x.strip()
-]
+# Sources can be defined in either:
+# - .env: TELEGRAM_SOURCE_CHANNELS + TELEGRAM_SOURCE_SESSION_NAME (backward compatible)
+# - RSS_Sources.txt lines (telegram:..., TELEGRAM_SOURCE_CHANNELS=..., TELEGRAM_SOURCE_SESSION_NAME=...)
+# If both are set, they are merged and de-duplicated.
+TELEGRAM_SOURCE_CONFIGS: Final[List[Tuple[str, str]]] = list(
+    dict.fromkeys(_parse_telegram_sources_env() + _rss_file_telegram_sources)
+)
+TELEGRAM_SOURCE_CHANNELS: Final[List[str]] = list(
+    dict.fromkeys([src for src, _session in TELEGRAM_SOURCE_CONFIGS])
+)
 
 # Deduplication: when enabled, once an article has been sent, it will never be sent again.
 # For testing message formats, you may want to disable this temporarily.

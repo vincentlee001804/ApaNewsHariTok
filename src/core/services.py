@@ -735,7 +735,17 @@ def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
                 article_text = extract_article_content(art.link)
                 source_text = article_text or art.raw_summary or art.title or ""
                 if not has_summary:
-                    ai = summarize(source_text, title=art.title or "")
+                    if _article_source_is_telegram(art.source) and _is_urgent_utility_alert(
+                        art.title or "",
+                        art.raw_summary,
+                    ):
+                        ai = build_urgent_preview(
+                            art.title or "",
+                            art.raw_summary,
+                            max_words=42,
+                        )
+                    else:
+                        ai = summarize(source_text, title=art.title or "")
                     if not ai:
                         ai = _fallback_summary_from_text(art.raw_summary or art.title or "", max_words=80)
                     art.ai_summary = normalize_stored_ai_summary(ai)
@@ -1373,11 +1383,21 @@ def get_latest_news_text(max_items: int = 3) -> str:
             # Fallback to RSS summary or title if article scraping fails
             source_text = item.summary or item.title
 
-        ai_summary = (
-            summarize(source_text, title=item.title)
-            if matches_local_interest(item.title, item.summary)
-            else None
-        )
+        if (item.source or "").lower().startswith("telegram") and _is_urgent_utility_alert(
+            item.title or "",
+            item.summary,
+        ):
+            ai_summary = build_urgent_preview(
+                item.title or "",
+                item.summary,
+                max_words=42,
+            )
+        else:
+            ai_summary = (
+                summarize(source_text, title=item.title)
+                if matches_local_interest(item.title, item.summary)
+                else None
+            )
         if not ai_summary:
             ai_summary = _fallback_summary_from_text(item.summary or item.title, max_words=80)
 
@@ -1660,11 +1680,21 @@ def get_latest_news_text_for_user(
                 category = _get_category_with_llm_fallback(item.title, item.summary)
                 article_text = extract_article_content(item.link)
                 source_text = article_text or item.summary or item.title
-                ai_summary = (
-                    summarize(source_text, title=item.title)
-                    if matches_local_interest(item.title, item.summary)
-                    else None
-                )
+                if (item.source or "").lower().startswith("telegram") and _is_urgent_utility_alert(
+                    item.title or "",
+                    item.summary,
+                ):
+                    ai_summary = build_urgent_preview(
+                        item.title or "",
+                        item.summary,
+                        max_words=42,
+                    )
+                else:
+                    ai_summary = (
+                        summarize(source_text, title=item.title)
+                        if matches_local_interest(item.title, item.summary)
+                        else None
+                    )
                 if not ai_summary:
                     ai_summary = _fallback_summary_from_text(
                         item.summary or item.title, max_words=80
@@ -1706,7 +1736,17 @@ def get_latest_news_text_for_user(
                 article_text = extract_article_content(art.link)
                 source_text = article_text or art.raw_summary or art.title
                 if not art.ai_summary:
-                    art.ai_summary = summarize(source_text, title=art.title)
+                    if _article_source_is_telegram(art.source) and _is_urgent_utility_alert(
+                        art.title or "",
+                        art.raw_summary,
+                    ):
+                        art.ai_summary = build_urgent_preview(
+                            art.title or "",
+                            art.raw_summary,
+                            max_words=42,
+                        )
+                    else:
+                        art.ai_summary = summarize(source_text, title=art.title)
                     if not art.ai_summary:
                         art.ai_summary = _fallback_summary_from_text(
                             art.raw_summary or art.title, max_words=80

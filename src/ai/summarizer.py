@@ -494,7 +494,7 @@ def generate_digest_greeting(period: str) -> Optional[str]:
 
         Rules:
         - ENGLISH ONLY.
-        - 10 to 18 words only.
+        - Keep it short (about 10 to 24 words), but complete.
         - Warm, supportive, and lightly emotional tone.
         - Start with "Good morning" or "Good evening" according to the context.
         - Mention this is the user's local news digest.
@@ -531,7 +531,6 @@ def generate_digest_greeting(period: str) -> Optional[str]:
             text = text[1:-1].strip()
         # Keep only the first line in case the model spills extra lines.
         text = text.splitlines()[0].strip()
-        text = clip_plain_text_to_word_limit(text, 16)
         text = finalize_summary_plain_text(text)
         lowered = text.lower()
         malay_markers = [
@@ -549,6 +548,8 @@ def generate_digest_greeting(period: str) -> Optional[str]:
         if p == "morning" and not lowered.startswith("good morning"):
             return None
         if p == "evening" and not lowered.startswith("good evening"):
+            return None
+        if len(text.split()) > 26:
             return None
         # Avoid overly short, awkward output.
         if len(text.split()) < 6:

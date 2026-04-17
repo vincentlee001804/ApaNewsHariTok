@@ -10,7 +10,7 @@ from src.core.services import (
     _get_source_name,
     backfill_ai_summaries_for_article_ids,
 )
-from src.core.config import PREFETCH_AI_SUMMARY, RSS_FEEDS, TELEGRAM_SOURCE_CHANNELS
+from src.core.config import PREFETCH_AI_SUMMARY, RSS_FEEDS, TELEGRAM_SOURCE_CONFIGS
 from src.core.local_keywords import matches_local_interest
 from src.core.location_extractor import extract_location_and_state
 from src.core.models import NewsArticle
@@ -35,7 +35,7 @@ def prefetch_latest_articles_to_db(
     max_age_hours: int = 24,
 ) -> int:
     """
-    Fetch recent RSS items plus optional Telegram channels (see TELEGRAM_SOURCE_CHANNELS)
+    Fetch recent RSS items plus optional Telegram channels (see TELEGRAM_SOURCE_CONFIGS)
     and store them into the database.
 
     Runs on the bot's global fetch job (same interval for all users; see PREFETCH_INTERVAL_MINUTES).
@@ -49,11 +49,22 @@ def prefetch_latest_articles_to_db(
         limit_per_feed=eff_limit,
         max_age_hours=max_age_hours,
     )
-    telegram_items: List[RssItem] = fetch_latest_telegram_items(
-        TELEGRAM_SOURCE_CHANNELS,
-        limit_per_source=eff_limit,
-        max_age_hours=max_age_hours,
-    )
+    telegram_items: List[RssItem] = []
+    if TELEGRAM_SOURCE_CONFIGS:
+        grouped_by_session: dict[str, list[str]] = {}
+        for source, session_name in TELEGRAM_SOURCE_CONFIGS:
+            session_key = (session_name or "sibuwb_session").strip() or "sibuwb_session"
+            grouped_by_session.setdefault(session_key, [])
+            grouped_by_session[session_key].append(source)
+        for session_name, sources in grouped_by_session.items():
+            batch = fetch_latest_telegram_items(
+                sources,
+                limit_per_source=eff_limit,
+                max_age_hours=max_age_hours,
+                session_name_override=session_name,
+            )
+            if batch:
+                telegram_items.extend(batch)
     if telegram_items:
         items.extend(telegram_items)
 

@@ -3,6 +3,7 @@
 ### 1. Project Overview
 
 **Project Title**: Intelligent Local News Summarization and Alerting Bot on Telegram Using Local LLM  
+
 **Short Description**:  
 A backend-driven automated system that scrapes local news from defined local sources, processes it using a locally hosted LLM to generate short summaries, and pushes scheduled updates directly to users via a Telegram bot. It aims to bridge the information gap for younger generations and busy professionals by delivering relevant community news without information overload.
 

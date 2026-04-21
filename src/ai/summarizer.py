@@ -22,6 +22,53 @@ from src.core.news_categories import (
 
 logger = logging.getLogger(__name__)
 
+_SARAWAK_LOCATION_ALIASES: dict[str, list[str]] = {
+    "kota samarahan": ["kota samarahan", "samarahan"],
+    "kuching": ["kuching"],
+    "miri": ["miri"],
+    "sibu": ["sibu"],
+    "bintulu": ["bintulu"],
+    "serian": ["serian"],
+    "sarikei": ["sarikei"],
+    "sri aman": ["sri aman", "sriaman"],
+    "mukah": ["mukah"],
+    "limbang": ["limbang"],
+    "lawas": ["lawas"],
+    "betong": ["betong"],
+    "saratok": ["saratok"],
+    "kapit": ["kapit"],
+    "marudi": ["marudi"],
+    "belaga": ["belaga"],
+}
+
+
+def _detect_sarawak_locations(text: str) -> set[str]:
+    t = f" {(text or '').lower()} "
+    if not t.strip():
+        return set()
+    found: set[str] = set()
+    for canonical, aliases in _SARAWAK_LOCATION_ALIASES.items():
+        for alias in aliases:
+            a = alias.strip().lower()
+            if not a:
+                continue
+            if re.search(rf"\b{re.escape(a)}\b", t):
+                found.add(canonical)
+                break
+    return found
+
+
+def _has_conflicting_sarawak_location(*, source_text: str, generated_text: str) -> bool:
+    """
+    Return True when generated output mentions a Sarawak place that conflicts
+    with the place(s) explicitly present in source text.
+    """
+    source_locs = _detect_sarawak_locations(source_text)
+    generated_locs = _detect_sarawak_locations(generated_text)
+    if not source_locs or not generated_locs:
+        return False
+    return generated_locs.isdisjoint(source_locs)
+
 
 def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
     """
@@ -210,6 +257,8 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
         - The summary MUST match the provided headline/article only.
         - Do NOT use information from other articles or prior context.
         - If the text does not contain enough matching information for the headline, output exactly: NO_SUMMARY
+        - If a place/location is mentioned in the article or headline, keep that exact place in the summary.
+          Do not replace it with another city.
 
         Provide only the summary text, no instructions, labels, or quotes around the summary.
         Write in clear, natural language using simple everyday words.
@@ -273,6 +322,12 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
 
         summary = strip_markdown_artifacts_for_plain_text(summary)
         summary = finalize_summary_plain_text(summary)
+        source_blob = f"{title or ''}\n{text or ''}"
+        if _has_conflicting_sarawak_location(
+            source_text=source_blob,
+            generated_text=summary,
+        ):
+            return None
         return summary or None
     except Exception:
         # For now, fail quietly and let the caller decide how to handle None.
@@ -308,6 +363,8 @@ def generate_display_title(
         - No quotes around the title.
         - No Markdown/HTML.
         - Do not invent facts not present in the provided text.
+        - If a place/location appears in the provided text/hint, preserve that place.
+          Do not swap it to another city.
 
         Summary/context (primary):
         \"\"\"{clean_text}\"\"\"
@@ -342,6 +399,12 @@ def generate_display_title(
 
         normalized = normalize_stored_ai_title(generated, max_words=max_words)
         if not normalized:
+            return None
+        source_blob = f"{clean_title_hint}\n{clean_text}"
+        if _has_conflicting_sarawak_location(
+            source_text=source_blob,
+            generated_text=normalized,
+        ):
             return None
         return normalized
     except Exception:

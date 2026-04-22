@@ -1967,14 +1967,31 @@ def get_todays_news_digest_for_user(
         if not digest:
             digest = items_text
 
+        display_items = chosen_items[:4]
+        overview_lines: list[str] = []
+        for it in display_items:
+            display_title = (
+                getattr(it, "ai_title", None)
+                or generate_display_title(
+                    text=it.summary or it.title or "",
+                    title_hint=it.title or "",
+                    max_words=14,
+                )
+                or _fallback_display_title_from_text(it.title or "")
+            )
+            if not display_title:
+                continue
+            snippet = _truncate_text(it.summary or it.title or "", max_chars=220)
+            overview_lines.append(f"- {display_title.strip()}\n  {snippet}")
+        overview_input = "\n".join(overview_lines).strip()
         overview = summarize_digest_overview(
-            items_text,
-            story_count=len(chosen_items),
+            overview_input,
+            story_count=len(display_items),
             max_words=60,
         )
         if not overview:
             overview = (
-                f"I found {len(chosen_items)} relevant stories in this digest window, "
+                f"I found {len(display_items)} relevant stories in this digest window, "
                 "covering infrastructure, community events, and local updates."
             )
         lines: list[str] = [
@@ -1984,7 +2001,7 @@ def get_todays_news_digest_for_user(
             "",
             "<b>Top stories for you</b>",
         ]
-        for it in chosen_items[:4]:
+        for it in display_items:
             display_title = (
                 getattr(it, "ai_title", None)
                 or generate_display_title(
@@ -2088,14 +2105,26 @@ def get_todays_news_digest_for_user(
         # Fallback: use the compact item list.
         digest = items_text
 
+    display_clusters = chosen_clusters[:4]
+    overview_lines: list[str] = []
+    for art, _members in display_clusters:
+        title = _display_title_text(art.title, art.ai_title).replace("\n", " ").strip()[:220]
+        if scheduled_push:
+            summary_blob = art.ai_summary or ""
+        else:
+            summary_blob = art.ai_summary or art.raw_summary or art.title or ""
+        snippet = _truncate_text(summary_blob, max_chars=220)
+        if title:
+            overview_lines.append(f"- {title}\n  {snippet}")
+    overview_input = "\n".join(overview_lines).strip()
     overview = summarize_digest_overview(
-        items_text,
-        story_count=len(chosen),
+        overview_input,
+        story_count=len(display_clusters),
         max_words=60,
     )
     if not overview:
         overview = (
-            f"I found {len(chosen)} relevant stories in this digest window, "
+            f"I found {len(display_clusters)} relevant stories in this digest window, "
             "covering infrastructure, community events, and local updates."
         )
     lines = [
@@ -2105,7 +2134,7 @@ def get_todays_news_digest_for_user(
         "",
         "<b>Top stories for you</b>",
     ]
-    for art, members in chosen_clusters[:4]:
+    for art, members in display_clusters:
         category = escape_html((art.category or "General").strip())
         title = escape_html(_display_title_text(art.title, art.ai_title).strip()[:220] or "Untitled")
         if scheduled_push:

@@ -343,6 +343,18 @@ CROSS_SOURCE_DEDUP_BODY_JACCARD_THRESHOLD: Final[float] = min(
         ),
     ),
 )
+CROSS_SOURCE_DEDUP_AI_SUMMARY_JACCARD_THRESHOLD: Final[float] = min(
+    1.0,
+    max(
+        0.0,
+        float(
+            (
+                os.getenv("CROSS_SOURCE_DEDUP_AI_SUMMARY_JACCARD_THRESHOLD", "0.58").strip()
+                or "0.58"
+            )
+        ),
+    ),
+)
 CROSS_SOURCE_DEDUP_MIN_BODY_TOKENS: Final[int] = max(
     8,
     int((os.getenv("CROSS_SOURCE_DEDUP_MIN_BODY_TOKENS", "18").strip() or "18")),

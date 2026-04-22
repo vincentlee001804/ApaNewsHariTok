@@ -18,6 +18,7 @@ from src.ai.summarizer import (
     waze_alerts_to_news_sentences,
 )
 from src.core.config import (
+    CROSS_SOURCE_DEDUP_AI_SUMMARY_JACCARD_THRESHOLD,
     CROSS_SOURCE_DEDUP_BODY_JACCARD_THRESHOLD,
     CROSS_SOURCE_DEDUP_DEBUG,
     CROSS_SOURCE_DEDUP_ENABLED,
@@ -101,14 +102,17 @@ def _find_cross_source_duplicate_story_match(
     *,
     title_tokens: set[str],
     body_tokens: set[str],
+    ai_summary_tokens: set[str],
     source_name: str,
     title_key: str,
-    seen_signatures: list[tuple[set[str], set[str], str, str]],
+    seen_signatures: list[tuple[set[str], set[str], set[str], str, str]],
 ) -> tuple[int, str, float] | None:
     if not seen_signatures:
         return None
 
-    for idx, (seen_title, seen_body, seen_source, seen_title_key) in enumerate(seen_signatures):
+    for idx, (seen_title, seen_body, seen_ai_summary, seen_source, seen_title_key) in enumerate(
+        seen_signatures
+    ):
         # Same publisher with normalized title match: treat as duplicate immediately.
         if (
             source_name
@@ -131,6 +135,9 @@ def _find_cross_source_duplicate_story_match(
             body_sim = _jaccard_similarity(body_tokens, seen_body)
             if body_sim >= CROSS_SOURCE_DEDUP_BODY_JACCARD_THRESHOLD:
                 return (idx, "body", body_sim)
+        ai_summary_sim = _jaccard_similarity(ai_summary_tokens, seen_ai_summary)
+        if ai_summary_sim >= CROSS_SOURCE_DEDUP_AI_SUMMARY_JACCARD_THRESHOLD:
+            return (idx, "ai_summary", ai_summary_sim)
 
     return None
 
@@ -144,7 +151,7 @@ def _cluster_ranked_articles_cross_source(
         return [(art, [art]) for art in ranked_articles[:max_items]]
 
     clusters: list[tuple[NewsArticle, list[NewsArticle]]] = []
-    seen_signatures: list[tuple[set[str], set[str], str, str]] = []
+    seen_signatures: list[tuple[set[str], set[str], set[str], str, str]] = []
     seen_links: set[str] = set()
 
     for art in ranked_articles:
@@ -165,12 +172,14 @@ def _cluster_ranked_articles_cross_source(
         body_tokens = _tokenize_for_story_dedup(
             f"{art.raw_summary or ''} {art.ai_summary or ''}"
         )
+        ai_summary_tokens = _tokenize_for_story_dedup(art.ai_summary or "")
         source_norm = (art.source or "").strip().lower()
         title_key = _normalized_title_key_for_story_dedup(art.title)
 
         duplicate_match = _find_cross_source_duplicate_story_match(
             title_tokens=title_tokens,
             body_tokens=body_tokens,
+            ai_summary_tokens=ai_summary_tokens,
             source_name=source_norm,
             title_key=title_key,
             seen_signatures=seen_signatures,
@@ -191,7 +200,9 @@ def _cluster_ranked_articles_cross_source(
             continue
 
         seen_links.add(dedup_link)
-        seen_signatures.append((title_tokens, body_tokens, source_norm, title_key))
+        seen_signatures.append(
+            (title_tokens, body_tokens, ai_summary_tokens, source_norm, title_key)
+        )
         clusters.append((art, [art]))
         if CROSS_SOURCE_DEDUP_DEBUG:
             logger.info(
@@ -301,7 +312,7 @@ def _deduplicate_items(items: List[RssItem], max_items: int) -> List[RssItem]:
     Items should be pre-sorted by date (newest first) to ensure latest news is prioritized.
     """
     seen_links = set()
-    seen_story_signatures: list[tuple[set[str], set[str], str, str]] = []
+    seen_story_signatures: list[tuple[set[str], set[str], set[str], str, str]] = []
     unique_items: List[RssItem] = []
     for item in items:
         link = canonical_link_for_news_item(item)
@@ -310,6 +321,9 @@ def _deduplicate_items(items: List[RssItem], max_items: int) -> List[RssItem]:
             continue
         title_tokens = _tokenize_for_story_dedup(item.title)
         body_tokens = _tokenize_for_story_dedup(item.summary)
+        ai_summary_tokens = _tokenize_for_story_dedup(
+            getattr(item, "ai_summary", None) or ""
+        )
         source_norm = _get_source_name(item.source).strip().lower()
         title_key = _normalized_title_key_for_story_dedup(item.title)
         duplicate_match = None
@@ -317,6 +331,7 @@ def _deduplicate_items(items: List[RssItem], max_items: int) -> List[RssItem]:
             duplicate_match = _find_cross_source_duplicate_story_match(
                 title_tokens=title_tokens,
                 body_tokens=body_tokens,
+                ai_summary_tokens=ai_summary_tokens,
                 source_name=source_norm,
                 title_key=title_key,
                 seen_signatures=seen_story_signatures,
@@ -332,7 +347,9 @@ def _deduplicate_items(items: List[RssItem], max_items: int) -> List[RssItem]:
                 )
             continue
         seen_links.add(dedup_key)
-        seen_story_signatures.append((title_tokens, body_tokens, source_norm, title_key))
+        seen_story_signatures.append(
+            (title_tokens, body_tokens, ai_summary_tokens, source_norm, title_key)
+        )
         unique_items.append(item)
         if CROSS_SOURCE_DEDUP_DEBUG:
             logger.info(

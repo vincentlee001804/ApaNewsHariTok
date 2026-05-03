@@ -31,11 +31,13 @@ from src.core.news_categories import (
     label_from_slug,
     slug_for_callback,
 )
+from src.ai.summarizer import infer_swb_telegram_geo
 from src.core.services import (
     _get_category_with_llm_fallback,
+    _is_swb_telegram_source,
     _is_urgent_utility_alert,
-    build_urgent_preview,
     post_matches_user_locations_filter,
+    summarize_channel_post_for_push,
 )
 from src.core.user_service import (
     digest_greeting_period_name,
@@ -909,8 +911,16 @@ async def ingest_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         link = f"telegram://channel/{chat.id}/{message.message_id}"
 
-    with SessionLocal() as session:
+    if _is_swb_telegram_source(
+        item_source=f"telegram:{username}" if username else "",
+        channel_username=username,
+        source_display=source,
+    ):
+        location, state = await asyncio.to_thread(infer_swb_telegram_geo, title, text)
+    else:
         location, state = extract_location_and_state(title, text)
+
+    with SessionLocal() as session:
         row = NewsArticle(
             title=title,
             link=link,
@@ -931,7 +941,7 @@ async def ingest_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Urgent alerts bypass per-user frequency but share the post-signup grace with scheduled pushes.
     if inserted and _is_urgent_utility_alert(title, text):
         safe_title = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        preview = build_urgent_preview(title, text, max_words=45)
+        preview = await asyncio.to_thread(summarize_channel_post_for_push, title, text, source)
         safe_summary = preview.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         safe_source = source.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -972,7 +982,13 @@ async def ingest_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
                 continue
             if not preference.wants_urgent_alerts:
                 continue
-            if not post_matches_user_locations_filter(title, text, preference.locations or ""):
+            if not post_matches_user_locations_filter(
+                title,
+                text,
+                preference.locations or "",
+                location=location,
+                state=state,
+            ):
                 continue
             sent_links = shared_sent.setdefault(telegram_id, set())
             if link in sent_links:

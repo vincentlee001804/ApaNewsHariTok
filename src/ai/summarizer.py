@@ -14,6 +14,7 @@ from src.core.config import (
     OLLAMA_SUMMARY_NUM_PREDICT,
     iter_ollama_generate_targets,
 )
+from src.core.location_extractor import extract_location_and_state
 from src.core.news_categories import (
     NEWS_ARTICLE_CATEGORY_LABELS as ALLOWED_CATEGORIES,
     category_labels_for_llm_prompt,
@@ -40,6 +41,111 @@ _SARAWAK_LOCATION_ALIASES: dict[str, list[str]] = {
     "marudi": ["marudi"],
     "belaga": ["belaga"],
 }
+
+_CANONICAL_SARAWAK_LOCATION_KEYS: tuple[str, ...] = tuple(sorted(_SARAWAK_LOCATION_ALIASES.keys()))
+
+
+def infer_swb_telegram_geo(title: str, body: str | None) -> tuple[str | None, str]:
+    """
+    Use the local LLM to infer NewsArticle.location / state for Sarawak Water Board-style Telegram posts
+    (often Bahasa Melayu, multi-area or statewide). Falls back to rule-based extract_location_and_state.
+
+    location return value:
+    - comma-separated canonical place keys (e.g. "sibu,sarikei")
+    - "statewide" when the post clearly affects all or most of Sarawak / multiple divisions
+    - None when unknown (caller may keep heuristic column empty)
+    """
+    blob = f"{title or ''}\n{body or ''}".strip()
+    if not blob:
+        return extract_location_and_state(title or "", body)
+
+    allowed = ", ".join(_CANONICAL_SARAWAK_LOCATION_KEYS)
+    prompt = textwrap.dedent(
+        f"""
+        You read an official utility / water / electricity style Telegram announcement for Sarawak, Malaysia.
+        It may be in Malay or English. Infer geography only from the text (do not guess places not implied).
+
+        Return ONLY one JSON object (no markdown fences, no extra text) with exactly these keys:
+        - "state": either "sarawak" or "other"
+        - "coverage": one of "places", "statewide", "unknown"
+        - "locations": an array of zero or more strings; each string MUST be exactly one of:
+          [{allowed}]
+
+        Rules:
+        - Use lowercase for every location string.
+        - If the notice affects all or most of Sarawak, many divisions, or uses phrases like
+          "seluruh Sarawak" / "sebahagian besar negeri" / statewide service recovery, set coverage to "statewide"
+          and locations to [].
+        - If specific towns/divisions are named (e.g. Sibu, Miri, Bahagian Kuching), set coverage to "places"
+          and list every distinct affected canonical location from the allowed list that is clearly implied.
+        - If you cannot tell, set coverage to "unknown" and locations to [].
+
+        Title:
+        \"\"\"{(title or "").strip()}\"\"\"
+
+        Body:
+        \"\"\"{(body or "").strip()[:6000]}\"\"\"
+        """
+    ).strip()
+
+    def _parse_json_obj(raw: str) -> dict[str, Any] | None:
+        s = (raw or "").strip()
+        if not s:
+            return None
+        try:
+            val = json.loads(s)
+            return val if isinstance(val, dict) else None
+        except json.JSONDecodeError:
+            pass
+        start = s.find("{")
+        end = s.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            val = json.loads(s[start : end + 1])
+            return val if isinstance(val, dict) else None
+        except json.JSONDecodeError:
+            return None
+
+    allowed_set = set(_CANONICAL_SARAWAK_LOCATION_KEYS)
+    try:
+        response = _ollama_post(
+            {
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"num_predict": 256},
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = response.json()
+        raw_out = (data.get("response", "") or "").strip()
+        obj = _parse_json_obj(raw_out)
+        if not obj:
+            raise ValueError("no json")
+
+        state_raw = (obj.get("state") or "other").strip().lower()
+        state = "sarawak" if state_raw == "sarawak" else "other"
+        coverage = (obj.get("coverage") or "unknown").strip().lower()
+        locs_raw = obj.get("locations")
+        locs: list[str] = []
+        if isinstance(locs_raw, list):
+            for x in locs_raw:
+                if isinstance(x, str):
+                    k = x.strip().lower()
+                    if k in allowed_set:
+                        locs.append(k)
+
+        if coverage == "statewide" and state == "sarawak":
+            return "statewide", "sarawak"
+        if locs:
+            ordered = sorted(dict.fromkeys(locs))
+            return ",".join(ordered), "sarawak" if state == "sarawak" else state
+    except Exception:
+        logger.debug("infer_swb_telegram_geo failed; using heuristic", exc_info=True)
+
+    return extract_location_and_state(title or "", body)
 
 
 def _detect_sarawak_locations(text: str) -> set[str]:
@@ -261,7 +367,8 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
           Do not replace it with another city.
 
         Provide only the summary text, no instructions, labels, or quotes around the summary.
-        Write in clear, natural language using simple everyday words.
+        Write in clear, natural English using simple everyday words.
+        If the source is in Malay or another language, translate faithfully into English.
         Avoid jargon, legal wording, and technical terms unless necessary.
         End with a complete sentence (do not stop mid-thought).
         Use plain text only: no Markdown, no ** or * for bold/italic, no __underscores__.
@@ -430,7 +537,7 @@ def summarize_digest(items_text: str, max_words: int = 160) -> Optional[str]:
         - Do NOT include headings or numbering.
         - Total output must be within {max_words} words.
         - Use plain text only (no HTML, no Markdown).
-        - Use simple, easy-to-understand words for general readers.
+        - Use simple, easy-to-understand English for general readers (translate if needed).
 
         Items (titles + item summaries):
         \"\"\"{items_text.strip()}\"\"\"
@@ -493,7 +600,7 @@ def summarize_digest_overview(
         - highlights key themes and likely places involved (if clear from input),
         - stays within {max_words} words,
         - uses plain text only (no HTML/Markdown),
-        - uses simple, reader-friendly language.
+        - uses simple, reader-friendly English (translate if needed).
 
         Strict output rules:
         - Output ONLY the paragraph content.
@@ -648,7 +755,7 @@ def answer_news_question(question: str, items_text: str, max_words: int = 90) ->
           "I couldn't find relevant information in the news items I have."
         - Keep the answer short (<= {max_words} words).
         - Use plain text only (no HTML, no Markdown).
-        - Use simple, easy-to-understand words.
+        - Use simple, easy-to-understand English (translate if needed).
         - Use 1 short paragraph. Avoid long lists.
 
         User question:

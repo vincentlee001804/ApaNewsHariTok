@@ -11,6 +11,7 @@ from src.ai.summarizer import (
     classify_category,
     clip_plain_text_to_word_limit,
     generate_display_title,
+    infer_swb_telegram_geo,
     normalize_stored_ai_title,
     normalize_stored_ai_summary,
     strip_markdown_artifacts_for_plain_text,
@@ -291,7 +292,14 @@ def _get_or_create_article_for_rss_item(session, item: RssItem) -> NewsArticle:
     if existing:
         return existing
 
-    loc, st = extract_location_and_state(item.title, item.summary)
+    display_src = _get_source_name(item.source)
+    if (item.source or "").lower().startswith("telegram:") and _is_swb_telegram_source(
+        item_source=item.source,
+        source_display=display_src,
+    ):
+        loc, st = infer_swb_telegram_geo(item.title, item.summary)
+    else:
+        loc, st = extract_location_and_state(item.title, item.summary)
     row = NewsArticle(
         title=item.title,
         link=link,
@@ -513,6 +521,11 @@ def _row_matches_user_locations(
     """
     Hard filter: if the user selected specific location(s), keep only matching articles.
     Uses DB location column when set; otherwise headline/summary heuristics (_matches_location_filter).
+
+    NewsArticle.location may hold:
+    - one canonical key (e.g. "sibu")
+    - comma-separated keys (e.g. "sibu,sarikei")
+    - "statewide" when the item affects all or most of Sarawak (matches any narrowed city filter).
     """
     if _is_locations_filter_all_sarawak(locations_filter):
         return True
@@ -523,14 +536,35 @@ def _row_matches_user_locations(
 
     loc_col = (location or "").strip().lower()
     if loc_col:
-        return loc_col in user_locs
+        tokens = [t.strip() for t in loc_col.split(",") if t.strip()]
+        wide_tokens = {"statewide", "sarawak_wide", "all_sarawak"}
+        if any(t in wide_tokens for t in tokens):
+            return True
+        for t in tokens:
+            if t in user_locs:
+                return True
+        return False
 
     return _matches_location_filter(title, summary or "", locations_filter)
 
 
-def post_matches_user_locations_filter(title: str, body: str | None, locations_filter: str) -> bool:
-    """Channel posts / urgent alerts: same rules as DB rows using extracted location/state."""
-    loc, st = extract_location_and_state(title, body)
+def post_matches_user_locations_filter(
+    title: str,
+    body: str | None,
+    locations_filter: str,
+    *,
+    location: str | None = None,
+    state: str | None = None,
+) -> bool:
+    """
+    Channel posts / urgent alerts: same rules as DB rows.
+    When ``location`` / ``state`` are provided (e.g. LLM inference for SWB Telegram), they override
+    headline heuristics from extract_location_and_state.
+    """
+    if location is None and state is None:
+        loc, st = extract_location_and_state(title, body)
+    else:
+        loc, st = location, state or "other"
     return _row_matches_user_locations(
         title=title,
         summary=body,
@@ -538,6 +572,24 @@ def post_matches_user_locations_filter(title: str, body: str | None, locations_f
         location=loc,
         locations_filter=locations_filter,
     )
+
+
+def _is_swb_telegram_source(
+    *,
+    item_source: str | None = None,
+    channel_username: str | None = None,
+    source_display: str | None = None,
+) -> bool:
+    """
+    True for Sarawak Water Board style Telegram sources (handles @swbnews and similar handles/titles).
+    """
+    parts = [
+        (item_source or "").lower(),
+        (channel_username or "").lower(),
+        (source_display or "").lower(),
+    ]
+    blob = " ".join(p for p in parts if p)
+    return "swb" in blob or "sarawak water" in blob
 
 
 def _article_source_is_telegram(source: str | None) -> bool:
@@ -727,6 +779,50 @@ def _display_title_text(raw_title: str | None, ai_title: str | None) -> str:
     return _fallback_display_title_from_text(raw_title or "")
 
 
+def _generate_ai_summary_text(
+    *,
+    title: str,
+    raw: str | None,
+    source_text: str,
+    item_source: str,
+) -> str | None:
+    """
+    Ollama summary in English (see summarizer prompt). Telegram posts always get a pass; RSS items
+    still respect matches_local_interest. Urgent utility Telegram alerts use a slightly higher word cap.
+    """
+    src_low = (item_source or "").strip().lower()
+    is_tg = src_low.startswith("telegram")
+    urgent = is_tg and _is_urgent_utility_alert(title or "", raw)
+    if not is_tg and not matches_local_interest(title, raw):
+        return None
+    mw = 52 if urgent else 30
+    blob = (source_text or "").strip() or (raw or "").strip() or (title or "").strip()
+    if not blob:
+        return None
+    s = summarize(blob[:8000], max_words=mw, title=title or "")
+    if s:
+        return s
+    if urgent:
+        prev = build_urgent_preview(title, raw, max_words=48)
+        return prev or None
+    return None
+
+
+def summarize_channel_post_for_push(title: str, body: str, source_display: str) -> str:
+    """
+    English summary line for urgent Telegram channel pushes (Ollama + deterministic fallback).
+    """
+    s = _generate_ai_summary_text(
+        title=title or "",
+        raw=body,
+        source_text=body or "",
+        item_source=source_display or "",
+    )
+    if s:
+        return normalize_stored_ai_summary(s)
+    return normalize_stored_ai_summary(build_urgent_preview(title, body, max_words=48))
+
+
 def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
     """
     Fill missing ai_summary and/or ai_title for the given news_articles rows (same logic as
@@ -735,7 +831,6 @@ def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
     """
     if not article_ids:
         return 0
-    from src.ai.summarizer import summarize
     from src.scrapers.article_scraper import extract_article_content
 
     updated = 0
@@ -752,17 +847,12 @@ def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
                 article_text = extract_article_content(art.link)
                 source_text = article_text or art.raw_summary or art.title or ""
                 if not has_summary:
-                    if _article_source_is_telegram(art.source) and _is_urgent_utility_alert(
-                        art.title or "",
-                        art.raw_summary,
-                    ):
-                        ai = build_urgent_preview(
-                            art.title or "",
-                            art.raw_summary,
-                            max_words=42,
-                        )
-                    else:
-                        ai = summarize(source_text, title=art.title or "")
+                    ai = _generate_ai_summary_text(
+                        title=art.title or "",
+                        raw=art.raw_summary,
+                        source_text=source_text,
+                        item_source=art.source or "",
+                    )
                     if not ai:
                         ai = _fallback_summary_from_text(art.raw_summary or art.title or "", max_words=80)
                     art.ai_summary = normalize_stored_ai_summary(ai)
@@ -884,8 +974,14 @@ def _geo_priority_rank(
         }
 
         if (state or "").lower() == "sarawak":
-            if location and location.strip().lower() in user_locations:
-                return 1
+            loc_raw = (location or "").strip().lower()
+            if loc_raw:
+                tokens = [t.strip() for t in loc_raw.split(",") if t.strip()]
+                wide_tokens = {"statewide", "sarawak_wide", "all_sarawak"}
+                if any(t in wide_tokens for t in tokens):
+                    return 1
+                if any(t in user_locations for t in tokens):
+                    return 1
             # Sarawak article, but not in the exact user-selected location.
             return 2
 
@@ -1264,6 +1360,13 @@ def _is_urgent_utility_alert(title: str, summary: str | None) -> bool:
         "power outage",
         "seb",
         "sarawak energy",
+        "bekalan air",
+        "loji rawatan air",
+        "rawatan air",
+        "sarawak water",
+        "swb",
+        "sesco",
+        "sesb",
     ]
     disruption_terms = [
         "disruption",
@@ -1280,6 +1383,11 @@ def _is_urgent_utility_alert(title: str, summary: str | None) -> bool:
         "alert",
         "notice",
         "advisory",
+        "gangguan",
+        "terputus",
+        "penutupan",
+        "pemulihan",
+        "notis",
     ]
 
     has_utility = any(term in text for term in utility_terms)
@@ -1316,11 +1424,22 @@ def get_recent_urgent_alert_items(
         if source_name.lower().startswith("http"):
             source_name = _get_source_name(source_name)
 
+        sum_text = (art.ai_summary or "").strip()
+        if not sum_text:
+            sum_text = (
+                _generate_ai_summary_text(
+                    title=art.title or "",
+                    raw=art.raw_summary,
+                    source_text=art.raw_summary or art.title or "",
+                    item_source=art.source or "",
+                )
+                or build_urgent_preview(art.title, art.raw_summary, max_words=45)
+            )
         results.append(
             {
                 "title": _display_title_text(art.title, art.ai_title),
                 "link": art.link,
-                "summary": build_urgent_preview(art.title, art.raw_summary, max_words=45),
+                "summary": sum_text,
                 "source": source_name,
             }
         )
@@ -1400,21 +1519,12 @@ def get_latest_news_text(max_items: int = 3) -> str:
             # Fallback to RSS summary or title if article scraping fails
             source_text = item.summary or item.title
 
-        if (item.source or "").lower().startswith("telegram") and _is_urgent_utility_alert(
-            item.title or "",
-            item.summary,
-        ):
-            ai_summary = build_urgent_preview(
-                item.title or "",
-                item.summary,
-                max_words=42,
-            )
-        else:
-            ai_summary = (
-                summarize(source_text, title=item.title)
-                if matches_local_interest(item.title, item.summary)
-                else None
-            )
+        ai_summary = _generate_ai_summary_text(
+            title=item.title or "",
+            raw=item.summary,
+            source_text=source_text,
+            item_source=item.source or "",
+        )
         if not ai_summary:
             ai_summary = _fallback_summary_from_text(item.summary or item.title, max_words=80)
 
@@ -1697,21 +1807,12 @@ def get_latest_news_text_for_user(
                 category = _get_category_with_llm_fallback(item.title, item.summary)
                 article_text = extract_article_content(item.link)
                 source_text = article_text or item.summary or item.title
-                if (item.source or "").lower().startswith("telegram") and _is_urgent_utility_alert(
-                    item.title or "",
-                    item.summary,
-                ):
-                    ai_summary = build_urgent_preview(
-                        item.title or "",
-                        item.summary,
-                        max_words=42,
-                    )
-                else:
-                    ai_summary = (
-                        summarize(source_text, title=item.title)
-                        if matches_local_interest(item.title, item.summary)
-                        else None
-                    )
+                ai_summary = _generate_ai_summary_text(
+                    title=item.title or "",
+                    raw=item.summary,
+                    source_text=source_text,
+                    item_source=item.source or "",
+                )
                 if not ai_summary:
                     ai_summary = _fallback_summary_from_text(
                         item.summary or item.title, max_words=80
@@ -1753,17 +1854,12 @@ def get_latest_news_text_for_user(
                 article_text = extract_article_content(art.link)
                 source_text = article_text or art.raw_summary or art.title
                 if not art.ai_summary:
-                    if _article_source_is_telegram(art.source) and _is_urgent_utility_alert(
-                        art.title or "",
-                        art.raw_summary,
-                    ):
-                        art.ai_summary = build_urgent_preview(
-                            art.title or "",
-                            art.raw_summary,
-                            max_words=42,
-                        )
-                    else:
-                        art.ai_summary = summarize(source_text, title=art.title)
+                    art.ai_summary = _generate_ai_summary_text(
+                        title=art.title or "",
+                        raw=art.raw_summary,
+                        source_text=source_text,
+                        item_source=art.source or "",
+                    )
                     if not art.ai_summary:
                         art.ai_summary = _fallback_summary_from_text(
                             art.raw_summary or art.title, max_words=80

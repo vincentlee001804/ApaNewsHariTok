@@ -5,9 +5,11 @@ from typing import List
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
+from src.ai.summarizer import infer_swb_telegram_geo
 from src.core.services import (
     _get_category_with_llm_fallback,
     _get_source_name,
+    _is_swb_telegram_source,
     backfill_ai_summaries_for_article_ids,
 )
 from src.core.config import PREFETCH_AI_SUMMARY, RSS_FEEDS, TELEGRAM_SOURCE_CONFIGS
@@ -96,11 +98,18 @@ def prefetch_latest_articles_to_db(
                 if already is not None:
                     continue
 
-            location, state = extract_location_and_state(item.title, item.summary)
+            display_src = _get_source_name(item.source)
+            if is_telegram and _is_swb_telegram_source(
+                item_source=item.source,
+                source_display=display_src,
+            ):
+                location, state = infer_swb_telegram_geo(item.title, item.summary)
+            else:
+                location, state = extract_location_and_state(item.title, item.summary)
             article = NewsArticle(
                 title=item.title,
                 link=link,
-                source=_get_source_name(item.source),
+                source=display_src,
                 raw_summary=item.summary,
                 location=location,
                 state=state,

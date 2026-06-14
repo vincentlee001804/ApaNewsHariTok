@@ -17,7 +17,14 @@ TELEGRAM_BOT_TOKEN: str | None = os.getenv("TELEGRAM_BOT_TOKEN")
 _OLLAMA_API_BASE: Final[str] = (
     (os.getenv("OLLAMA_API_BASE", "http://localhost:11434").strip() or "http://localhost:11434").rstrip("/")
 )
-OLLAMA_GENERATE_URL: Final[str] = f"{_OLLAMA_API_BASE}/api/generate"
+
+def _build_ollama_url(base_url: str) -> str:
+    cleaned = base_url.strip().rstrip("/")
+    if "/v1" in cleaned.lower() or "openai" in cleaned.lower():
+        return f"{cleaned}/chat/completions"
+    return f"{cleaned}/api/generate"
+
+OLLAMA_GENERATE_URL: Final[str] = _build_ollama_url(_OLLAMA_API_BASE)
 OLLAMA_API_KEY: Final[str | None] = (os.getenv("OLLAMA_API_KEY") or "").strip() or None
 OLLAMA_MODEL: Final[str] = (os.getenv("OLLAMA_MODEL", "llama3.1").strip() or "llama3.1")
 OLLAMA_EMBED_MODEL: Final[str] = (
@@ -102,7 +109,7 @@ def iter_ollama_generate_targets() -> tuple[tuple[str, dict[str, str], str, bool
     targets = [primary]
     
     if OLLAMA_API_BASE_FALLBACK:
-        fb_url = f"{OLLAMA_API_BASE_FALLBACK}/api/generate"
+        fb_url = _build_ollama_url(OLLAMA_API_BASE_FALLBACK)
         secondary = (
             fb_url,
             ollama_headers_for_endpoint(fb_url, is_fallback=True),
@@ -112,7 +119,7 @@ def iter_ollama_generate_targets() -> tuple[tuple[str, dict[str, str], str, bool
         targets.append(secondary)
         
     if OLLAMA_MODEL_FALLBACK_2 and OLLAMA_API_BASE_FALLBACK_2:
-        fb_2_url = f"{OLLAMA_API_BASE_FALLBACK_2}/api/generate"
+        fb_2_url = _build_ollama_url(OLLAMA_API_BASE_FALLBACK_2)
         headers_2 = {}
         if OLLAMA_FALLBACK_2_API_KEY:
             headers_2 = {"Authorization": f"Bearer {OLLAMA_FALLBACK_2_API_KEY}"}

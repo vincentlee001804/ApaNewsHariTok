@@ -178,20 +178,45 @@ def _has_conflicting_sarawak_location(*, source_text: str, generated_text: str) 
 
 def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
     """
-    Try primary Ollama (usually local), then OLLAMA_API_BASE_FALLBACK if configured.
-    When two targets exist, the first uses a shorter timeout so a sleeping host fails fast.
+    Try primary Ollama (usually local), then fallbacks if configured.
+    When multiple targets exist, the first uses a shorter timeout so a sleeping host fails fast.
     """
     targets = iter_ollama_generate_targets()
     last_exc: Exception | None = None
     multi = len(targets) > 1
     for i, (url, headers, model, use_short_timeout) in enumerate(targets):
-        payload = {**json_body, "model": model}
+        is_openai = "/chat/completions" in url.lower()
+        if is_openai:
+            openai_payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": json_body.get("prompt")}],
+                "stream": json_body.get("stream", False),
+            }
+            num_predict = json_body.get("options", {}).get("num_predict")
+            if num_predict:
+                openai_payload["max_tokens"] = num_predict
+            payload = openai_payload
+        else:
+            payload = {**json_body, "model": model}
+
         t = timeout
         if multi and use_short_timeout:
             t = min(timeout, OLLAMA_PRIMARY_TIMEOUT_SEC)
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=t)
             response.raise_for_status()
+            if is_openai:
+                # Intercept the response JSON to make it look like an Ollama response
+                orig_json = response.json
+                def mock_json(*args, **kwargs):
+                    data = orig_json(*args, **kwargs)
+                    choices = data.get("choices", [])
+                    content = ""
+                    if choices and isinstance(choices, list):
+                        msg = choices[0].get("message", {})
+                        content = msg.get("content", "")
+                    return {"response": content}
+                response.json = mock_json
             return response
         except Exception as exc:
             last_exc = exc

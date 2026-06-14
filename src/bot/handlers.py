@@ -2139,3 +2139,134 @@ async def cancel_awaiting_area_keywords(update: Update, context: ContextTypes.DE
             "Cancelled area keywords. Open /settings when you want to try again.",
             parse_mode=ParseMode.MARKDOWN,
         )
+
+
+async def force_fetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Developer-only: Trigger RSS prefetch and AI generation instantly, and report results.
+    Usage: /fetch
+    """
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await update.message.reply_text("Use /fetch in a private chat with the bot.")
+        return
+
+    telegram_id = update.effective_user.id
+    if not is_test_push_allowed(telegram_id):
+        await update.message.reply_text(
+            "Developer commands are disabled or your Telegram user ID is not on the allow list."
+        )
+        return
+
+    await update.message.reply_text("Fetching latest news and generating AI summaries... Please wait ⏳")
+
+    from src.core.prefetch_service import prefetch_latest_articles_to_db
+    from src.storage.database import SessionLocal
+    from sqlalchemy import select
+    from datetime import datetime, timedelta
+
+    cutoff = datetime.utcnow() - timedelta(minutes=2)
+
+    try:
+        # Run prefetch_latest_articles_to_db with a smaller limit per feed (e.g. 5) to keep it fast
+        inserted = await asyncio.to_thread(
+            lambda: prefetch_latest_articles_to_db(limit_per_feed=5, max_age_hours=24)
+        )
+        
+        # Get the new articles created after cutoff
+        with SessionLocal() as session:
+            new_articles = list(
+                session.execute(
+                    select(NewsArticle)
+                    .where(NewsArticle.created_at >= cutoff)
+                    .order_by(NewsArticle.created_at.desc())
+                )
+                .scalars()
+                .all()
+            )
+            
+        if inserted > 0 or new_articles:
+            msg = f"<b>Fetch complete!</b>\n- New articles stored in DB: {inserted}\n\n"
+            await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+            
+            # Escape helper
+            def escape_html(text: str) -> str:
+                return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") if text else ""
+
+            # Show details of each new article to demo AI title and summary
+            for art in new_articles[:5]:
+                art_msg = (
+                    f"📰 <b>Article Details:</b>\n"
+                    f"• <b>Original Title:</b> {escape_html(art.title)}\n"
+                    f"• <b>Source:</b> {escape_html(art.source)}\n"
+                    f"• <b>Link:</b> <a href=\"{art.link}\">Source Link</a>\n"
+                    f"• <b>Category:</b> <code>{escape_html(art.category)}</code>\n"
+                    f"• <b>AI-generated Title:</b> <i>{escape_html(art.ai_title or 'NULL')}</i>\n"
+                    f"• <b>AI-generated Summary:</b> {escape_html(art.ai_summary or 'NULL')}\n"
+                )
+                await update.message.reply_text(art_msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+        else:
+            await update.message.reply_text(
+                "Fetch complete. No new articles found (everything is already up to date).\n\n"
+                "💡 <i>Tip: Run <code>/deletedemo</code> to remove the latest 3 articles from the database so you can demo the ingestion live!</i>",
+                parse_mode=ParseMode.HTML
+            )
+    except Exception as e:
+        logger.exception("Force fetch failed")
+        await update.message.reply_text(f"Fetch failed: {e}")
+
+
+async def delete_demo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Developer-only: Delete the latest 3 articles from database to make them fetchable again for demo.
+    Usage: /deletedemo
+    """
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await update.message.reply_text("Use /deletedemo in a private chat with the bot.")
+        return
+
+    telegram_id = update.effective_user.id
+    if not is_test_push_allowed(telegram_id):
+        await update.message.reply_text(
+            "Developer commands are disabled or your Telegram user ID is not on the allow list."
+        )
+        return
+
+    from src.storage.database import SessionLocal
+    from sqlalchemy import select, text
+
+    try:
+        with SessionLocal() as session:
+            # Find the latest 3 articles
+            stmt = select(NewsArticle).order_by(NewsArticle.created_at.desc()).limit(3)
+            articles = list(session.execute(stmt).scalars().all())
+            if not articles:
+                await update.message.reply_text("No articles found in the database to delete.")
+                return
+            
+            titles_to_del = []
+            for art in articles:
+                titles_to_del.append(art.title)
+                # Delete foreign key deliveries first
+                session.execute(
+                    text("DELETE FROM user_article_delivery WHERE article_id = :aid"),
+                    {"aid": art.id}
+                )
+                # Delete the article
+                session.delete(art)
+                
+            session.commit()
+            
+        del_list = "\n".join([f"- {t}" for t in titles_to_del])
+        msg = (
+            f"🗑️ <b>Demo Cleanup Complete!</b>\n"
+            f"Deleted the following 3 latest articles from the database:\n\n{del_list}\n\n"
+            f"You can now run <code>/fetch</code> to trigger the RSS fetch and AI generation process live!"
+        )
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        logger.exception("Delete demo failed")
+        await update.message.reply_text(f"Cleanup failed: {e}")

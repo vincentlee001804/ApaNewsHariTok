@@ -853,18 +853,17 @@ def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
                         source_text=source_text,
                         item_source=art.source or "",
                     )
-                    if not ai:
-                        ai = _fallback_summary_from_text(art.raw_summary or art.title or "", max_words=80)
-                    art.ai_summary = normalize_stored_ai_summary(ai)
+                    if ai:
+                        art.ai_summary = normalize_stored_ai_summary(ai)
+                    else:
+                        art.ai_summary = None
                 if not has_title:
-                    art.ai_title = (
-                        generate_display_title(
-                            text=art.ai_summary or art.raw_summary or source_text,
-                            title_hint=art.title or "",
-                            max_words=14,
-                        )
-                        or _fallback_display_title_from_text(art.title or "")
+                    ai_title = generate_display_title(
+                        text=art.ai_summary or art.raw_summary or source_text,
+                        title_hint=art.title or "",
+                        max_words=14,
                     )
+                    art.ai_title = ai_title if ai_title else None
                 session.commit()
                 updated += 1
             except Exception:
@@ -873,11 +872,9 @@ def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
                     art2 = session.get(NewsArticle, aid)
                     if art2 is not None:
                         if not (art2.ai_summary or "").strip():
-                            art2.ai_summary = _fallback_summary_from_text(
-                                art2.raw_summary or art2.title or "", max_words=80
-                            )
+                            art2.ai_summary = None
                         if not (art2.ai_title or "").strip():
-                            art2.ai_title = _fallback_display_title_from_text(art2.title or "")
+                            art2.ai_title = None
                         session.commit()
                         updated += 1
                 except Exception:
@@ -1854,26 +1851,23 @@ def get_latest_news_text_for_user(
                 article_text = extract_article_content(art.link)
                 source_text = article_text or art.raw_summary or art.title
                 if not art.ai_summary:
-                    art.ai_summary = _generate_ai_summary_text(
+                    ai = _generate_ai_summary_text(
                         title=art.title or "",
                         raw=art.raw_summary,
                         source_text=source_text,
                         item_source=art.source or "",
                     )
-                    if not art.ai_summary:
-                        art.ai_summary = _fallback_summary_from_text(
-                            art.raw_summary or art.title, max_words=80
-                        )
-                    art.ai_summary = normalize_stored_ai_summary(art.ai_summary)
+                    if ai:
+                        art.ai_summary = normalize_stored_ai_summary(ai)
+                    else:
+                        art.ai_summary = None
                 if not (art.ai_title or "").strip():
-                    art.ai_title = (
-                        generate_display_title(
-                            text=art.ai_summary or art.raw_summary or source_text or art.title or "",
-                            title_hint=art.title or "",
-                            max_words=14,
-                        )
-                        or _fallback_display_title_from_text(art.title or "")
+                    ai_title = generate_display_title(
+                        text=art.ai_summary or art.raw_summary or source_text or art.title or "",
+                        title_hint=art.title or "",
+                        max_words=14,
                     )
+                    art.ai_title = ai_title if ai_title else None
 
         if DEDUPLICATION_ENABLED and user_id is not None:
             delivered_all_members = [

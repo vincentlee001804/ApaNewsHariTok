@@ -2247,21 +2247,7 @@ async def force_fetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
                 await update.message.reply_text(art_msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
-            # Auto-trigger a test push so the developer gets the push message instantly in the chat!
-            from src.core.services import get_latest_news_text_for_user
-            try:
-                push_text = await asyncio.to_thread(
-                    lambda tid=telegram_id: get_latest_news_text_for_user(
-                        tid, 1, scheduled_push=True
-                    )
-                )
-                if push_text:
-                    await update.message.reply_text(
-                        "🔔 <b>Instant Push Demo:</b>\n\n" + push_text,
-                        parse_mode=ParseMode.HTML
-                    )
-            except Exception as push_err:
-                logger.warning(f"Auto-push failed: {push_err}")
+            # Auto-push removed as requested
         else:
             await update.message.reply_text(
                 "Fetch complete. No new articles found (everything is already up to date).\n\n"

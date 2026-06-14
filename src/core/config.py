@@ -46,6 +46,11 @@ OLLAMA_MODEL_FALLBACK: Final[str] = (
     (os.getenv("OLLAMA_MODEL_FALLBACK") or "").strip() or OLLAMA_MODEL
 )
 
+_fb_base_2_raw = (os.getenv("OLLAMA_API_BASE_FALLBACK_2") or "").strip().rstrip("/")
+OLLAMA_API_BASE_FALLBACK_2: Final[str | None] = _fb_base_2_raw or OLLAMA_API_BASE_FALLBACK
+OLLAMA_FALLBACK_2_API_KEY: Final[str | None] = (os.getenv("OLLAMA_FALLBACK_2_API_KEY") or "").strip() or OLLAMA_FALLBACK_API_KEY or OLLAMA_API_KEY or None
+OLLAMA_MODEL_FALLBACK_2: Final[str | None] = (os.getenv("OLLAMA_MODEL_FALLBACK_2") or "").strip() or None
+
 # When a fallback URL is set, the first (primary) request uses this cap so a sleeping PC fails fast (seconds not minutes).
 OLLAMA_PRIMARY_TIMEOUT_SEC: Final[int] = max(
     1,
@@ -94,16 +99,37 @@ def iter_ollama_generate_targets() -> tuple[tuple[str, dict[str, str], str, bool
         OLLAMA_MODEL,
         True,
     )
-    if not OLLAMA_API_BASE_FALLBACK:
-        return (primary,)
-    fb_url = f"{OLLAMA_API_BASE_FALLBACK}/api/generate"
-    secondary = (
-        fb_url,
-        ollama_headers_for_endpoint(fb_url, is_fallback=True),
-        OLLAMA_MODEL_FALLBACK,
-        False,
-    )
-    return (primary, secondary)
+    targets = [primary]
+    
+    if OLLAMA_API_BASE_FALLBACK:
+        fb_url = f"{OLLAMA_API_BASE_FALLBACK}/api/generate"
+        secondary = (
+            fb_url,
+            ollama_headers_for_endpoint(fb_url, is_fallback=True),
+            OLLAMA_MODEL_FALLBACK,
+            False,
+        )
+        targets.append(secondary)
+        
+    if OLLAMA_MODEL_FALLBACK_2 and OLLAMA_API_BASE_FALLBACK_2:
+        fb_2_url = f"{OLLAMA_API_BASE_FALLBACK_2}/api/generate"
+        headers_2 = {}
+        if OLLAMA_FALLBACK_2_API_KEY:
+            headers_2 = {"Authorization": f"Bearer {OLLAMA_FALLBACK_2_API_KEY}"}
+        elif _ollama_host_is_loopback(fb_2_url):
+            headers_2 = {}
+        elif OLLAMA_API_KEY:
+            headers_2 = {"Authorization": f"Bearer {OLLAMA_API_KEY}"}
+            
+        tertiary = (
+            fb_2_url,
+            headers_2,
+            OLLAMA_MODEL_FALLBACK_2,
+            False,
+        )
+        targets.append(tertiary)
+        
+    return tuple(targets)
 
 
 def ollama_request_headers() -> dict[str, str]:
@@ -125,6 +151,8 @@ def print_ollama_config_banner() -> None:
     parts = [f"primary={_OLLAMA_API_BASE} model={OLLAMA_MODEL} ({primary_kind})"]
     if OLLAMA_API_BASE_FALLBACK:
         parts.append(f"fallback={OLLAMA_API_BASE_FALLBACK} model={OLLAMA_MODEL_FALLBACK}")
+    if OLLAMA_MODEL_FALLBACK_2 and OLLAMA_API_BASE_FALLBACK_2:
+        parts.append(f"fallback_2={OLLAMA_API_BASE_FALLBACK_2} model={OLLAMA_MODEL_FALLBACK_2}")
     print(f"[ollama] configured: {'; '.join(parts)}", flush=True)
 
     if (

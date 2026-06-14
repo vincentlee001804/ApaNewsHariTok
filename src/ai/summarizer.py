@@ -186,18 +186,35 @@ def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
     multi = len(targets) > 1
     for i, (url, headers, model, use_short_timeout) in enumerate(targets):
         is_openai = "/chat/completions" in url.lower()
+        
+        # Copy the body so we don't pollute arguments for subsequent targets in the loop
+        body = {**json_body}
+        
+        # Boost num_predict/max_tokens limits for reasoning models (e.g. mimo, deepseek) and OpenAI endpoints
+        model_lower = model.lower()
+        is_reasoning = "mimo" in model_lower or "r1" in model_lower or "reason" in model_lower or is_openai
+        
+        if is_reasoning:
+            options = {**body.get("options", {})}
+            curr_limit = options.get("num_predict", 96)
+            if curr_limit < 512:
+                options["num_predict"] = 512
+            else:
+                options["num_predict"] = max(curr_limit, 1024)
+            body["options"] = options
+
         if is_openai:
             openai_payload = {
                 "model": model,
-                "messages": [{"role": "user", "content": json_body.get("prompt")}],
-                "stream": json_body.get("stream", False),
+                "messages": [{"role": "user", "content": body.get("prompt")}],
+                "stream": body.get("stream", False),
             }
-            num_predict = json_body.get("options", {}).get("num_predict")
+            num_predict = body.get("options", {}).get("num_predict")
             if num_predict:
                 openai_payload["max_tokens"] = num_predict
             payload = openai_payload
         else:
-            payload = {**json_body, "model": model}
+            payload = {**body, "model": model}
 
         t = timeout
         if multi and use_short_timeout:

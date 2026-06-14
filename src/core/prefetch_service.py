@@ -35,6 +35,7 @@ def prefetch_latest_articles_to_db(
     *,
     limit_per_feed: int = 15,
     max_age_hours: int = 24,
+    single_feed_url: str | None = None,
 ) -> int:
     """
     Fetch recent RSS items plus optional Telegram channels (see TELEGRAM_SOURCE_CONFIGS)
@@ -46,29 +47,37 @@ def prefetch_latest_articles_to_db(
     Returns the number of newly inserted rows.
     """
     eff_limit = effective_rss_limit_per_feed(limit_per_feed)
-    items: List[RssItem] = fetch_latest_items(
-        RSS_FEEDS,
-        limit_per_feed=eff_limit,
-        max_age_hours=max_age_hours,
-    )
-    telegram_items: List[RssItem] = []
-    if TELEGRAM_SOURCE_CONFIGS:
-        grouped_by_session: dict[str, list[str]] = {}
-        for source, session_name in TELEGRAM_SOURCE_CONFIGS:
-            session_key = (session_name or "sibuwb_session").strip() or "sibuwb_session"
-            grouped_by_session.setdefault(session_key, [])
-            grouped_by_session[session_key].append(source)
-        for session_name, sources in grouped_by_session.items():
-            batch = fetch_latest_telegram_items(
-                sources,
-                limit_per_source=eff_limit,
-                max_age_hours=max_age_hours,
-                session_name_override=session_name,
-            )
-            if batch:
-                telegram_items.extend(batch)
-    if telegram_items:
-        items.extend(telegram_items)
+    if single_feed_url:
+        items: List[RssItem] = fetch_latest_items(
+            [single_feed_url],
+            limit_per_feed=eff_limit,
+            max_age_hours=max_age_hours,
+        )
+        telegram_items: List[RssItem] = []
+    else:
+        items: List[RssItem] = fetch_latest_items(
+            RSS_FEEDS,
+            limit_per_feed=eff_limit,
+            max_age_hours=max_age_hours,
+        )
+        telegram_items: List[RssItem] = []
+        if TELEGRAM_SOURCE_CONFIGS:
+            grouped_by_session: dict[str, list[str]] = {}
+            for source, session_name in TELEGRAM_SOURCE_CONFIGS:
+                session_key = (session_name or "sibuwb_session").strip() or "sibuwb_session"
+                grouped_by_session.setdefault(session_key, [])
+                grouped_by_session[session_key].append(source)
+            for session_name, sources in grouped_by_session.items():
+                batch = fetch_latest_telegram_items(
+                    sources,
+                    limit_per_source=eff_limit,
+                    max_age_hours=max_age_hours,
+                    session_name_override=session_name,
+                )
+                if batch:
+                    telegram_items.extend(batch)
+        if telegram_items:
+            items.extend(telegram_items)
 
     if not items:
         return 0
@@ -81,7 +90,8 @@ def prefetch_latest_articles_to_db(
             is_telegram = (item.source or "").lower().startswith("telegram:")
             # RSS: keep global Sarawak_Local_Keywords gate. Telegram: store all channel posts to DB;
             # per-user delivery uses /settings Area Keywords (see services.get_latest_news_text_for_user).
-            if not is_telegram and not matches_local_interest(item.title, item.summary):
+            # Bypass local keyword gate if single_feed_url is specified (developer/demo mode)
+            if not single_feed_url and not is_telegram and not matches_local_interest(item.title, item.summary):
                 continue
             link = canonical_link_for_news_item(item)
             bkey = _batch_dedup_key(link)

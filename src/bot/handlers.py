@@ -2144,7 +2144,10 @@ async def cancel_awaiting_area_keywords(update: Update, context: ContextTypes.DE
 async def force_fetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Developer-only: Trigger RSS prefetch and AI generation instantly, and report results.
-    Usage: /fetch
+    Usage:
+      - /fetch                  -> Quick demo (Sarawak Tribune, limit 1, fast ⚡)
+      - /fetch all              -> Fetch all 19 feeds + Telegram (slow ⏳)
+      - /fetch <url> [limit]    -> Fetch specific feed with limit (very fast ⚡)
     """
     if not update.message or not update.effective_user:
         return
@@ -2159,7 +2162,41 @@ async def force_fetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
 
-    await update.message.reply_text("Fetching latest news and generating AI summaries... Please wait ⏳")
+    feed_url = None
+    limit = 1
+    fetch_all = False
+
+    if context.args:
+        first_arg = context.args[0].lower()
+        if first_arg == "all":
+            fetch_all = True
+            limit = 5
+        elif first_arg.startswith("http://") or first_arg.startswith("https://"):
+            feed_url = context.args[0]
+            if len(context.args) > 1:
+                try:
+                    limit = int(context.args[1])
+                except ValueError:
+                    pass
+        else:
+            await update.message.reply_text(
+                "💡 <b>Usage for /fetch:</b>\n"
+                "• <code>/fetch</code> - Quick demo fetch (fetches 1 item from Sarawak Tribune, fast ⚡)\n"
+                "• <code>/fetch all</code> - Fetch all 19 RSS feeds + Telegram channels (slow ⏳)\n"
+                "• <code>/fetch &lt;url&gt; [limit]</code> - Fetch only a specific RSS feed URL (very fast ⚡)\n\n"
+                "Example: <code>/fetch https://www.sarawaktribune.com/feed/ 1</code>",
+                parse_mode=ParseMode.HTML
+            )
+            return
+    else:
+        # Default to a single feed with a limit of 1 for quick demo
+        feed_url = "https://www.sarawaktribune.com/feed/"
+        limit = 1
+
+    if fetch_all:
+        await update.message.reply_text("Fetching all 19 RSS feeds + Telegram channels... Please wait ⏳ (can take a few minutes)")
+    else:
+        await update.message.reply_text(f"Fetching from <code>{feed_url}</code> (limit {limit})... Please wait ⚡", parse_mode=ParseMode.HTML)
 
     from src.core.prefetch_service import prefetch_latest_articles_to_db
     from src.storage.database import SessionLocal
@@ -2169,9 +2206,12 @@ async def force_fetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     cutoff = datetime.utcnow() - timedelta(minutes=2)
 
     try:
-        # Run prefetch_latest_articles_to_db with a smaller limit per feed (e.g. 5) to keep it fast
         inserted = await asyncio.to_thread(
-            lambda: prefetch_latest_articles_to_db(limit_per_feed=5, max_age_hours=24)
+            lambda: prefetch_latest_articles_to_db(
+                limit_per_feed=limit,
+                max_age_hours=24,
+                single_feed_url=feed_url
+            )
         )
         
         # Get the new articles created after cutoff
@@ -2206,6 +2246,22 @@ async def force_fetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                     f"• <b>AI-generated Summary:</b> {escape_html(art.ai_summary or 'NULL')}\n"
                 )
                 await update.message.reply_text(art_msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+
+            # Auto-trigger a test push so the developer gets the push message instantly in the chat!
+            from src.core.services import get_latest_news_text_for_user
+            try:
+                push_text = await asyncio.to_thread(
+                    lambda tid=telegram_id: get_latest_news_text_for_user(
+                        tid, 1, scheduled_push=True
+                    )
+                )
+                if push_text:
+                    await update.message.reply_text(
+                        "🔔 <b>Instant Push Demo:</b>\n\n" + push_text,
+                        parse_mode=ParseMode.HTML
+                    )
+            except Exception as push_err:
+                logger.warning(f"Auto-push failed: {push_err}")
         else:
             await update.message.reply_text(
                 "Fetch complete. No new articles found (everything is already up to date).\n\n"

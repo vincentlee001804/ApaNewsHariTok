@@ -793,8 +793,6 @@ def _generate_ai_summary_text(
     src_low = (item_source or "").strip().lower()
     is_tg = src_low.startswith("telegram")
     urgent = is_tg and _is_urgent_utility_alert(title or "", raw)
-    if not is_tg and not matches_local_interest(title, raw):
-        return None
     mw = 52 if urgent else 30
     blob = (source_text or "").strip() or (raw or "").strip() or (title or "").strip()
     if not blob:

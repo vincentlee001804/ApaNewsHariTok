@@ -2095,10 +2095,20 @@ def get_todays_news_digest_for_user(
             max_words=60,
         )
         if not overview:
-            overview = (
-                f"I found {len(display_items)} relevant stories in this digest window, "
-                "covering infrastructure, community events, and local updates."
-            )
+            db_summaries = [
+                (getattr(it, "summary", None) or getattr(it, "title", None) or "").strip()
+                for it in display_items
+                if (getattr(it, "summary", None) or getattr(it, "title", None) or "").strip()
+            ]
+            if db_summaries:
+                overview = clip_plain_text_to_word_limit(
+                    strip_markdown_artifacts_for_plain_text(" ".join(db_summaries[:2])),
+                    55,
+                )
+            else:
+                overview = (
+                    f"I found {len(display_items)} relevant stories in this digest window."
+                )
         lines: list[str] = [
             "<b>🗞️ Today's digest</b>",
             "",
@@ -2194,10 +2204,7 @@ def get_todays_news_digest_for_user(
     items_text_lines: List[str] = []
     for art in chosen:
         title = _display_title_text(art.title, art.ai_title).replace("\n", " ").strip()[:220]
-        if scheduled_push:
-            snippet = (art.ai_summary or "")
-        else:
-            snippet = (art.ai_summary or art.raw_summary or art.title or "")
+        snippet = (art.ai_summary or art.raw_summary or art.title or "")
         snippet = _truncate_text(snippet, max_chars=550)
         if not title:
             continue
@@ -2214,10 +2221,7 @@ def get_todays_news_digest_for_user(
     overview_lines: list[str] = []
     for art, _members in display_clusters:
         title = _display_title_text(art.title, art.ai_title).replace("\n", " ").strip()[:220]
-        if scheduled_push:
-            summary_blob = art.ai_summary or ""
-        else:
-            summary_blob = art.ai_summary or art.raw_summary or art.title or ""
+        summary_blob = art.ai_summary or art.raw_summary or art.title or ""
         snippet = _truncate_text(summary_blob, max_chars=220)
         if title:
             overview_lines.append(f"- {title}\n  {snippet}")
@@ -2228,10 +2232,21 @@ def get_todays_news_digest_for_user(
         max_words=60,
     )
     if not overview:
-        overview = (
-            f"I found {len(display_clusters)} relevant stories in this digest window, "
-            "covering infrastructure, community events, and local updates."
-        )
+        # Fallback to stored summaries in DB
+        db_summaries = [
+            (art.ai_summary or art.raw_summary or art.title or "").strip()
+            for art, _m in display_clusters
+            if (art.ai_summary or art.raw_summary or art.title or "").strip()
+        ]
+        if db_summaries:
+            overview = clip_plain_text_to_word_limit(
+                strip_markdown_artifacts_for_plain_text(" ".join(db_summaries[:2])),
+                55,
+            )
+        else:
+            overview = (
+                f"I found {len(display_clusters)} relevant stories in this digest window."
+            )
     lines = [
         "<b>🗞️ Today's digest</b>",
         "",
@@ -2242,10 +2257,7 @@ def get_todays_news_digest_for_user(
     for art, members in display_clusters:
         category = escape_html((art.category or "General").strip())
         title = escape_html(_display_title_text(art.title, art.ai_title).strip()[:220] or "Untitled")
-        if scheduled_push:
-            summary_blob = art.ai_summary or ""
-        else:
-            summary_blob = art.ai_summary or art.raw_summary or art.title or ""
+        summary_blob = art.ai_summary or art.raw_summary or art.title or ""
         snippet = clip_plain_text_to_word_limit(
             strip_markdown_artifacts_for_plain_text(summary_blob),
             34,

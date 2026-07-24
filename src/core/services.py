@@ -793,7 +793,7 @@ def _generate_ai_summary_text(
     src_low = (item_source or "").strip().lower()
     is_tg = src_low.startswith("telegram")
     urgent = is_tg and _is_urgent_utility_alert(title or "", raw)
-    mw = 52 if urgent else 30
+    mw = 52 if urgent else 45
     blob = (source_text or "").strip() or (raw or "").strip() or (title or "").strip()
     if not blob:
         return None
@@ -1913,7 +1913,12 @@ def _truncate_text(text: str, max_chars: int) -> str:
         return ""
     if len(cleaned) <= max_chars:
         return cleaned
-    return cleaned[:max_chars].rstrip(" ,.;:!?") + "..."
+    truncated = cleaned[:max_chars]
+    if len(cleaned) > max_chars and cleaned[max_chars] != " ":
+        last_space = truncated.rfind(" ")
+        if last_space > int(max_chars * 0.4):
+            truncated = truncated[:last_space]
+    return truncated.rstrip(" ,.;:!?") + "…"
 
 
 def get_todays_news_digest_for_user(
@@ -2129,7 +2134,7 @@ def get_todays_news_digest_for_user(
             title = escape_html(display_title.strip()[:220] or "Untitled")
             snippet = clip_plain_text_to_word_limit(
                 strip_markdown_artifacts_for_plain_text(it.summary or it.title or ""),
-                34,
+                45,
             )
             safe_snippet = escape_html(snippet)
             lines.append(f"<blockquote><b>{title}</b></blockquote>")
@@ -2260,7 +2265,7 @@ def get_todays_news_digest_for_user(
         summary_blob = art.ai_summary or art.raw_summary or art.title or ""
         snippet = clip_plain_text_to_word_limit(
             strip_markdown_artifacts_for_plain_text(summary_blob),
-            34,
+            45,
         )
         safe_snippet = escape_html(snippet)
         lines.append(f"<blockquote>[{category}] <b>{title}</b></blockquote>")

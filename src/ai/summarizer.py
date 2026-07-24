@@ -273,12 +273,17 @@ def clip_plain_text_to_word_limit(text: str, max_words: int) -> str:
     words = cleaned.split()
     if len(words) <= max_words:
         return cleaned
-    clipped = " ".join(words[:max_words])
-    for punct in (". ", "? ", "! ", "。", "？", "！"):
-        pos = clipped.rfind(punct)
-        if pos > int(len(clipped) * 0.45):
-            return clipped[: pos + len(punct.rstrip())].strip()
-    return clipped.rstrip(" ,;:.—-") + "…"
+    clipped_draft = " ".join(words[:max_words])
+    
+    # Try to find the last complete sentence ending (. ! ?) within the word limit
+    best_end = -1
+    for match in re.finditer(r'[.!?](?:\s+|$)', clipped_draft):
+        best_end = match.end()
+    
+    if best_end > int(len(clipped_draft) * 0.3):
+        return clipped_draft[:best_end].strip()
+        
+    return clipped_draft.rstrip(" ,;:.—-") + "…"
 
 
 def finalize_summary_plain_text(text: str) -> str:

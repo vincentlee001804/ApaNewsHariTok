@@ -2132,10 +2132,15 @@ def get_todays_news_digest_for_user(
                 or _fallback_display_title_from_text(it.title or "")
             )
             title = escape_html(display_title.strip()[:220] or "Untitled")
-            snippet = clip_plain_text_to_word_limit(
-                strip_markdown_artifacts_for_plain_text(it.summary or it.title or ""),
-                45,
-            )
+            ai_summary_text = getattr(it, "ai_summary", None) or getattr(it, "summary", None)
+            if ai_summary_text and ai_summary_text.strip():
+                snippet = strip_markdown_artifacts_for_plain_text(ai_summary_text)
+            else:
+                raw_blob = getattr(it, "raw_summary", None) or getattr(it, "title", None) or ""
+                snippet = clip_plain_text_to_word_limit(
+                    strip_markdown_artifacts_for_plain_text(raw_blob),
+                    45,
+                )
             safe_snippet = escape_html(snippet)
             lines.append(f"<blockquote><b>{title}</b></blockquote>")
             if safe_snippet:
@@ -2262,11 +2267,14 @@ def get_todays_news_digest_for_user(
     for art, members in display_clusters:
         category = escape_html((art.category or "General").strip())
         title = escape_html(_display_title_text(art.title, art.ai_title).strip()[:220] or "Untitled")
-        summary_blob = art.ai_summary or art.raw_summary or art.title or ""
-        snippet = clip_plain_text_to_word_limit(
-            strip_markdown_artifacts_for_plain_text(summary_blob),
-            45,
-        )
+        if art.ai_summary and art.ai_summary.strip():
+            snippet = strip_markdown_artifacts_for_plain_text(art.ai_summary)
+        else:
+            summary_blob = art.raw_summary or art.title or ""
+            snippet = clip_plain_text_to_word_limit(
+                strip_markdown_artifacts_for_plain_text(summary_blob),
+                45,
+            )
         safe_snippet = escape_html(snippet)
         lines.append(f"<blockquote>[{category}] <b>{title}</b></blockquote>")
         if safe_snippet:

@@ -209,6 +209,8 @@ def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
                 "messages": [{"role": "user", "content": body.get("prompt")}],
                 "stream": body.get("stream", False),
             }
+            if body.get("format") == "json":
+                openai_payload["response_format"] = {"type": "json_object"}
             num_predict = body.get("options", {}).get("num_predict")
             if num_predict:
                 openai_payload["max_tokens"] = num_predict
@@ -402,23 +404,29 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
     prompt = textwrap.dedent(
         f"""
         You are summarizing a local news article from Sarawak, Malaysia.
-        Read the full article and output a brief {max_words}-word summary only: one or two tight
-        sentences with who, what, where, and the main outcome; skip minor detail if needed.
+        Read the full article and output a brief {max_words}-word summary in JSON format:
+        one or two tight complete sentences with who, what, where, and the main outcome; skip minor detail if needed.
         {title_line}
 
         Strict relevance rules:
         - The summary MUST match the provided headline/article only.
         - Do NOT use information from other articles or prior context.
-        - If the text does not contain enough matching information for the headline, output exactly: NO_SUMMARY
+        - If the text does not contain enough matching information for the headline, set "no_summary": true.
         - If a place/location is mentioned in the article or headline, keep that exact place in the summary.
           Do not replace it with another city.
 
-        Provide only the summary text, no instructions, labels, or quotes around the summary.
-        Write in clear, natural English using simple everyday words.
-        If the source is in Malay or another language, translate faithfully into English.
-        Avoid jargon, legal wording, and technical terms unless necessary.
-        End with a complete sentence (do not stop mid-thought).
-        Use plain text only: no Markdown, no ** or * for bold/italic, no __underscores__.
+        Return ONLY a single valid JSON object (no markdown fences, no text before or after) matching this exact schema:
+        {{
+            "summary": "Your 1-2 sentence English summary here ending with a complete period.",
+            "no_summary": false
+        }}
+
+        Rules for the summary text:
+        - Write in clear, natural English using simple everyday words.
+        - If the source is in Malay or another language, translate faithfully into English.
+        - Avoid jargon, legal wording, and technical terms unless necessary.
+        - End with a complete sentence with a period (do not stop mid-thought).
+        - Use plain text only inside the summary value: no Markdown, no ** or * for bold/italic, no __underscores__.
 
         Full Article:
         \"\"\"{text.strip()}\"\"\"
@@ -430,6 +438,7 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
             {
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
+                "format": "json",
                 "stream": False,
                 "options": {"num_predict": OLLAMA_SUMMARY_NUM_PREDICT},
             },
@@ -437,10 +446,28 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
         )
         response.raise_for_status()
         data = response.json()
-        summary = data.get("response", "").strip()
+        raw_output = (data.get("response", "") or "").strip()
 
-        # Clean up any instruction text that might be included
-        # Remove common prefixes like "Here is a summary...", "Summary:", etc.
+        summary = ""
+        no_summary = False
+
+        if raw_output:
+            try:
+                json_str = raw_output
+                if "```" in json_str:
+                    json_str = re.sub(r"^```(?:json)?\s*", "", json_str, flags=re.MULTILINE)
+                    json_str = re.sub(r"\s*```$", "", json_str, flags=re.MULTILINE).strip()
+                parsed = json.loads(json_str)
+                if isinstance(parsed, dict):
+                    summary = str(parsed.get("summary", "") or "").strip()
+                    no_summary = bool(parsed.get("no_summary", False))
+            except (json.JSONDecodeError, TypeError):
+                summary = raw_output
+
+        if no_summary or not summary:
+            return None
+
+        # Clean up any instruction text that might be included if fallback plain text was returned
         summary = re.sub(
             r"(?i)Here is a summary of the news article in \d+ words or less:\s*",
             "",

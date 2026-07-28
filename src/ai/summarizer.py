@@ -249,10 +249,28 @@ def strip_markdown_artifacts_for_plain_text(text: str) -> str:
     """
     Telegram /latest and pushes use ParseMode.HTML; summary lines are plain escaped text.
     Models often emit **bold** or *italic* (Markdown), which shows as ugly literals — strip it.
+    Also strips raw JSON wrapper syntax if unparsed JSON strings reach formatting.
     """
     if not text:
         return text
-    s = text
+    s = text.strip()
+    
+    # If string is a raw JSON payload, extract summary field or strip JSON syntax
+    if s.startswith("{") or '"summary":' in s:
+        try:
+            val = json.loads(s)
+            if isinstance(val, dict) and val.get("summary"):
+                s = str(val.get("summary")).strip()
+        except Exception:
+            match = re.search(r'"summary"\s*:\s*"([^"]*)', s, re.DOTALL)
+            if match:
+                s = match.group(1).strip()
+            else:
+                s = re.sub(r'^\s*\{\s*"summary"\s*:\s*"?', "", s, flags=re.IGNORECASE)
+                s = re.sub(r'"?\s*,\s*"no_summary".*$', "", s, flags=re.IGNORECASE)
+                s = re.sub(r'"?\s*\}\s*$', "", s)
+                s = s.strip(' "\'')
+
     for _ in range(16):
         prev = s
         s = re.sub(r"\*\*([^*]+?)\*\*", r"\1", s, flags=re.DOTALL)
@@ -452,17 +470,46 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
         no_summary = False
 
         if raw_output:
+            clean_raw = raw_output
+            if "```" in clean_raw:
+                clean_raw = re.sub(r"^```(?:json)?\s*", "", clean_raw, flags=re.MULTILINE)
+                clean_raw = re.sub(r"\s*```$", "", clean_raw, flags=re.MULTILINE).strip()
+
+            # 1. Try direct json parse
             try:
-                json_str = raw_output
-                if "```" in json_str:
-                    json_str = re.sub(r"^```(?:json)?\s*", "", json_str, flags=re.MULTILINE)
-                    json_str = re.sub(r"\s*```$", "", json_str, flags=re.MULTILINE).strip()
-                parsed = json.loads(json_str)
+                parsed = json.loads(clean_raw)
                 if isinstance(parsed, dict):
                     summary = str(parsed.get("summary", "") or "").strip()
                     no_summary = bool(parsed.get("no_summary", False))
             except (json.JSONDecodeError, TypeError):
-                summary = raw_output
+                pass
+
+            # 2. Try object substring parse { ... }
+            if not summary:
+                start = clean_raw.find("{")
+                end = clean_raw.rfind("}")
+                if start >= 0 and end > start:
+                    try:
+                        parsed = json.loads(clean_raw[start : end + 1])
+                        if isinstance(parsed, dict):
+                            summary = str(parsed.get("summary", "") or "").strip()
+                            no_summary = bool(parsed.get("no_summary", False))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+            # 3. Try regex extraction for partial/truncated JSON "summary": "..."
+            if not summary:
+                match = re.search(r'"summary"\s*:\s*"([^"]*)', clean_raw, re.DOTALL)
+                if match:
+                    summary = match.group(1).strip()
+
+            # 4. Check for no_summary flag
+            if '"no_summary": true' in clean_raw.lower() or '"no_summary":true' in clean_raw.lower():
+                no_summary = True
+
+            # 5. Fallback plain text if response is clean text (doesn't start with { or contain "summary":)
+            if not summary and not clean_raw.startswith("{") and '"summary":' not in clean_raw:
+                summary = clean_raw
 
         if no_summary or not summary:
             return None

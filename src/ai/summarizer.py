@@ -190,17 +190,26 @@ def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
         # Copy the body so we don't pollute arguments for subsequent targets in the loop
         body = {**json_body}
         
-        # Boost num_predict/max_tokens limits for reasoning models (e.g. mimo, deepseek) and OpenAI endpoints
+        # Boost num_predict/max_tokens limits for reasoning models (e.g. mimo, deepseek, gpt-oss)
+        # and OpenAI endpoints. Reasoning models burn tokens on hidden "thinking" before emitting
+        # any visible output, so a small cap (e.g. 384) can be exhausted with an empty response.
         model_lower = model.lower()
-        is_reasoning = "mimo" in model_lower or "r1" in model_lower or "reason" in model_lower or is_openai
-        
+        is_reasoning = (
+            "mimo" in model_lower
+            or "gpt-oss" in model_lower
+            or "qwen3" in model_lower
+            or "r1" in model_lower
+            or "reason" in model_lower
+            or is_openai
+        )
+
         if is_reasoning:
+            # Reasoning models need a large budget: observed gpt-oss "thinking" runs are
+            # ~300-650 tokens BEFORE any visible output, and Ollama Cloud currently ignores
+            # "think": false. 1024 leaves comfortable room for thinking + the actual answer.
             options = {**body.get("options", {})}
             curr_limit = options.get("num_predict", 96)
-            if curr_limit < 512:
-                options["num_predict"] = 512
-            else:
-                options["num_predict"] = max(curr_limit, 1024)
+            options["num_predict"] = max(curr_limit, 1024)
             body["options"] = options
 
         if is_openai:
@@ -217,6 +226,12 @@ def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
             payload = openai_payload
         else:
             payload = {**body, "model": model}
+            # Disable chain-of-thought for reasoning models on Ollama (/api/generate).
+            # Our tasks (short summaries, titles, category tags) don't need thinking, and
+            # thinking tokens count against num_predict — gpt-oss was returning empty
+            # responses with done_reason="length" because reasoning ate the whole budget.
+            if is_reasoning and "think" not in payload:
+                payload["think"] = False
 
         t = timeout
         if multi and use_short_timeout:

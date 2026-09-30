@@ -12,6 +12,7 @@ from telethon.sessions import StringSession
 from telethon.tl.functions.channels import JoinChannelRequest
 from telethon.tl.types import Channel, User
 
+from src.core.config import TELEGRAM_FETCH_TIMEOUT_SEC
 from src.scrapers.rss_reader import RssItem
 
 
@@ -227,8 +228,10 @@ def fetch_latest_telegram_items(
     except ValueError:
         return []
 
-    try:
-        return asyncio.run(
+    async def _run_with_deadline() -> List[RssItem]:
+        # Overall deadline: Telethon's connect()/iter_messages() have no timeout of their
+        # own, so a stalled connection to Telegram would block the prefetch job forever.
+        return await asyncio.wait_for(
             _fetch_async(
                 sources=source_list,
                 limit_per_source=limit_per_source,
@@ -238,8 +241,18 @@ def fetch_latest_telegram_items(
                 session_name=session_name,
                 session_string=session_string,
                 auto_join_channels=auto_join,
-            )
+            ),
+            timeout=TELEGRAM_FETCH_TIMEOUT_SEC,
         )
+
+    try:
+        return asyncio.run(_run_with_deadline())
+    except asyncio.TimeoutError:
+        print(
+            f"[telegram] fetch timed out after {TELEGRAM_FETCH_TIMEOUT_SEC}s "
+            "(deadline protects the prefetch job; will retry next cycle)"
+        )
+        return []
     except Exception as exc:
         err = str(exc).lower()
         hint = ""

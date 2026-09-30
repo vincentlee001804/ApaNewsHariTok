@@ -5,6 +5,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable, List
 
 import feedparser
+import requests
+
+from src.core.config import RSS_FETCH_TIMEOUT_SEC
 
 
 @dataclass
@@ -30,7 +33,15 @@ def fetch_latest_items(
 
     for feed_url in feeds:
         try:
-            parsed = feedparser.parse(feed_url)
+            # fetch via requests with an explicit timeout: bare feedparser.parse() can
+            # block forever on a stalled connection and wedge the whole prefetch job.
+            response = requests.get(
+                feed_url,
+                timeout=RSS_FETCH_TIMEOUT_SEC,
+                headers={"User-Agent": "Mozilla/5.0 (ApaNewsHariTok bot)"},
+            )
+            response.raise_for_status()
+            parsed = feedparser.parse(response.content)
             for entry in parsed.entries[:limit_per_feed]:
                 title = getattr(entry, "title", "").strip()
                 link = getattr(entry, "link", "").strip()

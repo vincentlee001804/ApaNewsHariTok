@@ -486,6 +486,18 @@ PREFETCH_AI_SUMMARY: Final[bool] = os.getenv("PREFETCH_AI_SUMMARY", "true").stri
     "on",
 }
 
+# Hard network deadlines so a stalled connection cannot block the prefetch job forever
+# (a hung job is skipped by the scheduler every tick and news ingestion silently stops).
+RSS_FETCH_TIMEOUT_SEC: Final[int] = max(
+    1,
+    int((os.getenv("RSS_FETCH_TIMEOUT_SEC", "15").strip() or "15")),
+)
+# Overall deadline for one Telegram source fetch (connect + history read), not per call.
+TELEGRAM_FETCH_TIMEOUT_SEC: Final[int] = max(
+    5,
+    int((os.getenv("TELEGRAM_FETCH_TIMEOUT_SEC", "90").strip() or "90")),
+)
+
 # DB retention cleanup (old news + delivery rows).
 DB_CLEANUP_ENABLED: Final[bool] = os.getenv("DB_CLEANUP_ENABLED", "true").strip().lower() in {
     "1",

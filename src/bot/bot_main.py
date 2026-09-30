@@ -103,6 +103,14 @@ def main() -> None:
 
     token = require_bot_token()
 
+    # Boot visibility: if this prints 0 (or raises) while users expect digests,
+    # the database is unreachable or empty — check DATABASE_URL / Supabase first.
+    try:
+        _boot_users = list_active_user_preferences()
+        print(f"[startup] active users with preferences: {len(_boot_users)}", flush=True)
+    except Exception as e:
+        print(f"[startup] WARNING: could not count active users: {e}", flush=True)
+
     application = ApplicationBuilder().token(token).build()
 
     application.add_handler(CommandHandler("start", start))
@@ -229,17 +237,27 @@ def main() -> None:
 
     async def _prefetch_db_job(context) -> None:
         """RSS + Telegram → database (and optional ai_summary backfill)."""
+        # Start/finish logging with duration: if only the "started" line repeats while the
+        # "finished" line never appears, a fetch is hung — visible immediately in fly logs.
+        started = datetime.utcnow()
+        print(f"[prefetch] run started at {started.isoformat()}Z", flush=True)
         try:
             inserted = await asyncio.to_thread(prefetch_latest_articles_to_db)
+            elapsed = (datetime.utcnow() - started).total_seconds()
             if inserted:
-                print(f"[prefetch] inserted {inserted} new row(s) into database (RSS + Telegram)")
+                print(
+                    f"[prefetch] finished in {elapsed:.1f}s: inserted {inserted} new row(s) "
+                    "into database (RSS + Telegram)",
+                    flush=True,
+                )
             else:
                 print(
-                    "[prefetch] completed: 0 new rows (sources returned nothing new, "
-                    "or all items already in DB / filtered)"
+                    f"[prefetch] finished in {elapsed:.1f}s: 0 new rows "
+                    "(sources returned nothing new, or all items already in DB / filtered)",
+                    flush=True,
                 )
         except Exception as e:
-            print(f"[prefetch] error: {e}")
+            print(f"[prefetch] error after {(datetime.utcnow() - started).total_seconds():.1f}s: {e}")
 
     async def _scheduled_push_job(context) -> None:
         """

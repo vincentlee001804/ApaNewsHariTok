@@ -17,6 +17,11 @@ engine = create_engine(
     DATABASE_URL,
     echo=False,
     future=True,
+    # Supabase and other managed Postgres kill idle pooled connections; without
+    # pre-ping the first query of a job intermittently fails with
+    # "SSL SYSCALL error: EOF detected" on a dead connection.
+    pool_pre_ping=not _IS_SQLITE,
+    pool_recycle=300 if not _IS_SQLITE else -1,
     connect_args={"timeout": 30, "check_same_thread": False} if _IS_SQLITE else {},
 )
 

@@ -38,3 +38,4 @@ Thumbs.db
 
 # Local logs
 bot_*.log
+logs/

@@ -102,9 +102,40 @@ Dedup/idempotency verified (second poll stores nothing); per-source failure hand
 verified live when JBALB briefly throttled repeated debug fetches (warnings logged,
 cycle continued — the politeness delay was added after).
 
-## 5. Stage 2 checklist (go-live, requires owner approval)
+## 5. Stage 1b — multi-day shadow log protocol (running 2026-10-06 →)
 
-1. Watch shadow logs for several days (`/devutility` + `[utility-alert]` log lines).
+Goal: accumulate several days of `[utility-alert]` logs (ideally spanning at least
+one 00:00–06:00 Asia/Kuching window, and wet-weather days when JBALB posts more) as
+the tuning/evidence set before Stage 2 sign-off.
+
+**How to run the local bot with capture** (from repo root, venv active):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_shadow_mode.ps1
+# -> console is tee'd to logs/utility_shadow_YYYYMMDD.log (logs/ is gitignored)
+```
+
+Git Bash alternative:
+`python -m src.bot.bot_main 2>&1 | tee -a logs/utility_shadow_$(date +%Y%m%d).log`
+
+**Evidence collected:** `logs/utility_shadow_*.log` (`[utility-alert]` lines),
+`/devutility` previews, and `utility_alerts` row counts by source/kind/location.
+
+**Stage 2 acceptance criteria (measured from the shadow log):**
+
+1. **Precision ≥ 90%** — sample ≥ 20 stored alerts; genuine Sarawak utility notices.
+2. **Zero pushes** — only `[shadow] would deliver` lines; no send attempts.
+3. **Quiet hours** — alerts announced 00:00–06:00 are held to 06:00 (log timestamps).
+4. **Rate cap** — would-deliver per user ≤ 3/h.
+5. **Stability** — job ticks every 10 min; errors are rare and non-fatal per source.
+6. **No cross-poll duplicates** over the whole period.
+
+An automated check-in on **2026-10-09 (Asia/Kuching)** reads the accumulated log and
+summarizes it against these criteria as a progress-report entry.
+
+## 6. Stage 2 checklist (go-live, requires owner approval)
+
+1. Review the Stage 1b shadow log against the acceptance criteria above.
 2. Add `/settings` toggle for `wants_urgent_alerts` (column already exists).
 3. Incident-level clustering for the news watch (multiple outlets report the same burst;
    reuse Phase 3 semantics) so users get one alert per incident, not per story.
@@ -114,7 +145,7 @@ cycle continued — the politeness delay was added after).
    coverage (paid).
 6. Set `UTILITY_ALERT_SHADOW_MODE=false` and redeploy.
 
-## 6. Threats to validity / risks
+## 7. Threats to validity / risks
 
 1. Google News watch latency (15–60 min) is out of our control; Telegram/JBALB are
    near-real-time but cover Central + rural respectively. South/North water and power

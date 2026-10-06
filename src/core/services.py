@@ -26,8 +26,9 @@ from src.core.config import (
     CROSS_SOURCE_DEDUP_MIN_BODY_TOKENS,
     CROSS_SOURCE_DEDUP_TITLE_JACCARD_THRESHOLD,
     DEDUPLICATION_ENABLED,
+    NEWS_AGENT_WINDOW_HOURS,
+    RAG_AGENT_POOL_SIZE,
     RAG_ENABLED,
-    RAG_NEWS_CANDIDATE_POOL,
     RAG_NEWS_TOP_K,
     RSS_FEEDS,
     TELEGRAM_SOURCE_CHANNELS,
@@ -2483,7 +2484,7 @@ def _format_no_related_news_html(
 def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     """
     "News agent" mode:
-    - Uses DB (today/last 24h) to build a small evidence set.
+    - Uses DB (configurable NEWS_AGENT_WINDOW_HOURS, default 30d) to build the evidence set.
     - Uses Ollama to answer the user's question strictly from those items.
     """
     from src.core.user_service import get_user_preference
@@ -2496,7 +2497,9 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     area_keywords_filter = preference.area_keywords if preference else ""
 
     now = datetime.utcnow()
-    cutoff = now - timedelta(hours=24)
+    # FYP2: 24h -> configurable window (default 720h/30d); vector search keeps the
+    # wider pool affordable and stops old-but-relevant stories being invisible.
+    cutoff = now - timedelta(hours=NEWS_AGENT_WINDOW_HOURS)
 
     with SessionLocal() as session:
         candidates: List[NewsArticle] = list(
@@ -2601,7 +2604,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
         ranked = intent_filtered
 
     fallback_chosen = [t[2] for t in ranked[:10]]
-    candidate_pool = [t[2] for t in ranked[:RAG_NEWS_CANDIDATE_POOL]]
+    candidate_pool = [t[2] for t in ranked[:RAG_AGENT_POOL_SIZE]]
     chosen = fallback_chosen
     if RAG_ENABLED and candidate_pool:
         semantic_hits = semantic_rank_articles(

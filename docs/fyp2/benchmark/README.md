@@ -23,5 +23,7 @@ Files in this folder:
 | 2026-10-05 | RAG A/B identity test (10 questions, vector vs in-memory) | 10/10 identical rankings (pool fully embedded) — equivalence confirmed | rag_test_20261005T150329Z.json/csv |
 | 2026-10-05 | Pool coverage: FYP1 24h window vs FYP2 vector top-10 over 30d corpus | FYP1 reachable 2/10, FYP2 3/10 | rag_pool_coverage.csv |
 | 2026-10-05 | nomic prefix experiment (search_query:/search_document:), full re-backfill 1,692 | No change (3/10) — negative result, prefixes kept | (table above) |
+| 2026-10-06 | Hybrid retrieval v1 (boost-only rescore) | No change (3/10) — misses sat at vector ranks 107–982, outside fetch window → recall union designed | (process note in 02 §4.5) |
+| 2026-10-06 | Hybrid retrieval v3 (recall union + stopword fix) | **FYP1 1/10, vector 3/10, hybrid 6/10**; Long Lellang/arson/crime misses still show 10/10 correct-story top-10s | rag_pool_hybrid_20261006.txt, rag_pool_coverage.csv |
 
 Embedding coverage: 1,692 / 1,692 articles (nomic-embed-text, document-prefixed).

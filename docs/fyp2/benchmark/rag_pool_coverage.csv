@@ -1,11 +1,11 @@
-question,relevant_article_id,relevant_title,age_hours,in_fyp1_24h_window,in_fyp2_vector_top10,vector_rank
-Is there any haze or API update in Serian?,408219,"General : Serian Hits Very Unhealthy API Again, 11 Other Are",581.5,False,False,
-What is the latest about the Bebuling Airport in Betong?,421596,Bebuling Airport marks milestone with first aircraft landing,419.2,False,False,
-Any news about high electricity bills or SESCO in Sarawak?,404282,High electricity bills: Minister directs SESCO CEO to invest,625.8,False,True,1
-What do you know about the Sarawak Delta development?,404271,Sarawak Delta secures first international partnership,625.8,False,False,
-Was there a helicopter crash at Long Lellang? What happened?,404276,Remains of five Long Lellang helicopter crash victims recove,625.8,False,False,
-What is Sarawak doing about cloud seeding for the hot weather?,407993,S’wak govt seeks to continue cloud seeding ops as State brac,583.8,False,True,1
-Tell me about the arson cases on 24-hour shops in Kuching,426583,"Dua kedai serbaneka 24 jam di Kuching, Sri Aman jadi sasaran",342.1,False,False,
-What is the SEZ and what will it focus on?,423257,"General : SEZ To Focus On Investment, Services Sector And Hi",394.2,False,False,
-Any crime news in Kuching recently?,431791,2 men on motorcycle allegedly hit cop at Jalan Padungan road,12.9,True,False,
-Any water supply or treatment news in Sarawak?,431983,General : PAAB Calls For Zero-Waste Water Treatment For Sust,7.4,True,True,3
+question,relevant_article_id,relevant_title,age_hours,relevant_cosine,in_fyp1_24h_window,in_vector_top10,vector_rank,in_hybrid_top10,hybrid_rank
+Is there any haze or API update in Serian?,408219,"General : Serian Hits Very Unhealthy API Again, 11 Other Are",595.9,0.6181,False,False,,True,4
+What is the latest about the Bebuling Airport in Betong?,421596,Bebuling Airport marks milestone with first aircraft landing,433.6,0.5749,False,False,,True,1
+Any news about high electricity bills or SESCO in Sarawak?,404282,High electricity bills: Minister directs SESCO CEO to invest,640.2,0.7416,False,True,1,True,1
+What do you know about the Sarawak Delta development?,404271,Sarawak Delta secures first international partnership,640.2,0.5618,False,False,,False,
+Was there a helicopter crash at Long Lellang? What happened?,404276,Remains of five Long Lellang helicopter crash victims recove,640.2,0.7222,False,False,,False,
+What is Sarawak doing about cloud seeding for the hot weather?,407993,S’wak govt seeks to continue cloud seeding ops as State brac,598.2,0.7955,False,True,1,True,2
+Tell me about the arson cases on 24-hour shops in Kuching,426583,"Dua kedai serbaneka 24 jam di Kuching, Sri Aman jadi sasaran",356.6,0.5557,False,False,,False,
+What is the SEZ and what will it focus on?,423257,"General : SEZ To Focus On Investment, Services Sector And Hi",408.6,0.4795,False,False,,True,8
+Any crime news in Kuching recently?,431791,2 men on motorcycle allegedly hit cop at Jalan Padungan road,27.3,0.6009,False,False,,False,
+Any water supply or treatment news in Sarawak?,431983,General : PAAB Calls For Zero-Waste Water Treatment For Sust,21.8,0.665,True,True,3,True,5

@@ -1,0 +1,114 @@
+question                                                   in 24h? vec hit? hyb hit?  relevant title
+Is there any haze or API update in Serian?                   False    False     True  General : Serian Hits Very Unhealthy API Again, 11 Other Are (age 595.9h)
+    hyb # 1 [serian] Sarawak extends school closures in Serian, Lubok Antu until haze improves
+    hyb # 2 [serian] Serian, Lubok Antu schools remain closed over haze
+    hyb # 3 [serian] General : Haze: Serian And Four Areas In Sarawak Record Unhealthy API
+    hyb # 4 [serian] General : Serian Hits Very Unhealthy API Again, 11 Other Areas Unhealthy As <== relevant
+    hyb # 5 [serian] Haze: Serian records API 213, highest air pollution level in Sarawak
+    hyb # 6 [serian] Sarawak terus dilanda jerebu, Serian kekal terjejas
+    hyb # 7 [serian] General : Schools In Serian, Lubok Antu To Remain Closed Until Haze Improve
+    hyb # 8 [serian] General : Haze: Serian Records Very Unhealthy API Reading
+    hyb # 9 [kuching] Rainfall eases haze, most Sarawak areas record API below 200
+    hyb #10 [serian] General : Haze: 22 Areas Record Unhealthy API Readings, IPD Serian Highest 
+What is the latest about the Bebuling Airport in Betong?     False    False     True  Bebuling Airport marks milestone with first aircraft landing (age 433.6h)
+    hyb # 1 [betong] Bebuling Airport marks milestone with first aircraft landing <== relevant
+    hyb # 2 [betong] General : Bebuling STOLport Commercial Flights Yet To Begin - Sarawak Deput
+    hyb # 3 [betong] Bebuling STOLPort’s trial flight paves way for commercial flights
+    hyb # 4 [betong] Clearer skies, better roads pave way for Sarawakku Sayang programme in Beto
+    hyb # 5 [betong] 21,000 expected as Betong hosts Sarawak-level National Sports Day 2026 from
+    hyb # 6 [betong] General : Pepper Industry Needs To Shift From Pursuing Production Increase 
+    hyb # 7 [betong] Old Batang Layar Bridge expected to reopen tomorrow (Sept 19) after two-wee
+    hyb # 8 [betong] Minister: Sarawak crucial to moving Malaysia’s pepper industry up value cha
+    hyb # 9 [betong] Sarawakku Sayang targets 115,000 visitors in Betong
+    hyb #10 [betong] SJK Chung Hua Betong leads S’wak’s first AI Classroom, giving rural pupils 
+Any news about high electricity bills or SESCO in Sarawak?   False     True     True  High electricity bills: Minister directs SESCO CEO to invest (age 640.2h)
+    hyb # 1 [kuching] High electricity bills: Minister directs SESCO CEO to investigate, issue pu <== relevant
+    hyb # 2 [kuching] High power bills: Sarawak Energy looking into grievances of customers
+    hyb # 3 [kuching] PAS Sarawak: Freeze disputed electricity bills until probe is completed
+    hyb # 4 [kuching] Digital meters must not become a smarter way to bill consumers
+    hyb # 5 [-] PAS Sarawak: Freeze disputed electricity bills until probe is completed - D
+    hyb # 6 [-] Review Sesco billing, dispute procedures after complaints over high bills, 
+    hyb # 7 [-] Sarawak Energy to issue statement on electricity bill spikes reported after
+    hyb # 8 [mukah] General : Sarawak Budget 2027 To Touch On Electricity Tariff Issue - Abang 
+    hyb # 9 [mukah] Premier: Sarawak Budget 2027 to cover electricity tariffs, revenue and econ
+    hyb #10 [kuching] Sarawak eyes Brunei power exports in 2028 to expand energy ties, revenue
+What do you know about the Sarawak Delta development?        False    False    False  Sarawak Delta secures first international partnership (age 640.2h)
+    hyb # 1 [-] Sarawak Delta Geopark to learn from Jeonbuk’s MIDA experience
+    hyb # 2 [kuching] Inclusive development key to Sarawak’s future
+    hyb # 3 [kuching] GPS government ‘walks the talk’ on Sarawak development
+    hyb # 4 [-] General : Budget 2027: Maintain or Increase Sabah, Sarawak Development Allo
+    hyb # 5 [miri] ADB impressed by Sarawak’s development vision, says Premier
+    hyb # 6 [-] Seeing Sarawak’s future from Abu Dhabi
+    hyb # 7 [miri] S’wak agrees in principle to establish Greater Miri Development Agency, say
+    hyb # 8 [kuching] Terminal LNG terapung Kuching dijangka beroperasi 2029
+    hyb # 9 [mukah] Over RM1 bln in proposed Mukah road projects among requests for further dis
+    hyb #10 [kuching] Swinburne Sarawak partners Idea Company to advance CEA innovation
+Was there a helicopter crash at Long Lellang? What happene   False    False    False  Remains of five Long Lellang helicopter crash victims recove (age 640.2h)
+    hyb # 1 [miri] Siasatan nahas helikopter Long Lellang masih dijalankan, punca belum dikena
+    hyb # 2 [-] General : Helicopter Crash: FDS Operations In Sarawak Temporarily Suspended
+    hyb # 3 [miri] Long Lellang heli crash: DNA analysis of victims completed, funeral arrange
+    hyb # 4 [kuching] Three Sarawakians among five victims of Long Lellang helicopter crash
+    hyb # 5 [-] Jenazah Kapten Zainol tiba di Masjid Bandar Baru Senawang
+    hyb # 6 [kuching] Long Lellang heli crash: Post-mortem on victims completed, DNA results pend
+    hyb # 7 [-] General : Captain Zainol Remembered For Devotion To Family And Service
+    hyb # 8 [-] General : Helicopter Tragedy: MMA Calls For Stronger Asset Safety, Health W
+    hyb # 9 [-] General : Remains Of Captain Zainol Afiq Buried In Senawang
+    hyb #10 [kuching] Long Lellang heli crash: Pilot Captain Zainol, medical officer Dr Ainul lai
+What is Sarawak doing about cloud seeding for the hot weat   False     True     True  S’wak govt seeks to continue cloud seeding ops as State brac (age 598.2h)
+    hyb # 1 [kuching] OPA boleh dilaksanakan tanpa tunggu permintaan negeri – Zahid
+    hyb # 2 [kuching] S’wak govt seeks to continue cloud seeding ops as State braces for hotter O <== relevant
+    hyb # 3 [kuching] Govt to act on cloud seeding without waiting for state requests
+    hyb # 4 [-] General : MetMalaysia Issues Weather Warning For Parts Of Sarawak, Sabah, P
+    hyb # 5 [kuching] Malaysia ready to help Indonesia with cloud seeding
+    hyb # 6 [-] MetMalaysia issues thunderstorm warning for northern states, Sabah and Sara
+    hyb # 7 [-] Amaran ribut petir, hujan lebat di enam negeri hingga 6 pagi
+    hyb # 8 [-] Amaran ribut petir, hujan lebat di sembilan negeri hingga 12 tengah hari
+    hyb # 9 [-] MetMalaysia warns of heavy rain and strong winds across Penang, Sabah and S
+    hyb #10 [-] Amaran ribut petir, hujan lebat di tujuh negeri hingga 10 malam ini
+Tell me about the arson cases on 24-hour shops in Kuching    False    False    False  Dua kedai serbaneka 24 jam di Kuching, Sri Aman jadi sasaran (age 356.6h)
+    hyb # 1 [kuching] Two 24-hour convenience stores targeted in separate arson attacks in Kuchin
+    hyb # 2 [kuching] Cops confirm arson at two 24-hour convenience stores in Kuching
+    hyb # 3 [kuching] Convenience store attacks: Hunt on for masked men
+    hyb # 4 [kuching] Arson attacks: Three detained, 10 others on police list
+    hyb # 5 [kuching] Dua kedai serbaneka 24 jam di Kuching jadi sasaran khianat
+    hyb # 6 [kuching] Quick action saves convenience store from being destroyed by fire
+    hyb # 7 [kuching] Fire breaks out at Jalan Green convenience store in Kuching
+    hyb # 8 [kuching] Masked duo linked to firebomb attacks on convenience stores in Kuching, Sri
+    hyb # 9 [kuching] Polis Sarawak terima dua laporan kes khianat
+    hyb #10 [kuching] Fire breaks out at three-storey shop along Jln Tun Ahmad Zaidi Adruce in Ku
+What is the SEZ and what will it focus on?                   False    False     True  General : SEZ To Focus On Investment, Services Sector And Hi (age 408.6h)
+    hyb # 1 [kuching] General : Budget 2027: LPPKN Fertility Programmes Among KPWKM’s Key Priorit
+    hyb # 2 [kuching] Welfare Carnival to put mental health in focus
+    hyb # 3 [kuching] Sarawak, Penang to get greater focus in Malaysia fertility push, says women
+    hyb # 4 [kuching] Helicopter crash: Refuelling location among PDRM probe focus
+    hyb # 5 [kuching] Sarawak sets sights on semiconductor front-end capabilities
+    hyb # 6 [betong] General : Pepper Industry Needs To Shift From Pursuing Production Increase 
+    hyb # 7 [-] General : 16 Tourist Hotspots Selected For ZTTP Programme To Ensure Trader'
+    hyb # 8 [sibu] General : SEZ To Focus On Investment, Services Sector And High-value Job Cr <== relevant
+    hyb # 9 [kuching] Kandungan video terus dominasi penggunaan media – Datuk Ashwad
+    hyb #10 [kuching] Youth groups urged to produce leaders, not just increase numbers
+Any crime news in Kuching recently?                          False    False    False  2 men on motorcycle allegedly hit cop at Jalan Padungan road (age 27.3h)
+    hyb # 1 [kuching] Elderly man loses RM220,000 in scam
+    hyb # 2 [kuching] Polis Sarawak terima dua laporan kes khianat
+    hyb # 3 [kuching] Polis siasat 2 premis di Kuching, Sri Aman diserang dengan bahan letupan
+    hyb # 4 [kuching] Dua kedai serbaneka 24 jam di Kuching jadi sasaran khianat
+    hyb # 5 [kuching] Arson attacks: Three detained, 10 others on police list
+    hyb # 6 [kuching] General : Police To Seek Interpol Help Over Sarawak Convenience Store Attac
+    hyb # 7 [kuching] Two 24-hour convenience stores targeted in separate arson attacks in Kuchin
+    hyb # 8 [kuching] Convenience store attacks: Hunt on for masked men
+    hyb # 9 [kuching] Masked duo linked to firebomb attacks on convenience stores in Kuching, Sri
+    hyb #10 [kuching] Polis siasat 2 premis di Kuching, Sri Aman diserang dengan bahan letupan
+Any water supply or treatment news in Sarawak?                True     True     True  General : PAAB Calls For Zero-Waste Water Treatment For Sust (age 21.8h)
+    hyb # 1 [sibu] Improved water supply eases Empawah concern, poor connectivity remains
+    hyb # 2 [kuching] Temporary water fix eases low-pressure woes at Kenyalang Food Centre
+    hyb # 3 [-] Unscheduled Water Supply Interruption
+    hyb # 4 [kuching] Water aid targeted within 12 hours for affected Sarawak communities
+    hyb # 5 [kuching] General : PAAB Calls For Zero-Waste Water Treatment For Sustainable Water S <== relevant
+    hyb # 6 [-] KKM perkukuh perkhidmatan alternatif susulan penangguhan FDS
+    hyb # 7 [mukah] Basong Water Treatment Plant Phase 3 ahead of schedule at 15.1 pct, eyes co
+    hyb # 8 [saratok] Long-standing Krian longhouse water woes prompt call for JBALB action
+    hyb # 9 [kuching] S’wak govt seeks to continue cloud seeding ops as State braces for hotter O
+    hyb #10 [-] KKB Engineering secures RM517 mil contract for water infrastructure upgrade
+
+Relevant article reachable: FYP1 (24h window) 1/10 | FYP2 vector top-10 3/10 | FYP2 hybrid top-10 6/10
+CSV -> C:\Users\vince\Documents\UTS\2025_26 FEB Degree SEM 6\CSS 3714 FYP 1\MVP\docs\fyp2\benchmark\rag_pool_coverage.csv

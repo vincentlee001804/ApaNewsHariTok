@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import re
 from typing import Iterable, Sequence
 
 import requests
@@ -11,16 +12,67 @@ from sqlalchemy import bindparam, inspect, text
 from src.core.config import (
     OLLAMA_EMBED_MODEL,
     OLLAMA_PRIMARY_TIMEOUT_SEC,
+    RAG_HYBRID_ENABLED,
+    RAG_HYBRID_RECALL_MIN_OVERLAP,
+    RAG_HYBRID_W_CATEGORY,
+    RAG_HYBRID_W_KEYWORD,
+    RAG_HYBRID_W_LOCATION,
     RAG_VECTOR_ENABLED,
     iter_ollama_generate_targets,
     ollama_headers_for_endpoint,
 )
+from src.core.location_extractor import SARAWAK_LOCATION_ALIASES
 from src.storage.database import SessionLocal, engine
 
 logger = logging.getLogger(__name__)
 
 _EMBED_CACHE: dict[str, list[float]] = {}
 _TABLE_CHECK_CACHE: dict[str, bool] = {}
+
+# Words that carry no entity/topic signal in a news question (kept local to avoid an
+# import cycle with services._DEDUP_STOPWORDS).
+_HYBRID_STOPWORDS: set[str] = {
+    "about", "after", "again", "also", "any", "are", "been", "could", "from",
+    "happened", "has", "have", "into", "just", "know", "last", "latest", "more",
+    "most", "news", "only", "other", "over", "recent", "recently", "said", "says",
+    "shall", "should", "some", "such", "tell", "than", "that", "the", "their",
+    "them", "then", "there", "these", "this", "today", "under", "updates",
+    "update", "very", "were", "what", "when", "where", "which", "while", "will",
+    "with", "would", "yesterday",
+}
+
+
+def _distinctive_tokens(text: str | None) -> set[str]:
+    raw = text or ""
+    words = re.findall(r"[a-z]+", raw.lower())
+    tokens = {w for w in words if len(w) >= 4 and w not in _HYBRID_STOPWORDS}
+    # Acronyms carry heavy news-question signal (SEZ, API, SESCO) but are short — keep
+    # them regardless of length. Match on the original casing before lowercasing.
+    tokens |= {m.lower() for m in re.findall(r"\b[A-Z]{2,}\b", raw)}
+    return tokens
+
+
+def _query_locations(query: str) -> set[str]:
+    """
+    Sarawak locations named anywhere in the question. The pipeline extractor anchors
+    locations at the start of a headline, but users name them mid-sentence
+    ("...in Kuching?"), so scan the alias map directly (word-boundary match).
+    """
+    q = query.lower()
+    found: set[str] = set()
+    for canonical, aliases in SARAWAK_LOCATION_ALIASES.items():
+        for alias in aliases:
+            if re.search(rf"\b{re.escape(alias)}\b", q):
+                found.add(canonical)
+                break
+    return found
+
+
+def _article_blob(art: object) -> str:
+    return (
+        f"{getattr(art, 'title', '') or ''} "
+        f"{(getattr(art, 'ai_summary', None) or getattr(art, 'raw_summary', None) or '')}"
+    )
 
 
 def _vector_table_available() -> bool:
@@ -107,17 +159,18 @@ def _article_text_for_embedding(article) -> str:
     return "\n".join(parts)
 
 
-def _vector_top_articles(
+def _vector_scores(
     *,
     query: str,
     article_ids: Sequence[int],
-    top_k: int,
-) -> list[int] | None:
+    fetch_k: int,
+) -> list[tuple[int, float]] | None:
     """
-    FYP2 (pgvector): rank article_ids by cosine similarity to the query using the stored
-    article_embeddings. Returns a ranked list of article_ids, or None when vector search is
-    unavailable (disabled, not Postgres, table missing, Ollama embed down, or any SQL error)
-    so the caller falls back to the FYP1 in-memory path.
+    FYP2 (pgvector): cosine scores of the top-``fetch_k`` articles (restricted to
+    ``article_ids`` when given) from stored embeddings. Returns [(article_id, cosine)]
+    sorted descending, or None when vector search is unavailable (disabled, not Postgres,
+    table missing, Ollama embed down, or any SQL error) so the caller falls back to the
+    FYP1 in-memory path.
     """
     if not RAG_VECTOR_ENABLED:
         return None
@@ -133,27 +186,111 @@ def _vector_top_articles(
         with SessionLocal() as session:
             if article_ids:
                 sql = text(
-                    "SELECT article_id FROM article_embeddings "
+                    "SELECT article_id, 1 - (embedding <=> CAST(:qv AS vector)) AS cosine "
+                    "FROM article_embeddings "
                     "WHERE article_id IN :ids "
                     "ORDER BY embedding <=> CAST(:qv AS vector) "
                     "LIMIT :k"
                 ).bindparams(bindparam("ids", expanding=True))
                 rows = session.execute(
-                    sql, {"ids": [int(i) for i in article_ids], "qv": vec_literal, "k": int(top_k)}
+                    sql, {"ids": [int(i) for i in article_ids], "qv": vec_literal, "k": int(fetch_k)}
                 ).all()
             else:
                 rows = session.execute(
                     text(
-                        "SELECT article_id FROM article_embeddings "
+                        "SELECT article_id, 1 - (embedding <=> CAST(:qv AS vector)) AS cosine "
+                        "FROM article_embeddings "
                         "ORDER BY embedding <=> CAST(:qv AS vector) LIMIT :k"
                     ),
-                    {"qv": vec_literal, "k": int(top_k)},
+                    {"qv": vec_literal, "k": int(fetch_k)},
                 ).all()
-        ranked = [int(r[0]) for r in rows]
-        return ranked or None
+        scored = [(int(r[0]), float(r[1])) for r in rows]
+        return scored or None
     except Exception as e:
         logger.warning("[rag] vector search failed, using in-memory fallback: %s", e)
         return None
+
+
+def _vector_top_articles(
+    *,
+    query: str,
+    article_ids: Sequence[int],
+    top_k: int,
+) -> list[int] | None:
+    """Thin wrapper over _vector_scores returning ranked ids only (compat for callers/eval)."""
+    scored = _vector_scores(query=query, article_ids=article_ids, fetch_k=max(1, top_k))
+    if not scored:
+        return None
+    return [aid for aid, _ in scored]
+
+
+def _metadata_recall_ids(
+    *,
+    q_tokens: set[str],
+    q_locs: set[str],
+    candidates: Iterable,
+    already: set[int],
+) -> set[int]:
+    """
+    FYP2 hybrid recall: articles whose stored metadata matches the question directly,
+    regardless of cosine. Vector-only ranking buries these (small embedding model), so
+    they must be unioned into the rescored set — a boost cannot promote an article the
+    fetch never returned (first hybrid eval: 3/10 -> 3/10, every miss below rank 50).
+    """
+    out: set[int] = set()
+    if not q_tokens and not q_locs:
+        return out
+    for art in candidates:
+        aid = getattr(art, "id", None)
+        if aid is None or aid in already:
+            continue
+        loc = (getattr(art, "location", None) or "").lower()
+        if loc and loc in q_locs:
+            out.add(aid)
+            continue
+        if q_tokens:
+            overlap = len(q_tokens & _distinctive_tokens(_article_blob(art))) / len(q_tokens)
+            if overlap >= RAG_HYBRID_RECALL_MIN_OVERLAP:
+                out.add(aid)
+    return out
+
+
+def _hybrid_rescore(
+    *,
+    query: str,
+    scored: list[tuple[int, float]],
+    articles_by_id: dict[int, object],
+    q_locs: set[str] | None = None,
+) -> list[int]:
+    """
+    FYP2 (hybrid retrieval): add metadata boosts to cosine similarity —
+      + W_KEYWORD  × fraction of the question's distinctive tokens present in the article
+                   (rescues rare proper nouns like "Bebuling" that embeddings underweight);
+      + W_LOCATION when the question names a Sarawak location matching the article's;
+      + W_CATEGORY when the question names the article's category label.
+    """
+    q_tokens = _distinctive_tokens(query)
+    if q_locs is None:
+        q_locs = _query_locations(query)
+
+    out: list[tuple[float, int]] = []
+    for aid, cosine in scored:
+        art = articles_by_id.get(aid)
+        if art is None:
+            continue
+        score = cosine
+        art_tokens = _distinctive_tokens(_article_blob(art))
+        if q_tokens:
+            score += RAG_HYBRID_W_KEYWORD * (len(q_tokens & art_tokens) / len(q_tokens))
+        art_loc = (getattr(art, "location", None) or "").lower()
+        if art_loc and art_loc in q_locs:
+            score += RAG_HYBRID_W_LOCATION
+        cat = (getattr(art, "category", None) or "").lower()
+        if cat and cat in q_tokens:
+            score += RAG_HYBRID_W_CATEGORY
+        out.append((score, aid))
+    out.sort(key=lambda t: t[0], reverse=True)
+    return [aid for _, aid in out]
 
 
 def semantic_rank_articles(
@@ -164,8 +301,8 @@ def semantic_rank_articles(
 ) -> list:
     """
     Rank candidate articles by embedding similarity to the query.
-    FYP2: uses stored pgvector embeddings when available; otherwise (or on any failure)
-    falls back to the FYP1 in-memory cosine path.
+    FYP2: pgvector cosine (fetch-deep + hybrid metadata rescoring) when available;
+    otherwise falls back to the FYP1 in-memory path on any failure.
     Returns selected article objects in descending relevance.
     """
     candidates = list(articles)
@@ -175,10 +312,33 @@ def semantic_rank_articles(
     # FYP2 path: stored vectors (articles without embeddings simply do not surface).
     ids = [getattr(a, "id", None) for a in candidates]
     if all(i is not None for i in ids):
-        ranked_ids = _vector_top_articles(query=query, article_ids=ids, top_k=max(1, top_k))
-        if ranked_ids:
+        top_k = max(1, top_k)
+        # Fetch deeper than top_k so hybrid boosts can promote matches from below the cut.
+        fetch_k = min(len(ids), max(50, top_k * 5))
+        scored = _vector_scores(query=query, article_ids=ids, fetch_k=fetch_k)
+        if scored:
             by_id = {getattr(a, "id"): a for a in candidates}
-            return [by_id[i] for i in ranked_ids if i in by_id]
+            ranked_ids = [aid for aid, _ in scored if aid in by_id]
+            if RAG_HYBRID_ENABLED:
+                q_tokens = _distinctive_tokens(query)
+                q_locs = _query_locations(query)
+                # Metadata recall: union in articles the question names directly that
+                # cosine ranking buried; re-score the union in one vector query.
+                extra = _metadata_recall_ids(
+                    q_tokens=q_tokens,
+                    q_locs=q_locs,
+                    candidates=candidates,
+                    already=set(ranked_ids),
+                )
+                if extra:
+                    union = sorted(set(ranked_ids) | extra)
+                    deep = _vector_scores(query=query, article_ids=union, fetch_k=len(union))
+                    if deep:
+                        scored = deep
+                ranked_ids = _hybrid_rescore(
+                    query=query, scored=scored, articles_by_id=by_id, q_locs=q_locs
+                )
+            return [by_id[i] for i in ranked_ids[:top_k] if i in by_id]
 
     # FYP1 fallback: embed the query and every candidate on the fly, cosine in memory.
     query_vec = _embed_text(query, kind="query")

@@ -10,6 +10,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _env_float(key: str, default: str) -> float:
+    return float((os.getenv(key, default) or default).strip() or default)
+
+
 TELEGRAM_BOT_TOKEN: str | None = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # Ollama: primary = local or any URL. Optional OLLAMA_API_BASE_FALLBACK = Ollama Cloud when primary is down.
@@ -66,6 +70,38 @@ RAG_EMBEDDING_DIM: Final[int] = max(
 RAG_EMBED_BATCH_SIZE: Final[int] = max(
     1,
     int((os.getenv("RAG_EMBED_BATCH_SIZE", "8").strip() or "8")),
+)
+
+# FYP2 (hybrid retrieval): rescore vector candidates with the metadata the pipeline
+# already extracts — location/category matches and distinctive-keyword overlap —
+# which small embedding models handle poorly on their own (see docs/fyp2/02 §4.3).
+RAG_HYBRID_ENABLED: Final[bool] = os.getenv("RAG_HYBRID_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+# Boost weights added to the cosine score (all in [0, 1] cosine units). Tune via eval_rag_pools.
+RAG_HYBRID_W_LOCATION: Final[float] = _env_float("RAG_HYBRID_W_LOCATION", "0.15")
+RAG_HYBRID_W_CATEGORY: Final[float] = _env_float("RAG_HYBRID_W_CATEGORY", "0.10")
+RAG_HYBRID_W_KEYWORD: Final[float] = _env_float("RAG_HYBRID_W_KEYWORD", "0.25")
+# Minimum fraction of the question's distinctive tokens an article must share to be
+# unioned into the hybrid rescored set (metadata recall). 0.5 = at least half.
+RAG_HYBRID_RECALL_MIN_OVERLAP: Final[float] = _env_float("RAG_HYBRID_RECALL_MIN_OVERLAP", "0.5")
+
+# News agent evidence window. FYP1 hardcoded 24h; FYP2 defaults to the full 30-day
+# retention corpus now that vector search makes large pools affordable.
+NEWS_AGENT_WINDOW_HOURS: Final[int] = max(
+    1,
+    int((os.getenv("NEWS_AGENT_WINDOW_HOURS", "720").strip() or "720")),
+)
+# Candidate pool size fed to semantic ranking in the news agent (FYP1 effectively 15).
+# Large enough that hybrid metadata recall (location/keyword union) is not capped off —
+# the whole window's articles are already in memory, so a wider pool costs one query.
+RAG_AGENT_POOL_SIZE: Final[int] = max(
+    5,
+    int((os.getenv("RAG_AGENT_POOL_SIZE", "400").strip() or "400")),
 )
 
 _fb_base_raw = (os.getenv("OLLAMA_API_BASE_FALLBACK") or "").strip().rstrip("/")
@@ -548,10 +584,6 @@ DB_CLEANUP_INTERVAL_HOURS: Final[int] = max(
     1,
     int((os.getenv("DB_CLEANUP_INTERVAL_HOURS", "24").strip() or "24")),
 )
-
-
-def _env_float(key: str, default: str) -> float:
-    return float((os.getenv(key, default) or default).strip() or default)
 
 
 # Waze Live Map (unofficial georss JSON used by the browser map). Bounding box = Sarawak by default.

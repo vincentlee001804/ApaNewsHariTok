@@ -1,8 +1,9 @@
-# Phase 2 — pgvector RAG (Vector Search)
+# Phase 2 — pgvector RAG (Vector Search + Hybrid Retrieval)
 
 **Thesis priority:** #1 (RAG retrieval quality) from §5.5 Future Works.
-**Date:** 2026-10-05 (FYP 2, Week 1)
-**Status:** implementation complete, smoke-tested end-to-end against Supabase; full backfill pending.
+**Date:** 2026-10-05 (vector search) / 2026-10-06 (hybrid retrieval) — FYP 2, Week 1
+**Status:** complete — vector search, hybrid rescoring, and widened news-agent window all
+implemented and evaluated against the production Supabase corpus (1,692 embedded articles).
 
 ---
 
@@ -101,7 +102,7 @@ a known relevant article (`scripts/eval_rag_pools.py`, results in
 
 | Path | Reachable relevant articles |
 |---|---|
-| FYP1 (24h window) | **2 / 10** |
+| FYP1 (24h window) | **1–2 / 10** (run-dependent: the crime question's article was 27h old, straddling the boundary) |
 | FYP2 (vector top-10 over the full 30-day corpus) | **3 / 10** |
 
 The vector path *can* reach every article (any pool size costs 1 query embedding + SQL),
@@ -124,15 +125,92 @@ Interventions tried:
 
 The bottleneck is no longer *where* vectors live or *how many* articles can be searched —
 it is the **ranking signal** of a small embedding model over short RSS snippets. The
-system already extracts structured metadata per article (location, category); the planned
-next iteration is **hybrid retrieval**: pgvector cosine + a rescore boost for
+system already extracts structured metadata per article (location, category); the next
+iteration (§4.5) is **hybrid retrieval**: pgvector cosine + a rescore boost for
 location/category/entity matches between question and article. The same eval script
 measures it.
 
-Other honest limitations: production Q&A still stubs to the 24h window in
+Other honest limitations at this point: production Q&A still stubs to the 24h window in
 `get_news_agent_response_for_user`; widening that window is a one-line change once hybrid
 rescoring is in place (otherwise dilution, as seen with the crime question scoring in-24h
 but missing vector top-10).
+
+### 4.5 Hybrid retrieval (2026-10-06) — implemented and evaluated
+
+**Not in the original FYP 2 plan** (plan §5.5 lists vector search, dedup, official alerts,
+summaries). Added as an evidence-driven step: §4.3's diagnosis showed the embedding model
+is the ranking bottleneck, and the pipeline already extracts the metadata that could
+compensate. Approved by project owner 2026-10-06.
+
+#### Design
+
+Three additions on top of the pgvector path, all in `src/ai/retriever.py`:
+
+1. **Metadata boosts** (`_hybrid_rescore`): after vector fetch, add to each article's cosine
+   - `RAG_HYBRID_W_KEYWORD` (0.25) × fraction of the question's distinctive tokens present
+     in the article (rescues rare proper nouns like "Bebuling");
+   - `RAG_HYBRID_W_LOCATION` (0.15) when the question names a Sarawak location matching the
+     article's extracted location;
+   - `RAG_HYBRID_W_CATEGORY` (0.10) when the question names the article's category.
+2. **Anywhere location scan** (`_query_locations`): the pipeline extractor anchors locations
+   at the start of a headline, but users name them mid-sentence ("…in Kuching?"), so the
+   question is scanned directly against `SARAWAK_LOCATION_ALIASES`.
+3. **Metadata recall union** (`_metadata_recall_ids`): articles with a location match, or
+   sharing ≥ `RAG_HYBRID_RECALL_MIN_OVERLAP` (0.5) of the question's tokens, are **unioned
+   into the rescored set** regardless of cosine. Without this, boosts are cosmetic: the
+   first hybrid eval scored 3/10 — *identical* to vector-only, because every rescued miss
+   sat at vector rank 107–982, outside the fetch-deep-50 window the rescore could reorder.
+   Acronyms (SEZ, API, SESCO) are kept as tokens regardless of length — the ≥4-letter
+   filter had silently dropped them.
+
+All weights and switches are env-tunable in `src/core/config.py`
+(`RAG_HYBRID_ENABLED` defaults on; `false` restores pure vector ranking).
+
+#### Result (same 10 questions, same corpus; `benchmark/rag_pool_hybrid_20261006.txt`)
+
+| Path | Relevant article in top-10 |
+|---|---|
+| FYP1 (24h window) | 1 / 10 |
+| FYP2 vector only | 3 / 10 |
+| **FYP2 hybrid** | **6 / 10** |
+
+The three hybrid rescues: **Serian haze/API** (location + keyword), **Bebuling Airport**
+(keyword recall of a rare proper noun at vector rank ~982), **SEZ** (acronym keyword).
+The four remaining single-article misses are mostly **not** quality failures — the
+verbose top-10s show the right *story* surfaces: for "helicopter crash at Long Lellang"
+**all 10** results are about that crash (sibling follow-up articles outrank the designated
+one); for "arson on 24-hour shops" 10/10 are about those arson attacks, including the
+Malay-language article; for "crime news in Kuching" 10/10 are Kuching crime/police
+stories. The strict per-article metric undercounts answer quality; a same-story cluster
+metric is future work.
+
+**Process record (negative results kept for the report):**
+- v1 boost-only hybrid: 3/10 = no change. Root cause: rescoring reorders only what the
+  vector fetch returns; the misses sat at ranks 107–982. → led to the recall union (v2).
+- v2 recall union: 5/10. Debugging the SEZ miss showed "will" leaking into the query's
+  distinctive tokens and diluting the keyword fraction (2/3 instead of 2/2).
+  → added modal verbs to the stopword list (v3).
+- v3: 6/10 (final).
+
+#### Residual limitations (honest, for §5.4-style discussion)
+
+- **Cross-lingual gap persists**: an English question against a Malay-titled article
+  (arson case, cosine 0.556, vector rank ~394) is rescued into the pool only when its
+  location matches; keyword boosts cannot fire cross-lingually.
+- **Embedding ceiling**: when the relevant article's cosine is far below the top-10
+  boundary (SEZ was 0.48 vs ~0.67 before boosts), +0.25 boost barely closes the gap —
+  it only just made top-10. A stronger embedding model or a cross-encoder reranker is the
+  next lever if FYP 2 budget allows.
+- **Sibling competition**: big stories generate many similar articles that split the
+  keyword boost equally; ranking within a story cluster is still cosine-driven.
+
+#### Production window change (same commit)
+
+`get_news_agent_response_for_user` now uses `NEWS_AGENT_WINDOW_HOURS` (default 720h = the
+full 30-day retention corpus) instead of the hardcoded 24h, and the semantic pool grew
+from 15 to `RAG_AGENT_POOL_SIZE` (default 400). Without hybrid, widening the window would
+have diluted quality; with it, old-but-relevant stories become reachable (several eval
+relevant articles were 18–27 days old).
 
 ## 5. Reproduction
 

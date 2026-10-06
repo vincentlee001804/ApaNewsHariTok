@@ -43,6 +43,17 @@
 - Config additions in `src/core/config.py`: `RAG_VECTOR_ENABLED`, `RAG_CHUNK_*`, backfill batch sizes. Degrade to today's in-memory path when disabled/unavailable.
 - Evaluation: fixed question set (20–30 real user-style questions), compare retrieval quality before/after (hit-rate of the article a human would pick).
 
+**Phase 2 addendum — hybrid retrieval (done 2026-10-06, owner-approved; not in the original plan above).**
+The §4.3 diagnosis in `docs/fyp2/02-pgvector-rag.md` showed the embedding model (not vector
+storage) was the ranking bottleneck, so a hybrid layer was added on top of pgvector:
+metadata boosts (location/category/keyword, env-weighted) + a metadata recall union
+(location or ≥50% keyword overlap enters the rescored set regardless of cosine) + acronym
+tokens + anywhere location scan in questions. News-agent evidence window widened 24h → 30d
+(`NEWS_AGENT_WINDOW_HOURS`) with the semantic pool 15 → 400 (`RAG_AGENT_POOL_SIZE`).
+Measured on the fixed 10-question set: relevant-article top-10 rate 1/10 (FYP1) → 3/10
+(vector) → **6/10 (hybrid)**; the remaining misses still surface the correct story in the
+top-10 (see 02 doc §4.5 for the full record, including two negative-result iterations).
+
 ### Phase 3 — Semantic dedup (Weeks 6–12, overlaps Phase 2)
 *Thesis priority #2. Reuses the pgvector work.*
 

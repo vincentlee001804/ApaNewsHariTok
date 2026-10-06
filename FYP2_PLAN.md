@@ -54,13 +54,20 @@ Measured on the fixed 10-question set: relevant-article top-10 rate 1/10 (FYP1) 
 (vector) → **6/10 (hybrid)**; the remaining misses still surface the correct story in the
 top-10 (see 02 doc §4.5 for the full record, including two negative-result iterations).
 
-### Phase 3 — Semantic dedup (Weeks 6–12, overlaps Phase 2)
+### Phase 3 — Semantic dedup (Weeks 6–12, overlaps Phase 2) — DONE 2026-10-06
 *Thesis priority #2. Reuses the pgvector work.*
 
 - Keep today's Jaccard pass as a cheap prefilter, then run embedding similarity (same `article_chunks`/article-level vectors from Phase 2) on survivors: same-story pairs get flagged above a tuned cosine threshold.
 - Tune against a labeled set: pull known duplicate pairs from production `news_articles` (same incident, multiple publishers) + known distinct pairs; pick threshold that minimizes both repeat notifications and false merges.
 - Config: `CROSS_SOURCE_DEDUP_SEMANTIC_ENABLED`, `..._COSINE_THRESHOLD` in `config.py`.
 - Evaluation metric: duplicate-repeat rate before/after, measured on live traffic over a fixed window.
+
+**Outcome (full record: `docs/fyp2/03-semantic-dedup.md`):** cosine pass added to delivery
+clustering on stored article vectors (no LLM calls); threshold **0.85** chosen from 249
+labeled production pairs (negatives ≤ 0.765, same-story band ≥ 0.85). Clustering
+simulation on a 14-day batch: 312 → 249 clusters, 71 semantic-only merges including
+cross-lingual pairs Jaccard cannot catch; manual sample ~23% false-merge rate, soft cost
+(merged members keep their source links). Human-labeled tuning set deferred to Phase 5.
 
 ### Phase 4 — Real-time official alerts (Weeks 10–14, time-boxed)
 *Thesis priority #3. Highest risk, lowest certainty — schedule last.*

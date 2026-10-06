@@ -1,0 +1,70 @@
+corpus: 1746 articles in 45d, 1739 with embeddings
+pair CSV -> C:\Users\vince\Documents\UTS\2025_26 FEB Degree SEM 6\CSS 3714 FYP 1\MVP\docs\fyp2\benchmark\dedup_pair_cosines.csv  (249 pairs)
+jaccard_caught  n=40  min=0.755 p25=0.870 median=0.927 p75=0.965 max=1.000
+hard_positive   n=149 min=0.570 p25=0.675 median=0.707 p75=0.774 max=0.957
+negative        n=60  min=0.492 p25=0.625 median=0.667 p75=0.688 max=0.765
+
+clustering simulation: 339 articles from last 14d
+clusters before (Jaccard only): 312
+clusters after  (Jaccard+semantic): 249
+merges made ONLY by semantic pass: 71
+  cos=0.872 | Sarawak Tourism Board expands footprint in Tokyo, Osaka to attract Jap
+           -> AirBorneo to add flights as demand grows, says Abang Johari
+  cos=0.864 | Tourism Minister seeks stronger air links to boost Russian tourist arr
+           -> AirBorneo to add flights as demand grows, says Abang Johari
+  cos=0.881 | Man jailed two weeks for trespassing at house linked to Sarawak deputy
+           -> Foreigner jailed six months for overstaying in Malaysia
+  cos=0.885 | Sarawak Borneo Craft Festival targets RM3 mln in sales, 125,000 visito
+           -> BCG 2.0 targets 30,000 visitors
+  cos=0.855 | MBKS’s Ausome Park, Kuching Natural Farmers Market win at 2026 JCI M’s
+           -> SarawakPass clinches double honours at Digital Economy Awards 2026 for
+  cos=0.855 | Police seek witnesses of Sunday’s fatal motorcycle crash near Miri Sen
+           -> Motorcyclist dies after veering into opposite lane, plunging into drai
+  cos=0.888 | Sarawak to host international water conference in 2028
+           -> Kuching to make regional first as host of int’l World Water Congress &
+  cos=0.864 | 10 kawasan catat IPU tidak sihat setakat 8 malam
+           -> All areas in Sarawak record moderate air quality at 8am on Tuesday
+  cos=0.856 | Sembilan kawasan catat IPU tidak sihat setakat 10 pagi
+           -> All areas in Sarawak record moderate air quality at 8am on Tuesday
+  cos=0.884 | Sarawak Officially Unveils Its First Locally Designed GaN Power Semico
+           -> SMD unveils first locally-designed GaN power semiconductor chip keteq.
+  cos=0.905 | S’wak unveils keteq.GaN, first locally designed gallium nitride power 
+           -> SMD unveils first locally-designed GaN power semiconductor chip keteq.
+  cos=0.866 | keteq.GaN marks S’wak’s push to expand semiconductor applications beyo
+           -> SMD unveils first locally-designed GaN power semiconductor chip keteq.
+  cos=0.936 | S’wak unveils keteq.GaN, first locally designed GaN power semiconducto
+           -> SMD unveils first locally-designed GaN power semiconductor chip keteq.
+  cos=0.877 | Four-day programme lined up for TYT’s 80th birthday
+           -> Interfaith thanksgiving ceremony among programmes for Sarawak TYT’s 80
+  cos=0.914 | Premier remembers Song Swee Guan as humble, dedicated leader with stro
+           -> Sarawak’s only Mayor-MP-Speaker: Leaders remember Datuk Song Swee Guan
+  cos=0.886 | Song remembered for putting people first
+           -> Sarawak’s only Mayor-MP-Speaker: Leaders remember Datuk Song Swee Guan
+  cos=0.869 | Pilot’s widow questions MOH silence following Long Lellang helicopter 
+           -> ‘I don’t want sympathy, I want results’: Zainol Afiq’s widow questions
+  cos=0.869 | Balingian Rumah Spektra Permata scheme to provide 54 homes, first 22 u
+           -> Sarawak targets another 20,000 affordable homes
+  cos=0.943 | Kebocoran gas bawah tanah paksa operasi ladang sawit Kuala Baram dihen
+           -> Gas bawah tanah bocor, ladang sawit ditutup sementara
+  cos=0.885 | Underground gas leak prompts shutdown at Kuala Baram oil palm site
+           -> Gas bawah tanah bocor, ladang sawit ditutup sementara
+  cos=0.962 | Repair work is completed 1.25PM
+           -> Repair work is completed 4.30PM.
+  cos=0.948 | Repair work is completed 5.15PM
+           -> Repair work is completed 4.30PM.
+  cos=0.888 | 2 men on motorcycle allegedly hit cop at Jalan Padungan roadblock
+           -> Dua lelaki langgar anggota polis sedang dikesan
+  cos=0.855 | General : Audit Report Flags Weaknesses In Pan Borneo Highway, Flood M
+           -> Contract, governance weaknesses flagged in Sarawak Pan Borneo project 
+  cos=0.953 | Founding mayor of Kuching South, Song Swee Guan, dies at 84
+           -> Datuk Song Swee Guan, first Kuching South mayor, dies at 84
+  cos=0.977 | Former DUN Speaker, first MBKS mayor Song Swee Guan dies at 84
+           -> Datuk Song Swee Guan, first Kuching South mayor, dies at 84
+  cos=0.857 | Veterinary dept withdraws ‘Kumang’, ‘Keling’ livestock references foll
+           -> Keling, Kumang cattle stunt: Analyst questions Sarawak Agrofest cultur
+  cos=0.860 | Sarawak Open Bonsai Championship goes cross-Borneo, draws 167 entries 
+           -> Pekat Pickleball debut exceeds turnout expectations
+  cos=0.887 | Seri Santubong petanque championship set for 18th edition
+           -> Sri Santubong delivers two days of petanque action
+  cos=0.890 | Sarawak dijangka dilanda ribut petir, hujan lebat hari ini
+           -> Amaran ribut petir, hujan lebat di tujuh negeri hingga 10 malam ini

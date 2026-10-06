@@ -224,6 +224,68 @@ def _vector_top_articles(
     return [aid for aid, _ in scored]
 
 
+def fetch_stored_vectors(article_ids: Sequence[int]) -> dict[int, list[float]] | None:
+    """
+    FYP2 (semantic dedup): one SQL fetch of stored embeddings for ``article_ids``.
+    Returns {article_id: vector} for the ids that have rows, or None when vector storage
+    is unavailable (disabled, not Postgres, table missing, or any SQL error) so callers
+    skip the semantic pass and keep the Jaccard-only behavior.
+    """
+    ids = [int(i) for i in article_ids if i is not None]
+    if not ids or not RAG_VECTOR_ENABLED:
+        return None
+    if not _vector_table_available():
+        return None
+    try:
+        with SessionLocal() as session:
+            rows = session.execute(
+                text(
+                    "SELECT article_id, embedding FROM article_embeddings "
+                    "WHERE article_id IN :ids"
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": ids},
+            ).all()
+        out: dict[int, list[float]] = {}
+        for r in rows:
+            vec = _coerce_vector(r[1])
+            if vec is not None:
+                out[int(r[0])] = vec
+        return out or None
+    except Exception as e:
+        logger.warning("[rag] stored-vector fetch failed, semantic dedup skipped: %s", e)
+        return None
+
+
+def _coerce_vector(value) -> list[float] | None:
+    """pgvector columns come back as '[f,f,...]' text (or '{...}') without a type codec."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        body = value.strip().strip("[]{}")
+        if not body:
+            return None
+        try:
+            return [float(x) for x in body.split(",")]
+        except ValueError:
+            return None
+    try:
+        return [float(x) for x in value]
+    except (TypeError, ValueError):
+        return None
+
+
+def cosine_between(a: Sequence[float] | None, b: Sequence[float] | None) -> float | None:
+    """Pure-python cosine of two stored embeddings (same model => same dimension)."""
+    if not a or not b or len(a) != len(b):
+        return None
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0.0 or nb == 0.0:
+        return None
+    return dot / (na * nb)
+
+
 def _metadata_recall_ids(
     *,
     q_tokens: set[str],

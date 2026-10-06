@@ -24,6 +24,8 @@ from src.core.config import (
     CROSS_SOURCE_DEDUP_DEBUG,
     CROSS_SOURCE_DEDUP_ENABLED,
     CROSS_SOURCE_DEDUP_MIN_BODY_TOKENS,
+    CROSS_SOURCE_DEDUP_SEMANTIC_COSINE_THRESHOLD,
+    CROSS_SOURCE_DEDUP_SEMANTIC_ENABLED,
     CROSS_SOURCE_DEDUP_TITLE_JACCARD_THRESHOLD,
     DEDUPLICATION_ENABLED,
     NEWS_AGENT_WINDOW_HOURS,
@@ -152,8 +154,21 @@ def _cluster_ranked_articles_cross_source(
     if not CROSS_SOURCE_DEDUP_ENABLED:
         return [(art, [art]) for art in ranked_articles[:max_items]]
 
+    # FYP2 Phase 3 (semantic dedup): stored embeddings let us catch same-story pairs whose
+    # wording differs too much for Jaccard (thesis limitation: cross-source duplicates).
+    # Lazy import (services<->retriever boundary); silently skipped when vector storage
+    # is unavailable or articles lack embeddings (graceful degradation, rule #8).
+    semantic_vecs: dict[int, list[float]] = {}
+    if CROSS_SOURCE_DEDUP_SEMANTIC_ENABLED:
+        from src.ai.retriever import fetch_stored_vectors
+
+        ids = [a.id for a in ranked_articles if getattr(a, "id", None) is not None]
+        if ids:
+            semantic_vecs = fetch_stored_vectors(ids) or {}
+
     clusters: list[tuple[NewsArticle, list[NewsArticle]]] = []
     seen_signatures: list[tuple[set[str], set[str], set[str], str, str]] = []
+    seen_vecs: list[list[float] | None] = []
     seen_links: set[str] = set()
 
     for art in ranked_articles:
@@ -186,6 +201,21 @@ def _cluster_ranked_articles_cross_source(
             title_key=title_key,
             seen_signatures=seen_signatures,
         )
+        if duplicate_match is None and semantic_vecs:
+            from src.ai.retriever import cosine_between
+
+            vec = semantic_vecs.get(art.id)
+            if vec is not None:
+                for idx, seen_vec in enumerate(seen_vecs):
+                    if seen_vec is None:
+                        continue
+                    cos = cosine_between(vec, seen_vec)
+                    if (
+                        cos is not None
+                        and cos >= CROSS_SOURCE_DEDUP_SEMANTIC_COSINE_THRESHOLD
+                    ):
+                        duplicate_match = (idx, "semantic", cos)
+                        break
         if duplicate_match is not None:
             cluster_idx, match_by, score = duplicate_match
             clusters[cluster_idx][1].append(art)
@@ -205,6 +235,7 @@ def _cluster_ranked_articles_cross_source(
         seen_signatures.append(
             (title_tokens, body_tokens, ai_summary_tokens, source_norm, title_key)
         )
+        seen_vecs.append(semantic_vecs.get(art.id))
         clusters.append((art, [art]))
         if CROSS_SOURCE_DEDUP_DEBUG:
             logger.info(

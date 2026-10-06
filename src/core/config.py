@@ -464,6 +464,32 @@ CROSS_SOURCE_DEDUP_MIN_BODY_TOKENS: Final[int] = max(
     8,
     int((os.getenv("CROSS_SOURCE_DEDUP_MIN_BODY_TOKENS", "18").strip() or "18")),
 )
+# FYP2 Phase 3 (semantic dedup): cosine same-story check on stored article embeddings,
+# applied after the Jaccard pass misses. Catches same-incident articles whose wording
+# differs too much for token overlap (thesis limitation: cross-source duplicates).
+# Requires the pgvector table (Phase 2); silently skipped when unavailable (rule #8).
+CROSS_SOURCE_DEDUP_SEMANTIC_ENABLED: Final[bool] = os.getenv(
+    "CROSS_SOURCE_DEDUP_SEMANTIC_ENABLED", "true"
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+# Same-story floor measured on labeled production pairs — see docs/fyp2/03-semantic-dedup.md.
+CROSS_SOURCE_DEDUP_SEMANTIC_COSINE_THRESHOLD: Final[float] = min(
+    1.0,
+    max(
+        0.0,
+        float(
+            (
+                os.getenv("CROSS_SOURCE_DEDUP_SEMANTIC_COSINE_THRESHOLD", "0.85").strip()
+                or "0.85"
+            )
+        ),
+    ),
+)
 
 # Background RSS prefetch (store to DB while bot is running)
 PREFETCH_ENABLED: Final[bool] = os.getenv("PREFETCH_ENABLED", "true").strip().lower() in {

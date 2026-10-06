@@ -82,7 +82,10 @@ complex questions.
 
 ## 5. Next (Week 2 onward)
 
-- **Phase 3 — semantic dedup** (thesis priority #2): cosine same-story detection on top
-  of the Jaccard prefilter, reusing Phase 2 vectors; threshold tuned on labeled pairs.
+- ~~**Phase 3 — semantic dedup**~~ **DONE 2026-10-06** (same day): cosine same-story pass
+  on stored vectors, threshold 0.85 from 249 labeled pairs; 14-day clustering simulation
+  312 → 249 clusters with 71 semantic-only merges incl. cross-lingual pairs. Full record:
+  `03-semantic-dedup.md`.
 - Phase 4 — real-time official alerts (time-boxed; highest risk).
-- Phase 5 — evaluation expansion 86 → 150+ respondents; deferred Phase 1 mimo benchmark.
+- Phase 5 — evaluation expansion 86 → 150+ respondents; human-labeled dedup tuning set;
+  deferred Phase 1 mimo benchmark.

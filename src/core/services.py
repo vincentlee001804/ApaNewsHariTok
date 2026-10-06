@@ -877,7 +877,53 @@ def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
                         updated += 1
                 except Exception:
                     session.rollback()
+    # FYP2 (pgvector RAG): keep stored embeddings fresh for newly ingested articles.
+    # Best-effort: never let embedding failures affect the prefetch pipeline.
+    try:
+        embed_articles_for_ids(article_ids)
+    except Exception:
+        pass
     return updated
+
+
+def embed_articles_for_ids(article_ids: List[int]) -> int:
+    """
+    FYP2 (pgvector RAG): embed articles that do not have an article_embeddings row yet,
+    using the same text composition as the retriever (title + summary + category + location
+    + state). Postgres-only; returns the number of rows inserted.
+    """
+    from src.ai.retriever import _embed_text
+    from src.core.config import OLLAMA_EMBED_MODEL, RAG_VECTOR_ENABLED
+    from src.core.models import ArticleEmbedding
+
+    if not RAG_VECTOR_ENABLED or not article_ids:
+        return 0
+
+    inserted = 0
+    with SessionLocal() as session:
+        pending = session.execute(
+            select(NewsArticle).where(
+                NewsArticle.id.in_(article_ids),
+                NewsArticle.id.notin_(select(ArticleEmbedding.article_id).scalar_subquery()),
+            )
+        ).scalars().all()
+        for art in pending:
+            text = "\n".join(
+                p for p in [art.title, (art.ai_summary or "") or (art.raw_summary or ""),
+                            art.category, art.location, art.state] if p
+            )
+            if not text.strip():
+                continue
+            try:
+                vec = _embed_text(text)
+                if not vec:
+                    continue
+                session.add(ArticleEmbedding(article_id=art.id, embedding=vec, model=OLLAMA_EMBED_MODEL))
+                session.commit()
+                inserted += 1
+            except Exception:
+                session.rollback()
+    return inserted
 
 
 def build_urgent_preview(title: str, summary: str | None, max_words: int = 45) -> str:

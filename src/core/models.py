@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -15,6 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from src.core.config import RAG_EMBEDDING_DIM
 from src.storage.database import Base
 
 
@@ -105,6 +107,23 @@ class NewsArticle(Base):
     # Deprecated: was used for global “already sent” dedup (wrong for multi-user).
     # Per-user delivery is tracked in UserArticleDelivery. Kept for DB compatibility.
     last_sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ArticleEmbedding(Base):
+    """
+    FYP2 (pgvector RAG): one vector row per news article, embedding of the same text
+    the FYP1 in-memory retriever embedded (title + summary + category + location + state).
+    Populated by scripts/backfill_embeddings.py and prefetch-time enrichment.
+    Postgres-only table; SQLite deployments skip it (migration is dialect-guarded).
+    """
+
+    __tablename__ = "article_embeddings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    article_id = Column(Integer, ForeignKey("news_articles.id"), unique=True, nullable=False, index=True)
+    embedding = Column(Vector(RAG_EMBEDDING_DIM), nullable=False)
+    model = Column(String(128), nullable=False)  # embed model tag, for provenance/re-embed checks
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 

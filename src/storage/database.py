@@ -46,8 +46,14 @@ def init_db() -> None:
     """
     from src.core import models  # noqa: F401  # ensure models are registered
 
-    Base.metadata.create_all(bind=engine)
-    
+    # article_embeddings needs pgvector; skip on SQLite (migration is dialect-guarded too).
+    tables = [
+        t
+        for t in Base.metadata.sorted_tables
+        if not (_IS_SQLITE and t.name == "article_embeddings")
+    ]
+    Base.metadata.create_all(bind=engine, tables=tables)
+
     # Run migrations to add missing columns if needed
     try:
         from src.storage.migrate import (
@@ -58,6 +64,7 @@ def init_db() -> None:
             migrate_add_locations_column,
             migrate_add_news_article_category_column,
             migrate_add_news_article_location_and_state_columns,
+            migrate_create_article_embeddings_table,
             migrate_create_user_article_delivery_table,
             migrate_add_last_scheduled_push_at_column,
             migrate_users_telegram_id_to_bigint,
@@ -74,6 +81,7 @@ def init_db() -> None:
         migrate_add_delivery_schedule_columns()
         migrate_create_user_article_delivery_table()
         migrate_add_last_scheduled_push_at_column()
+        migrate_create_article_embeddings_table()
         backfill_news_article_location_and_state()
         backfill_news_article_category()
     except Exception as e:

@@ -46,6 +46,28 @@ RAG_NEWS_CANDIDATE_POOL: Final[int] = max(
     int((os.getenv("RAG_NEWS_CANDIDATE_POOL", "15").strip() or "15")),
 )
 
+# FYP2 (pgvector RAG): store article embeddings in Postgres (Supabase pgvector) and answer
+# news questions with SQL cosine top-k instead of re-embedding the whole candidate pool.
+# Degrades automatically to the FYP1 in-memory path when disabled, table missing, or Ollama down.
+RAG_VECTOR_ENABLED: Final[bool] = os.getenv("RAG_VECTOR_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+# Embedding vector width; MUST match OLLAMA_EMBED_MODEL output (nomic-embed-text = 768,
+# mxbai-embed-large = 1024). Changing models requires re-embedding (delete rows + backfill).
+RAG_EMBEDDING_DIM: Final[int] = max(
+    64,
+    int((os.getenv("RAG_EMBEDDING_DIM", "768").strip() or "768")),
+)
+# Backfill batching (scripts/backfill_embeddings.py and prefetch-time embedding).
+RAG_EMBED_BATCH_SIZE: Final[int] = max(
+    1,
+    int((os.getenv("RAG_EMBED_BATCH_SIZE", "8").strip() or "8")),
+)
+
 _fb_base_raw = (os.getenv("OLLAMA_API_BASE_FALLBACK") or "").strip().rstrip("/")
 OLLAMA_API_BASE_FALLBACK: Final[str | None] = _fb_base_raw or None
 OLLAMA_FALLBACK_API_KEY: Final[str | None] = (os.getenv("OLLAMA_FALLBACK_API_KEY") or "").strip() or None
@@ -68,6 +90,18 @@ OLLAMA_PRIMARY_TIMEOUT_SEC: Final[int] = max(
 OLLAMA_SUMMARY_NUM_PREDICT: Final[int] = max(
     128,
     int((os.getenv("OLLAMA_SUMMARY_NUM_PREDICT", "384").strip() or "384")),
+)
+
+# FYP2 (summary-length consistency): when the model returns more words than the target,
+# retry once with a stricter prompt before accepting the over-limit output.
+# Set SUMMARY_RETRY_ON_OVERLIMIT=false to restore FYP1 behavior (accept first output).
+SUMMARY_RETRY_ON_OVERLIMIT: Final[bool] = os.getenv(
+    "SUMMARY_RETRY_ON_OVERLIMIT", "true"
+).strip().lower() in {"1", "true", "yes", "y", "on"}
+# Word budget for the strict retry prompt (usually the same as the summarize() target).
+SUMMARY_TARGET_WORDS: Final[int] = max(
+    5,
+    int((os.getenv("SUMMARY_TARGET_WORDS", "30").strip() or "30")),
 )
 
 

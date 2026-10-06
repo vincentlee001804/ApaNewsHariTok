@@ -12,6 +12,8 @@ from src.core.config import (
     OLLAMA_MODEL,
     OLLAMA_PRIMARY_TIMEOUT_SEC,
     OLLAMA_SUMMARY_NUM_PREDICT,
+    SUMMARY_RETRY_ON_OVERLIMIT,
+    SUMMARY_TARGET_WORDS,
     iter_ollama_generate_targets,
 )
 from src.core.location_extractor import extract_location_and_state
@@ -425,19 +427,33 @@ def classify_category(text: str) -> Optional[str]:
         return None
 
 
-def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
-    """
-    Use Ollama to summarize the given text. The prompt asks for about ``max_words`` words, but the
-    returned text is not hard-clipped so longer accurate summaries are preserved end-to-end.
-    """
-    if not text:
-        return None
+def word_count(text: str | None) -> int:
+    """Simple whitespace-based word count used for the summary length target."""
+    return len((text or "").split())
 
+
+def build_summary_prompt(*, text: str, max_words: int, title: str = "", strict: bool = False) -> str:
+    """
+    FYP2 prompt (v2): the word cap is stated as a hard limit up front, not a suggestion.
+    ``strict=True`` adds a mandatory HARD LIMIT block — used for the one-shot retry when the
+    first output exceeded the cap. Keep in sync with docs/fyp2/01-summary-length-consistency.md.
+    """
     title_line = f'Headline: "{title.strip()}"\n' if title and title.strip() else ""
+    strict_block = ""
+    if strict:
+        strict_block = textwrap.dedent(
+            f"""
+
+            HARD LIMIT (mandatory — highest priority):
+            - The summary MUST contain at most {max_words} words. This is a hard cap, not a guideline.
+            - Before answering, draft the summary, count its words, and shorten it until it fits the cap.
+            - If it cannot fit in {max_words} words, drop minor details — never exceed the cap.
+            """
+        )
     prompt = textwrap.dedent(
         f"""
         You are summarizing a local news article from Sarawak, Malaysia.
-        Read the full article and output a brief {max_words}-word summary in JSON format:
+        Read the full article and output a summary of no more than {max_words} words in JSON format:
         one or two tight complete sentences with who, what, where, and the main outcome; skip minor detail if needed.
         {title_line}
 
@@ -460,12 +476,134 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
         - Avoid jargon, legal wording, and technical terms unless necessary.
         - End with a complete sentence with a period (do not stop mid-thought).
         - Use plain text only inside the summary value: no Markdown, no ** or * for bold/italic, no __underscores__.
+        - The summary must not exceed {max_words} words. Shorter is acceptable; longer is not.{strict_block}
 
         Full Article:
         \"\"\"{text.strip()}\"\"\"
         """
     ).strip()
+    return prompt
 
+
+def parse_summary_output(raw_output: str) -> tuple[str, bool]:
+    """
+    Extract (summary_text, no_summary) from raw model output.
+    Mirrors the FYP1 extraction chain: full JSON parse -> {..} substring -> regex -> plain-text fallback.
+    """
+    summary = ""
+    no_summary = False
+
+    if not raw_output:
+        return summary, no_summary
+
+    clean_raw = raw_output
+    if "```" in clean_raw:
+        clean_raw = re.sub(r"^```(?:json)?\s*", "", clean_raw, flags=re.MULTILINE)
+        clean_raw = re.sub(r"\s*```$", "", clean_raw, flags=re.MULTILINE).strip()
+
+    # 1. Try direct json parse
+    try:
+        parsed = json.loads(clean_raw)
+        if isinstance(parsed, dict):
+            summary = str(parsed.get("summary", "") or "").strip()
+            no_summary = bool(parsed.get("no_summary", False))
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # 2. Try object substring parse { ... }
+    if not summary:
+        start = clean_raw.find("{")
+        end = clean_raw.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                parsed = json.loads(clean_raw[start : end + 1])
+                if isinstance(parsed, dict):
+                    summary = str(parsed.get("summary", "") or "").strip()
+                    no_summary = bool(parsed.get("no_summary", False))
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    # 3. Try regex extraction for partial/truncated JSON "summary": "..."
+    if not summary:
+        match = re.search(r'"summary"\s*:\s*"([^"]*)', clean_raw, re.DOTALL)
+        if match:
+            summary = match.group(1).strip()
+
+    # 4. Check for no_summary flag
+    if '"no_summary": true' in clean_raw.lower() or '"no_summary":true' in clean_raw.lower():
+        no_summary = True
+
+    # 5. Fallback plain text if response is clean text (doesn't start with { or contain "summary":)
+    if not summary and not clean_raw.startswith("{") and '"summary":' not in clean_raw:
+        summary = clean_raw
+
+    return summary, no_summary
+
+
+def finalize_summary_candidate(summary: str, *, title: str = "", source_text: str = "") -> Optional[str]:
+    """
+    Clean a parsed summary exactly like the production pipeline: strip instruction
+    artifacts and quotes, reject refusals, strip Markdown, finish the sentence,
+    and reject conflicting-location output. Returns None when the candidate is unusable.
+    """
+    s = (summary or "").strip()
+    if not s:
+        return None
+
+    # Clean up any instruction text that might be included if fallback plain text was returned
+    s = re.sub(
+        r"(?i)Here is a summary of the news article in \d+ words or less:\s*",
+        "",
+        s,
+    )
+    s = s.replace("Here is a summary:", "")
+    s = s.replace("Summary:", "")
+    s = s.replace("Here is the summary:", "")
+    s = s.replace("Here's a summary:", "")
+    s = s.strip()
+
+    # Remove quotes if the entire summary is wrapped in quotes
+    if s.startswith('"') and s.endswith('"'):
+        s = s[1:-1].strip()
+    if s.startswith("'") and s.endswith("'"):
+        s = s[1:-1].strip()
+
+    if not s:
+        return None
+
+    # Hard reject model refusal/mismatch responses.
+    lowered = s.lower()
+    rejection_markers = [
+        "no_summary",
+        "i don't have an article",
+        "i do not have an article",
+        "provided text is",
+        "if you'd like",
+        "i can help with",
+    ]
+    if any(marker in lowered for marker in rejection_markers):
+        return None
+
+    s = strip_markdown_artifacts_for_plain_text(s)
+    s = finalize_summary_plain_text(s)
+    source_blob = f"{title or ''}\n{source_text or ''}"
+    if _has_conflicting_sarawak_location(
+        source_text=source_blob,
+        generated_text=s,
+    ):
+        return None
+    return s or None
+
+
+def _summarize_attempt(
+    text: str,
+    max_words: int,
+    title: str,
+    *,
+    strict: bool,
+) -> Optional[str]:
+    """One Ollama call + extraction. Returns the finalized summary, or None on any failure."""
+    prompt = build_summary_prompt(text=text, max_words=max_words, title=title, strict=strict)
     try:
         response = _ollama_post(
             {
@@ -480,101 +618,60 @@ def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
         response.raise_for_status()
         data = response.json()
         raw_output = (data.get("response", "") or "").strip()
-
-        summary = ""
-        no_summary = False
-
-        if raw_output:
-            clean_raw = raw_output
-            if "```" in clean_raw:
-                clean_raw = re.sub(r"^```(?:json)?\s*", "", clean_raw, flags=re.MULTILINE)
-                clean_raw = re.sub(r"\s*```$", "", clean_raw, flags=re.MULTILINE).strip()
-
-            # 1. Try direct json parse
-            try:
-                parsed = json.loads(clean_raw)
-                if isinstance(parsed, dict):
-                    summary = str(parsed.get("summary", "") or "").strip()
-                    no_summary = bool(parsed.get("no_summary", False))
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-            # 2. Try object substring parse { ... }
-            if not summary:
-                start = clean_raw.find("{")
-                end = clean_raw.rfind("}")
-                if start >= 0 and end > start:
-                    try:
-                        parsed = json.loads(clean_raw[start : end + 1])
-                        if isinstance(parsed, dict):
-                            summary = str(parsed.get("summary", "") or "").strip()
-                            no_summary = bool(parsed.get("no_summary", False))
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-
-            # 3. Try regex extraction for partial/truncated JSON "summary": "..."
-            if not summary:
-                match = re.search(r'"summary"\s*:\s*"([^"]*)', clean_raw, re.DOTALL)
-                if match:
-                    summary = match.group(1).strip()
-
-            # 4. Check for no_summary flag
-            if '"no_summary": true' in clean_raw.lower() or '"no_summary":true' in clean_raw.lower():
-                no_summary = True
-
-            # 5. Fallback plain text if response is clean text (doesn't start with { or contain "summary":)
-            if not summary and not clean_raw.startswith("{") and '"summary":' not in clean_raw:
-                summary = clean_raw
-
-        if no_summary or not summary:
-            return None
-
-        # Clean up any instruction text that might be included if fallback plain text was returned
-        summary = re.sub(
-            r"(?i)Here is a summary of the news article in \d+ words or less:\s*",
-            "",
-            summary,
-        )
-        summary = summary.replace("Here is a summary:", "")
-        summary = summary.replace("Summary:", "")
-        summary = summary.replace("Here is the summary:", "")
-        summary = summary.replace("Here's a summary:", "")
-        summary = summary.strip()
-        
-        # Remove quotes if the entire summary is wrapped in quotes
-        if summary.startswith('"') and summary.endswith('"'):
-            summary = summary[1:-1].strip()
-        if summary.startswith("'") and summary.endswith("'"):
-            summary = summary[1:-1].strip()
-
-        if not summary:
-            return None
-
-        # Hard reject model refusal/mismatch responses.
-        lowered = summary.lower()
-        rejection_markers = [
-            "no_summary",
-            "i don't have an article",
-            "i do not have an article",
-            "provided text is",
-            "if you'd like",
-            "i can help with",
-        ]
-        if any(marker in lowered for marker in rejection_markers):
-            return None
-
-        summary = strip_markdown_artifacts_for_plain_text(summary)
-        summary = finalize_summary_plain_text(summary)
-        source_blob = f"{title or ''}\n{text or ''}"
-        if _has_conflicting_sarawak_location(
-            source_text=source_blob,
-            generated_text=summary,
-        ):
-            return None
-        return summary or None
     except Exception:
-        # For now, fail quietly and let the caller decide how to handle None.
         return None
+
+    summary, no_summary = parse_summary_output(raw_output)
+    if no_summary or not summary:
+        return None
+    return finalize_summary_candidate(summary, title=title, source_text=text)
+
+
+def summarize(text: str, max_words: int = 30, title: str = "") -> Optional[str]:
+    """
+    Use Ollama to summarize the given text (FYP2: prompt v2 with a hard word cap,
+    plus a one-shot strict retry when the first output exceeds ``max_words``).
+
+    The returned text is not hard-clipped, so a slightly longer accurate summary can still
+    be preserved when the retry fails or is unavailable (Ollama down = graceful None).
+    """
+    if not text:
+        return None
+
+    effective_cap = max_words or SUMMARY_TARGET_WORDS
+
+    first = _summarize_attempt(text, effective_cap, title, strict=False)
+    if not first:
+        return None
+
+    first_words = word_count(first)
+    if first_words <= effective_cap:
+        return first
+
+    # Over the cap: FYP1 behavior accepted this output. FYP2 retries once, strictly.
+    logger.info(
+        "[summary] over limit (%d words > %d cap); strict retry | title=%r",
+        first_words,
+        effective_cap,
+        (title or "")[:80],
+    )
+    if not SUMMARY_RETRY_ON_OVERLIMIT:
+        return first
+
+    retry = _summarize_attempt(text, effective_cap, title, strict=True)
+    if retry and word_count(retry) < first_words:
+        logger.info(
+            "[summary] retry accepted (%d words, was %d)",
+            word_count(retry),
+            first_words,
+        )
+        return retry
+
+    logger.info(
+        "[summary] retry failed or not shorter; keeping first output (%d words)",
+        first_words,
+    )
+    return first
 
 
 def generate_display_title(

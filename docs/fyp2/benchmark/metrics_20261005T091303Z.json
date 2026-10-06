@@ -1,0 +1,34 @@
+{
+  "generated_utc": "20261005T091303Z",
+  "max_words_target": 30,
+  "groups": {
+    "llama31_v1": {
+      "model": "llama3.1:latest",
+      "prompt_version": "v1",
+      "articles": 10,
+      "parse_success_rate": 1.0,
+      "within_cap_rate": 1.0,
+      "mean_final_words": 20.5,
+      "median_final_words": 21.5,
+      "p90_final_words": 25.0,
+      "max_final_words": 26.0,
+      "retry_triggered": 0,
+      "retry_fixed_within_cap": 0,
+      "mean_first_latency_s": 3.56
+    },
+    "llama31_v2": {
+      "model": "llama3.1:latest",
+      "prompt_version": "v2",
+      "articles": 10,
+      "parse_success_rate": 1.0,
+      "within_cap_rate": 1.0,
+      "mean_final_words": 20.4,
+      "median_final_words": 20.0,
+      "p90_final_words": 25.0,
+      "max_final_words": 30.0,
+      "retry_triggered": 1,
+      "retry_fixed_within_cap": 1,
+      "mean_first_latency_s": 3.93
+    }
+  }
+}

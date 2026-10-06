@@ -356,6 +356,45 @@ def backfill_news_article_category() -> None:
         pass
 
 
+def migrate_create_article_embeddings_table() -> None:
+    """
+    FYP2 (pgvector RAG): create article_embeddings (one vector per article) with an HNSW
+    cosine index. Postgres-only; SQLite deployments skip (model is not created there either).
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    try:
+        from src.core.config import RAG_EMBEDDING_DIM
+
+        insp = inspect(engine)
+        with SessionLocal() as session:
+            if "article_embeddings" not in insp.get_table_names():
+                session.execute(
+                    text(
+                        f"""
+                        CREATE TABLE article_embeddings (
+                            id SERIAL PRIMARY KEY,
+                            article_id INTEGER NOT NULL UNIQUE REFERENCES news_articles(id),
+                            embedding vector({RAG_EMBEDDING_DIM}) NOT NULL,
+                            model VARCHAR(128) NOT NULL,
+                            created_at TIMESTAMP NOT NULL DEFAULT now()
+                        )
+                        """
+                    )
+                )
+                session.commit()
+                print("✓ Created article_embeddings table (pgvector).")
+            session.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_article_embeddings_hnsw "
+                    "ON article_embeddings USING hnsw (embedding vector_cosine_ops)"
+                )
+            )
+            session.commit()
+    except Exception as e:
+        print(f"Migration warning (article_embeddings): {e}")
+
+
 def migrate_add_delivery_schedule_columns() -> None:
     """
     Add structured delivery schedule columns to user_preferences.

@@ -119,6 +119,44 @@ MVP/
 
 You can adjust folder names as the project grows, but this structure separates concerns clearly (bot, scraping, AI, core logic, storage, tests).
 
+### 7b. Actual Project Structure (FYP 2, updated 2026-10-06)
+
+The tree above was the original proposal; this is the structure as implemented
+(FYP 1 production system + FYP 2 improvements). Runtime secrets (`.env`,
+`*.session`, `mvp.db`) live at root and are never committed.
+
+```text
+MVP/
+  src/                         # application code (absolute `src.*` imports)
+    bot/                       # bot_main.py (entrypoint + jobs), handlers.py (commands)
+    core/                      # config.py, models.py, services.py, news_categories.py,
+                               # location_extractor.py, utility_alert_service.py (FYP2)
+    ai/                        # summarizer.py (Ollama), retriever.py (pgvector RAG, FYP2)
+    scrapers/                  # rss_reader, article_scraper, telegram_reader,
+                               # waze_client, utility_alert_reader.py (FYP2)
+    storage/                   # database.py (engine/setup), migrate.py (idempotent migrations)
+  scripts/                     # development & evaluation helpers (not shipped)
+    run_shadow_mode.ps1        # run the bot with utility-alert shadow logging -> logs/
+    benchmark_summaries.py     # FYP2 Phase 1: summary-length model benchmark
+    eval_rag_pools.py          # FYP2 Phase 2: retrieval pool evaluation
+    eval_semantic_dedup.py     # FYP2 Phase 3: dedup threshold evidence
+    backfill_embeddings.py     # one-off vector backfill for pgvector
+    create_fyp2_proposal.js    # one-off generator for the FYP2 proposal docx
+  docs/
+    fyp2/                      # FYP2 change log (README.md) + per-phase docs
+                               # 01 summary length, 02 pgvector RAG, 03 semantic dedup,
+                               # 04 utility alerts + benchmark/ evidence artifacts
+    thesis/                    # FYP1 submission PDF + extracted thesis text
+    news-summary-format.txt    # digest formatting reference note
+  logs/                        # local run logs (gitignored)
+  tools/                       # local tool binaries, e.g. flyctl (gitignored)
+  # Root config & deployment:  Dockerfile, fly.toml, Procfile, .dockerignore,
+  # requirements.txt, RSS_Sources.txt, Sarawak_Local_Keywords.txt, FYP2_PLAN.md
+```
+
+FYP 2 changes are documented per phase in `docs/fyp2/` (start at its README.md),
+with reproducible evidence under `docs/fyp2/benchmark/`.
+
 ---
 
 ## Software Requirements Specification

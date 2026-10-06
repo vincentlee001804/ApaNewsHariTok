@@ -10,6 +10,7 @@ its evaluation. Individual phase documents hold the full detail; benchmark artif
 | 1 | Summary-length consistency | [01-summary-length-consistency](01-summary-length-consistency.md) | Code done 2026-10-05; local llama3.1 benchmark run (n=10); production-model run pending |
 | 2 | pgvector RAG | [02-pgvector-rag](02-pgvector-rag.md) | Complete 2026-10-06: vector search + **hybrid retrieval** (metadata boosts + recall union) + 30-day news-agent window. Pool coverage 1/10 (FYP1) → 3/10 (vector) → **6/10 (hybrid)**; right-story top-10s on 9–10/10 |
 | 3 | Semantic dedup | [03-semantic-dedup](03-semantic-dedup.md) | Complete 2026-10-06: cosine same-story pass on stored vectors (threshold 0.85, evidence-based); clustering sim 312 → 249 clusters on a 14-day batch, cross-lingual duplicates caught |
+| 4 | Utility disruption alerts | [04-utility-alerts](04-utility-alerts.md) | Stage 1 (shadow mode) live 2026-10-06: polls swbnews Telegram + JBALB + Google News RSS every 10 min, classifies water/power disruption notices, stores alerts, computes deliveries but sends nothing until Stage 2 approval |
 
 **Code baseline:** all FYP 2 work branches from the production system as of 2026-10-05
 (Oracle Cloud Docker + Supabase Postgres, 100 pilot users, pipeline live since 2026-09-09).

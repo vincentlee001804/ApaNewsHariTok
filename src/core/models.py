@@ -143,3 +143,48 @@ class UserArticleDelivery(Base):
     article_id = Column(Integer, ForeignKey("news_articles.id"), nullable=False, index=True)
     sent_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+
+class UtilityAlert(Base):
+    """
+    FYP2 (utility disruption alerts): one row per detected official utility notice
+    (water/power disruption, scheduled or unscheduled, plus restoration updates).
+    Populated by src/core/utility_alert_service.poll_utility_alerts(); delivery to users
+    is tracked in UtilityAlertDelivery (same per-user pattern as UserArticleDelivery).
+    """
+
+    __tablename__ = "utility_alerts"
+    __table_args__ = (
+        UniqueConstraint("source", "source_ref", name="uq_utility_alert_ref"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    source = Column(String(32), nullable=False)  # telegram | jbalb | news
+    source_ref = Column(String(1000), nullable=False)  # t.me message link / notice URL
+    title = Column(String(500), nullable=False)
+    text = Column(Text, nullable=False)
+    utility_type = Column(String(16), nullable=False, default="other")  # water | power | other
+    kind = Column(String(16), nullable=False, default="info")  # scheduled|unscheduled|restored|info
+    # Comma-separated canonical Sarawak location keys (empty = statewide / unclear).
+    locations = Column(String(500), nullable=True, default="")
+    # Raw affected-area snippet kept for the message renderer.
+    area_text = Column(String(1000), nullable=True, default="")
+    announced_at = Column(DateTime, nullable=True)
+    window_start = Column(DateTime, nullable=True)
+    window_end = Column(DateTime, nullable=True)
+    status = Column(String(16), nullable=False, default="active")  # active | restored | expired
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class UtilityAlertDelivery(Base):
+    """Per-user delivery record for utility alerts (prevents repeat notification)."""
+
+    __tablename__ = "utility_alert_delivery"
+    __table_args__ = (
+        UniqueConstraint("user_id", "utility_alert_id", name="uq_user_utility_alert_delivery"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    utility_alert_id = Column(Integer, ForeignKey("utility_alerts.id"), nullable=False, index=True)
+    sent_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+

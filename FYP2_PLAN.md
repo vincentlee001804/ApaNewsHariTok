@@ -69,11 +69,14 @@ simulation on a 14-day batch: 312 → 249 clusters, 71 semantic-only merges incl
 cross-lingual pairs Jaccard cannot catch; manual sample ~23% false-merge rate, soft cost
 (merged members keep their source links). Human-labeled tuning set deferred to Phase 5.
 
-### Phase 4 — Real-time official alerts (Weeks 10–14, time-boxed)
-*Thesis priority #3. Highest risk, lowest certainty — schedule last.*
+### Phase 4 — Real-time official alerts (Weeks 10–14, time-boxed) → DELIVERED AS UTILITY ALERT MODULE, STAGE 1 SHADOW MODE
+*Thesis priority #3. Originally the highest-risk phase; resolved ahead of schedule by reusing the existing Telegram session reader instead of chasing paid APIs.*
 
-- Scope narrowly: pick ONE official source with an accessible API or approved channel (e.g. a utility/authority with RSS/API), integrate as a new scraper in `src/scrapers/`.
-- If no source is approvable within the time-box, document the attempt, the platform restrictions found, and keep Waze + RSS as the alert path — an honest "future work" section is acceptable here.
+- **Delivered 2026-10-06** as `src/scrapers/utility_alert_reader.py` + `src/core/utility_alert_service.py`: polls three approved sources every 10 min — official Sarawak Water Telegram channel (Central Region), JBALB .gov.my notices, Google News RSS disruption queries — classifies water/power disruption notices (restored > scheduled > unscheduled), extracts Sarawak locations, dedups, and stages per-user deliveries.
+- **Shadow mode** (default on): alerts are stored and "would-be" deliveries computed, but nothing is pushed. First shadow run: 10 alerts stored (7 locations), idempotent re-poll, 6 non-Sarawak stories rejected. Full evidence in `docs/fyp2/04-utility-alerts.md` + `docs/fyp2/benchmark/utility_alerts_shadow_20261006.txt`.
+- Platform restrictions found (documented in 04): X/Twitter API is paid (owner-verified), Facebook pages require app review (impractical), no official Telegram channels found for South/North regions — covered by scope note below.
+- **Stage 2 go-live checklist** (needs owner approval, in 04 §5): flip `UTILITY_ALERT_SHADOW_MODE=false`, add a `/settings` toggle so users can opt out, then monitor `[utility-alert]` logs.
+- Scope note retained: if a new official source (e.g. Sarawak Energy app API, South/North region channels) becomes accessible, it plugs in as one more reader function — no schema change needed.
 
 ### Phase 5 — Evaluation expansion (Weeks 12–16, parallel)
 - Grow sample from 86 → 150+ respondents (power/target justification for the thesis).
@@ -107,5 +110,5 @@ cross-lingual pairs Jaccard cannot catch; manual sample ~23% false-merge rate, s
 | Ollama embedding unavailable on Oracle (no GPU) → slow backfill | Batch + rate-limit backfill; run once on laptop against Supabase |
 | pgvector extension blocked on free tier | Fall back to storing vectors as `float4[]`/`jsonb` + in-SQL dot product |
 | Semantic dedup false-merges distinct stories | Conservative threshold; Jaccard prefilter retained; shadow-mode logging before enforcing |
-| Phase 4 source approval stalls | Time-box; documented negative result is an acceptable thesis outcome |
+| Phase 4 source approval stalls | RESOLVED 2026-10-06: reused existing Telegram session reader for the official Sarawak Water channel; X API paid / FB app review impractical documented as negative results in docs/fyp2/04 |
 | Migration breaks production startup | Test `init_db()` against a fresh local Postgres container before deploy |

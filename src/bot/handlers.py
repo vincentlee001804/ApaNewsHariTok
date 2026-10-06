@@ -775,6 +775,35 @@ async def dev_waze_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
 
 
+async def dev_utility_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Developer-only: preview utility disruption alerts detected by the FYP2 alert
+    module (shadow mode). Same access control as /testpush — nothing is pushed
+    to users from here.
+    """
+    if not update.message or not update.effective_user:
+        return
+
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await update.message.reply_text("Use /devutility in a private chat with the bot.")
+        return
+
+    telegram_id = update.effective_user.id
+    if not is_test_push_allowed(telegram_id):
+        await update.message.reply_text(
+            "Developer commands are disabled or your Telegram user ID is not on the allow list."
+        )
+        return
+
+    from src.core.utility_alert_service import preview_text
+
+    await update.message.reply_text(
+        preview_text(),
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+
+
 async def backfill_titles_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Developer-only: backfill missing ai_title/ai_summary for existing DB rows in batches.

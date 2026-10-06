@@ -27,6 +27,7 @@ from src.bot.handlers import (
     test_digest_push_command,
     test_push_command,
     dev_waze_command,
+    dev_utility_command,
     force_fetch_command,
     delete_demo_command,
 )
@@ -45,12 +46,21 @@ from src.core.config import (
     SCHEDULED_PUSH_QUIET_START_HOUR_LOCAL,
     SCHEDULED_PUSH_QUIET_TIMEZONE,
     TELEGRAM_SOURCE_CHANNELS,
+    UTILITY_ALERT_ENABLED,
+    UTILITY_ALERT_POLL_MINUTES,
+    UTILITY_ALERT_SHADOW_MODE,
     is_scheduled_push_quiet_hours_now,
     print_ollama_config_banner,
     require_bot_token,
 )
 from src.core.cleanup_service import cleanup_old_news_data
 from src.core.prefetch_service import prefetch_latest_articles_to_db
+from src.core.utility_alert_service import (
+    compute_pending_deliveries,
+    format_utility_alert_html,
+    poll_utility_alerts,
+    record_delivery,
+)
 from src.core.services import (
     SCHEDULED_PUSH_SUMMARY_PENDING_SKIP_MARKER,
     get_latest_news_text_for_user,
@@ -119,6 +129,7 @@ def main() -> None:
     application.add_handler(CommandHandler("testpush", test_push_command))
     application.add_handler(CommandHandler("testdigestpush", test_digest_push_command))
     application.add_handler(CommandHandler("devwaze", dev_waze_command))
+    application.add_handler(CommandHandler("devutility", dev_utility_command))
     application.add_handler(CommandHandler("backfilltitles", backfill_titles_command))
     application.add_handler(CommandHandler("setareas", setareas_command))
     application.add_handler(CommandHandler("cancel", cancel_awaiting_area_keywords))
@@ -357,6 +368,46 @@ def main() -> None:
         except Exception as e:
             print(f"[cleanup] error: {e}")
 
+    async def _utility_alert_job(context) -> None:
+        """
+        FYP2 utility disruption alerts: poll official sources, dedupe, store, notify.
+        Stage 1 runs in SHADOW MODE — detection and would-be deliveries are logged,
+        nothing is sent to users until UTILITY_ALERT_SHADOW_MODE=false (owner approval).
+        """
+        started = datetime.utcnow()
+        try:
+            summary = await asyncio.to_thread(poll_utility_alerts)
+            print(
+                f"[utility-alert] poll in "
+                f"{(datetime.utcnow() - started).total_seconds():.1f}s: {summary}",
+                flush=True,
+            )
+            pending = await asyncio.to_thread(compute_pending_deliveries)
+            if UTILITY_ALERT_SHADOW_MODE:
+                if summary.get("new"):
+                    print(
+                        f"[utility-alert][shadow] would deliver {len(pending)} "
+                        "notification(s) right now (not sending; owner review pending)",
+                        flush=True,
+                    )
+                return
+            for telegram_id, alert in pending:
+                try:
+                    await context.application.bot.send_message(
+                        chat_id=telegram_id,
+                        text=format_utility_alert_html(alert),
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True,
+                    )
+                    await asyncio.to_thread(record_delivery, telegram_id, alert.id)
+                except Forbidden as e:
+                    await asyncio.to_thread(set_user_active, telegram_id, False)
+                    print(f"[utility-alert] deactivated user {telegram_id} ({e})")
+                except Exception as e:
+                    print(f"[utility-alert] user {telegram_id} failed: {e}")
+        except Exception as e:
+            print(f"[utility-alert] error: {e}")
+
     if PREFETCH_ENABLED:
         application.job_queue.run_repeating(
             _prefetch_db_job,
@@ -398,6 +449,19 @@ def main() -> None:
         print(
             "DB cleanup enabled: every "
             f"{DB_CLEANUP_INTERVAL_HOURS} hours (retention={DB_RETENTION_DAYS} days)"
+        )
+
+    if UTILITY_ALERT_ENABLED:
+        application.job_queue.run_repeating(
+            _utility_alert_job,
+            interval=UTILITY_ALERT_POLL_MINUTES * 60,
+            first=45,
+            name="utility_alerts",
+        )
+        mode = "SHADOW (detect + log only, no pushes)" if UTILITY_ALERT_SHADOW_MODE else "LIVE pushes"
+        print(
+            f"Utility alerts: every {UTILITY_ALERT_POLL_MINUTES} min — {mode}; "
+            "preview with /devutility"
         )
 
     print_ollama_config_banner()

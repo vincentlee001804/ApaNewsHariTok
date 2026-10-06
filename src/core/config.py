@@ -665,6 +665,63 @@ def waze_allowed_type_set() -> set[str]:
     return set() if not types else {t.upper() for t in types}
 
 
+# FYP2 (utility disruption alerts): fast path for official utility notices (water/power).
+# Stage 1 (2026-10-06): SHADOW MODE — detect + log only, nothing is pushed to users.
+# Sources (see docs/fyp2/04-utility-alerts.md for the scouting record):
+#   telegram — official Sarawak Water regional channels read via the existing session reader
+#   jbalb    — Rural Water Supply Department .gov.my announcement pages (direct scrape)
+#   news     — Google News RSS keyword watches (catches FB/X-only agencies via republishing)
+# Quiet hours reuse the scheduled-push window (hold 12am–6am Asia/Kuching until 06:00).
+UTILITY_ALERT_ENABLED: Final[bool] = os.getenv("UTILITY_ALERT_ENABLED", "true").strip().lower() in {
+    "1", "true", "yes", "y", "on",
+}
+UTILITY_ALERT_SHADOW_MODE: Final[bool] = os.getenv(
+    "UTILITY_ALERT_SHADOW_MODE", "true"
+).strip().lower() in {"1", "true", "yes", "y", "on"}
+UTILITY_ALERT_POLL_MINUTES: Final[int] = max(
+    5,
+    int((os.getenv("UTILITY_ALERT_POLL_MINUTES", "10").strip() or "10")),
+)
+UTILITY_ALERT_LOOKBACK_HOURS: Final[int] = max(
+    1,
+    int((os.getenv("UTILITY_ALERT_LOOKBACK_HOURS", "24").strip() or "24")),
+)
+UTILITY_ALERT_MAX_PER_HOUR_PER_USER: Final[int] = max(
+    1,
+    int((os.getenv("UTILITY_ALERT_MAX_PER_HOUR_PER_USER", "3").strip() or "3")),
+)
+UTILITY_ALERT_TELEGRAM_CHANNELS: Final[List[str]] = [
+    x.strip().lower().lstrip("@")
+    for x in (
+        os.getenv("UTILITY_ALERT_TELEGRAM_CHANNELS", "swbnews").strip() or "swbnews"
+    ).split(",")
+    if x.strip()
+]
+UTILITY_ALERT_JBALB_URLS: Final[List[str]] = [
+    x.strip()
+    for x in (
+        os.getenv(
+            "UTILITY_ALERT_JBALB_URLS",
+            "https://jbalb.sarawak.gov.my/web/subpage/announcement_list/",
+        ).strip()
+        or "https://jbalb.sarawak.gov.my/web/subpage/announcement_list/"
+    ).split(",")
+    if x.strip()
+]
+# Plain-language queries; URL-encoded at fetch time. Google News RSS is free, no API key.
+UTILITY_ALERT_NEWS_QUERIES: Final[List[str]] = [
+    x.strip()
+    for x in (
+        os.getenv(
+            "UTILITY_ALERT_NEWS_QUERIES",
+            "Sarawak water supply disruption, Sarawak water pipe burst, Sarawak Energy power outage",
+        ).strip()
+        or "Sarawak water supply disruption"
+    ).split(",")
+    if x.strip()
+]
+
+
 # /testpush and /devwaze: developer commands (scheduled preview + Waze-only preview). Disable in production if desired.
 TEST_PUSH_ENABLED: Final[bool] = os.getenv("TEST_PUSH_ENABLED", "true").strip().lower() in {
     "1",

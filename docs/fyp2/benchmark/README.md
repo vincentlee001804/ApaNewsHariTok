@@ -27,5 +27,6 @@ Files in this folder:
 | 2026-10-06 | Hybrid retrieval v3 (recall union + stopword fix) | **FYP1 1/10, vector 3/10, hybrid 6/10**; Long Lellang/arson/crime misses still show 10/10 correct-story top-10s | rag_pool_hybrid_20261006.txt, rag_pool_coverage.csv |
 | 2026-10-06 | End-to-end Telegram confirmation (live local bot, hybrid on) | "Was there a helicopter crash at Long Lellang?" → correct grounded answer with 2–3 sourced articles from the 26-day-old story; FYP1 baseline for the same question was "no related news" (24h window) | owner screenshot, 02:58 PM |
 | 2026-10-06 | Semantic dedup threshold evidence (249 labeled pairs) | negatives ≤0.765, same-story band ≥0.85 → threshold 0.85; before/after clustering sim: 312 → 249 clusters on a 14-day batch, 71 semantic-only merges incl. cross-lingual pairs | dedup_semantic_20261006.txt, dedup_pair_cosines.csv |
+| 2026-10-06 | Utility disruption alerts — Stage 1 shadow run (Telegram swbnews + JBALB scrape + Google News RSS) | Poll 1: fetched 16 → classified 10 → 10 new alerts stored (8 JBALB across 7 locations, 2 Telegram); poll 2: 0 new / 10 duplicates (idempotency confirmed); 6 non-Sarawak rejected; 155 pending deliveries held in shadow | utility_alerts_shadow_20261006.txt, doc 04 |
 
 Embedding coverage: 1,692 / 1,692 articles (nomic-embed-text, document-prefixed).

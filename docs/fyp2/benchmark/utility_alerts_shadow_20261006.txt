@@ -1,0 +1,22 @@
+== clean shadow run: utility_alerts table wiped ==
+== poll 1 ==
+summary: {'fetched': 16, 'classified': 10, 'new': 10, 'duplicates': 0, 'rejected': 6, 'sources': {'telegram': 4, 'jbalb': 8, 'news': 4}}
+
+== poll 2 (dedup/idempotency check — expect new=0) ==
+summary: {'fetched': 16, 'classified': 10, 'new': 0, 'duplicates': 10, 'rejected': 6, 'sources': {'telegram': 4, 'jbalb': 8, 'news': 4}}
+
+stored by source: {'jbalb': 8, 'telegram': 2}
+== 10 alerts stored ==
+[water/scheduled] (jbalb) locs=[sarikei] Scheduled Water Interruption Notice at Sarikei (08.10.2026)
+[water/unscheduled] (jbalb) locs=[sibu] Unscheduled Water Interruption Notice at Sibu (Selangau) (05.10.2026)
+[water/unscheduled] (jbalb) locs=[sarikei] Unscheduled Water Interruption Notice at Sarikei (Meradong) (04.10.2026)
+[water/unscheduled] (jbalb) locs=[kota samarahan] Unscheduled Water Interruption Notice at Samarahan (Asajaya) (03.10.2026)
+[water/scheduled] (jbalb) locs=[serian] Scheduled Water Interruption Notice at Serian (08-09.10.2026)
+[water/unscheduled] (jbalb) locs=[betong] Unscheduled Water Interruption Notice at Betong (Kabong, Roban) (05.10.2026)
+[water/unscheduled] (jbalb) locs=[betong] Unscheduled Water Interruption Notice at Betong (Spaoh dan Debak) (05.10.2026)
+[water/scheduled] (jbalb) locs=[bintulu] Scheduled Water Interruption Notice at Bintulu (Sebauh) (05.10.2026)
+[water/unscheduled] (telegram) locs=[sibu] Water Supply Interruption Notice for Interconnection of 12" AC Pipe at Jalan Deshon Timur, Sibu.
+[water/unscheduled] (telegram) locs=[-] Unscheduled Water Supply Interruption
+
+== pending deliveries right now: 155 ==
+(53 opted-in users x 3/hour rate cap on a fresh table; steady state tracks real alerts)

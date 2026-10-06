@@ -6,6 +6,7 @@ its evaluation. Individual phase documents hold the full detail; benchmark artif
 
 | # | Phase | Document | Status |
 |---|-------|----------|--------|
+| — | **Progress report (Week 1)** | [00-progress-report-20261006](00-progress-report-20261006.md) | Phases 1–2 done + evaluated; Telegram end-to-end confirmed |
 | 1 | Summary-length consistency | [01-summary-length-consistency](01-summary-length-consistency.md) | Code done 2026-10-05; local llama3.1 benchmark run (n=10); production-model run pending |
 | 2 | pgvector RAG | [02-pgvector-rag](02-pgvector-rag.md) | Complete 2026-10-06: vector search + **hybrid retrieval** (metadata boosts + recall union) + 30-day news-agent window. Pool coverage 1/10 (FYP1) → 3/10 (vector) → **6/10 (hybrid)**; right-story top-10s on 9–10/10 |
 

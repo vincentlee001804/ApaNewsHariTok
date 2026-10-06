@@ -379,7 +379,7 @@ FIRST_BOOT_RSS_MAX_PER_FEED: Final[int] = max(
 # Optional Telegram sources for prefetch (same job as RSS while bot_main is running).
 # Requires TELEGRAM_API_ID, TELEGRAM_API_HASH and either:
 # - TELEGRAM_SESSION_STRING (recommended on Fly.io: no sqlite3 / .session file). Obtain by running
-#   `python test_sibuwb_bot.py` locally after login; the script prints the string at the end.
+#   `python scripts/test_sibuwb_bot.py` locally after login; the script prints the string at the end.
 # - TELEGRAM_PHONE plus an authorized Telethon session file.
 #
 # Sources can be defined in either:

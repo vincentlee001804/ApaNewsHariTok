@@ -151,7 +151,8 @@ MVP/
   logs/                        # local run logs (gitignored)
   tools/                       # local tool binaries, e.g. flyctl (gitignored)
   # Root config & deployment:  Dockerfile, fly.toml, Procfile, .dockerignore,
-  # requirements.txt, RSS_Sources.txt, Sarawak_Local_Keywords.txt, FYP2_PLAN.md
+  # requirements.txt, RSS_Sources.txt, Sarawak_Local_Keywords.txt
+  # (FYP2 plan: docs/fyp2/FYP2_PLAN.md)
 ```
 
 FYP 2 changes are documented per phase in `docs/fyp2/` (start at its README.md),

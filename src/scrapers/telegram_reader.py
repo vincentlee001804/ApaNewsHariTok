@@ -157,7 +157,7 @@ async def _fetch_async(
         if not await client.is_user_authorized():
             raise RuntimeError(
                 "Telegram source session is not authorized. "
-                "Run test_sibuwb_bot.py locally to log in, copy TELEGRAM_SESSION_STRING for Fly, "
+                "Run scripts/test_sibuwb_bot.py locally to log in, copy TELEGRAM_SESSION_STRING for Fly, "
                 "or use a .session file on disk."
             )
 
@@ -259,7 +259,7 @@ def fetch_latest_telegram_items(
         if "padding" in err:
             hint = (
                 " (often: TELEGRAM_SESSION_STRING has newlines/spaces/truncation in Fly secrets — "
-                "re-paste the full line from test_sibuwb_bot.py)"
+                "re-paste the full line printed by scripts/test_sibuwb_bot.py)"
             )
         print(f"[telegram] fetch failed: {exc}{hint}")
         return []

@@ -106,6 +106,12 @@ New settings go through `config.py`, never scattered `os.getenv` calls.
 - `User.telegram_id` is **BigInteger** — never shrink (32-bit overflow).
 - `NewsArticle.last_sent_at` is **deprecated** (global dedup anti-pattern); per-user
   dedup uses `UserArticleDelivery` (and FYP2: `UtilityAlertDelivery`).
+- `UtilityAlertShadowLog` (FYP2 Stage 1b): durable shadow-mode evidence — one `poll`
+  row per detection cycle (JSON summary) + one deduped `would_deliver` row per
+  (telegram_id, utility_alert_id) at first-due time. Written only while
+  `UTILITY_ALERT_SHADOW_MODE=true`, gated by `UTILITY_ALERT_SHADOW_LOG`, purged with
+  `DB_RETENTION_DAYS`. Would_deliver timestamps evidence quiet-hours holding and back
+  the per-user rate-cap review. See `docs/fyp2/04-utility-alerts.md` §5.1.
 - Schema changes: idempotent migration in `src/storage/migrate.py` + register in
   `init_db()`; must be safe to re-run at every startup.
 
@@ -137,6 +143,8 @@ printed session string into `TELEGRAM_SESSION_STRING`.
 
 FYP2 shadow logging: `powershell -ExecutionPolicy Bypass -File scripts/run_shadow_mode.ps1`
 (tees console to `logs/utility_shadow_*.log`; alerts are detected but NOT pushed).
+On servers, shadow evidence is also persisted to the `utility_alert_shadow_log` DB table
+(survives log-stream rotation) — see `docs/fyp2/04-utility-alerts.md` §5.1.
 
 Deploy: Docker build; on the server, Ollama `localhost` refers to the server, not your
 laptop — use a cloud fallback or tunnel (`config.print_ollama_config_banner()` warns at startup).

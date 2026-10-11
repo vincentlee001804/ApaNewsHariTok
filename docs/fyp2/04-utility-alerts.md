@@ -133,6 +133,53 @@ Git Bash alternative:
 An automated check-in on **2026-10-09 (Asia/Kuching)** reads the accumulated log and
 summarizes it against these criteria as a progress-report entry.
 
+### 5.1 Durable evidence store (added 2026-10-11, commit `855f2f8`)
+
+The stdout log stream (`flyctl logs`) is **not an archive** — old lines cannot be
+relied on after days. Shadow evidence is therefore also persisted to the
+`utility_alert_shadow_log` table (Postgres + SQLite), written by the poll job itself:
+
+- **`kind='poll'`** — one row per detection cycle with the full summary JSON,
+  timestamped. The unbroken sequence of rows *is* the stability proof (expect
+  `144/day` at the default 10-min cadence); per-cycle duplicate counts prove
+  idempotency over the whole period.
+- **`kind='would_deliver'`** — one row per `(telegram_id, utility_alert_id)` at the
+  **first moment that pair becomes due**, with the alert title/locations as JSON.
+  The unique constraint `(kind, telegram_id, utility_alert_id)` silently skips
+  re-computed pairs, so volume stays ~one row per genuine notification event even
+  though shadow mode never records a real delivery to suppress recomputation.
+  - *Quiet-hours evidence:* an alert announced 00:00–06:00 only becomes due at 06:00,
+    so its `created_at` ≥ 06:00 demonstrates the hold.
+  - *Rate-cap evidence:* count rows per user per hour — never above
+    `UTILITY_ALERT_MAX_PER_HOUR_PER_USER`.
+- **Zero pushes** is proven by `utility_alert_delivery` staying empty while shadow
+  mode is on.
+
+Gating and safety: writes happen only while `UTILITY_ALERT_SHADOW_MODE=true`, are
+controlled by `UTILITY_ALERT_SHADOW_LOG` (default on), are best-effort (a failed
+write can never break the detection cycle), and rows are purged with
+`DB_RETENTION_DAYS` by the existing alert cleanup.
+
+**Review queries for the Stage 2 sign-off:**
+
+```sql
+-- Stability: poll ticks per hour (expect 6/hour, no gaps)
+SELECT date_trunc('hour', created_at) AS hr, count(*) FROM utility_alert_shadow_log
+WHERE kind = 'poll' GROUP BY 1 ORDER BY 1;
+
+-- Quiet hours: first-due time vs alert announcement (hold → created_at ≥ 06:00 local)
+SELECT w.created_at, w.payload FROM utility_alert_shadow_log w
+WHERE w.kind = 'would_deliver' ORDER BY w.created_at;
+
+-- Rate cap: would-deliver events per user per hour
+SELECT telegram_id, date_trunc('hour', created_at) AS hr, count(*)
+FROM utility_alert_shadow_log WHERE kind = 'would_deliver'
+GROUP BY 1, 2 ORDER BY 3 DESC;
+```
+
+On Fly.io the table lives in Supabase, so evidence survives even total loss of the
+app; `flyctl logs` remains useful only for same-day debugging.
+
 ## 6. Stage 2 checklist (go-live, requires owner approval)
 
 1. Review the Stage 1b shadow log against the acceptance criteria above.

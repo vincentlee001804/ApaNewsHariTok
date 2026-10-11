@@ -76,7 +76,7 @@ logs/  tools/            # local-only, gitignored
 ### Commands
 
 - User: `/start` (6-step onboarding), `/help`, `/latest`, `/settings`, `/setareas`, `/cancel`.
-- Developer (`is_test_push_allowed`): `/testpush`, `/testdigestpush`, `/devwaze`, `/devutility` (FYP2 alert preview), `/backfilltitles [limit]`, `/fetch`, `/deletedemo`.
+- Developer (`is_test_push_allowed`): `/testpush`, `/testdigestpush`, `/devwaze`, `/devutility` (FYP2 alert preview), `/devshadowlog` (FYP2 Stage 1b evidence summary from `utility_alert_shadow_log`), `/backfilltitles [limit]`, `/fetch`, `/deletedemo`.
 
 ### Conversational mode
 

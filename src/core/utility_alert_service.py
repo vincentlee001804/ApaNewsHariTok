@@ -18,7 +18,7 @@ from __future__ import annotations
 import html
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
@@ -26,6 +26,8 @@ from sqlalchemy.exc import IntegrityError
 from src.core.config import (
     CROSS_SOURCE_DEDUP_TITLE_JACCARD_THRESHOLD,
     DB_RETENTION_DAYS,
+    SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL,
+    SCHEDULED_PUSH_QUIET_TIMEZONE,
     UTILITY_ALERT_JBALB_URLS,
     UTILITY_ALERT_LOOKBACK_HOURS,
     UTILITY_ALERT_MAX_PER_HOUR_PER_USER,
@@ -240,6 +242,114 @@ def record_shadow_would_delivers(pending: list[tuple[int, UtilityAlert]]) -> Non
                 {"title": (alert.title or "")[:300], "locations": alert.locations or ""}
             ),
         )
+
+
+def get_shadow_log_summary(window_hours: int = 48) -> dict:
+    """
+    Stage 1b evidence stats from utility_alert_shadow_log (+ the real delivery
+    table, which must stay empty while shadow mode is on). Read-only; used by
+    the /devshadowlog developer preview.
+    """
+    cutoff = datetime.utcnow() - timedelta(hours=window_hours)
+    with SessionLocal() as session:
+        poll_times = [
+            t
+            for (t,) in session.execute(
+                select(UtilityAlertShadowLog.created_at).where(
+                    UtilityAlertShadowLog.kind == "poll",
+                    UtilityAlertShadowLog.created_at >= cutoff,
+                )
+            ).all()
+        ]
+        wd_rows = session.execute(
+            select(
+                UtilityAlertShadowLog.telegram_id, UtilityAlertShadowLog.created_at
+            ).where(UtilityAlertShadowLog.kind == "would_deliver")
+        ).all()
+        real_deliveries = (
+            session.execute(select(func.count(UtilityAlertDelivery.id))).scalar() or 0
+        )
+
+    per_hour: dict = {}
+    for t in poll_times:
+        hr = t.replace(minute=0, second=0, microsecond=0)
+        per_hour[hr] = per_hour.get(hr, 0) + 1
+    # At the 10-min cadence a healthy hour has 6 ticks; fewer = the job missed polls.
+    hours_with_gaps = sum(1 for c in per_hour.values() if c < 6)
+
+    # Quiet-hours evidence: a would_deliver row must never land inside the local
+    # quiet window (held alerts only become due at/after the window end).
+    quiet_violations = 0
+    try:
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(SCHEDULED_PUSH_QUIET_TIMEZONE)
+        quiet_violations = sum(
+            1
+            for _, t in wd_rows
+            if t.replace(tzinfo=timezone.utc).astimezone(tz).hour
+            < SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL
+        )
+    except Exception:  # noqa: BLE001 — preview must work even if tz data is missing
+        pass
+
+    per_user_hour: dict = {}
+    for tid, t in wd_rows:
+        key = (tid, t.replace(minute=0, second=0, microsecond=0))
+        per_user_hour[key] = per_user_hour.get(key, 0) + 1
+
+    return {
+        "window_hours": window_hours,
+        "polls": len(poll_times),
+        "hours_covered": len(per_hour),
+        "hours_with_gaps": hours_with_gaps,
+        "would_deliver_total": len(wd_rows),
+        "would_deliver_users": len({tid for tid, _ in wd_rows}),
+        "quiet_hour_violations": quiet_violations,
+        "max_would_deliver_per_user_hour": max(per_user_hour.values(), default=0),
+        "rate_cap": UTILITY_ALERT_MAX_PER_HOUR_PER_USER,
+        "real_deliveries": int(real_deliveries),
+        "shadow_mode": UTILITY_ALERT_SHADOW_MODE,
+        "oldest_poll": min(poll_times) if poll_times else None,
+        "newest_poll": max(poll_times) if poll_times else None,
+    }
+
+
+def shadow_log_preview_text(window_hours: int = 48) -> str:
+    """HTML summary of the Stage 1b evidence store for /devshadowlog."""
+    s = get_shadow_log_summary(window_hours)
+    ok = "✅"
+    bad = "❌"
+    lines = [
+        "<b>[Dev — shadow log evidence, last "
+        f"{s['window_hours']}h]</b>",
+        "",
+        f"Shadow mode: <b>{'ON (no pushes)' if s['shadow_mode'] else 'OFF (live)'}</b>",
+        f"Poll ticks: {s['polls']} across {s['hours_covered']}h "
+        f"({s['hours_with_gaps']}h with gaps; "
+        f"{ok if s['hours_with_gaps'] == 0 else bad} 6 ticks/h expected)",
+        f"Would-deliver events: {s['would_deliver_total']} "
+        f"({s['would_deliver_users']} users, deduped)",
+        f"Quiet-hours violations: {s['quiet_hour_violations']} "
+        f"{ok if s['quiet_hour_violations'] == 0 else bad} "
+        "(would-deliver inside 00:00–06:00 local)",
+        f"Max per user/hour: {s['max_would_deliver_per_user_hour']} "
+        f"(cap {s['rate_cap']}) "
+        f"{ok if s['max_would_deliver_per_user_hour'] <= s['rate_cap'] else bad}",
+        f"Real deliveries sent: {s['real_deliveries']} "
+        f"{ok if s['real_deliveries'] == 0 else bad} (must stay 0 in shadow)",
+    ]
+    if s["oldest_poll"]:
+        lines.append(
+            "Coverage: "
+            + s["oldest_poll"].strftime("%d %b %H:%M")
+            + " → "
+            + s["newest_poll"].strftime("%d %b %H:%M")
+            + " UTC"
+        )
+    else:
+        lines.append("No poll rows recorded yet in this window.")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

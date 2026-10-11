@@ -28,6 +28,7 @@ from src.bot.handlers import (
     test_push_command,
     dev_waze_command,
     dev_utility_command,
+    dev_shadow_log_command,
     force_fetch_command,
     delete_demo_command,
 )
@@ -131,6 +132,7 @@ def main() -> None:
     application.add_handler(CommandHandler("testdigestpush", test_digest_push_command))
     application.add_handler(CommandHandler("devwaze", dev_waze_command))
     application.add_handler(CommandHandler("devutility", dev_utility_command))
+    application.add_handler(CommandHandler("devshadowlog", dev_shadow_log_command))
     application.add_handler(CommandHandler("backfilltitles", backfill_titles_command))
     application.add_handler(CommandHandler("setareas", setareas_command))
     application.add_handler(CommandHandler("cancel", cancel_awaiting_area_keywords))

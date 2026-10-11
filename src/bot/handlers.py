@@ -804,6 +804,36 @@ async def dev_utility_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 
+async def dev_shadow_log_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Developer-only: Stage 1b evidence summary from the durable shadow log
+    (poll stability, quiet-hours holds, rate cap, zero-push check). Same access
+    control as /testpush — read-only, nothing is pushed.
+    """
+    if not update.message or not update.effective_user:
+        return
+
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await update.message.reply_text("Use /devshadowlog in a private chat with the bot.")
+        return
+
+    telegram_id = update.effective_user.id
+    if not is_test_push_allowed(telegram_id):
+        await update.message.reply_text(
+            "Developer commands are disabled or your Telegram user ID is not on the allow list."
+        )
+        return
+
+    from src.core.utility_alert_service import shadow_log_preview_text
+
+    text = await asyncio.to_thread(shadow_log_preview_text)
+    await update.message.reply_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+
+
 async def backfill_titles_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Developer-only: backfill missing ai_title/ai_summary for existing DB rows in batches.

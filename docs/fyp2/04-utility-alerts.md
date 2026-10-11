@@ -180,6 +180,11 @@ GROUP BY 1, 2 ORDER BY 3 DESC;
 On Fly.io the table lives in Supabase, so evidence survives even total loss of the
 app; `flyctl logs` remains useful only for same-day debugging.
 
+**Quick review:** `/devshadowlog` (developer allow-list, private chat) renders the
+same stats as a pass/fail report straight from the table — poll ticks + gap count,
+would-deliver totals, quiet-hours violations (Kuching local), per-user/hour rate-cap
+max, and the zero-push check — reviewable from a phone without opening Supabase.
+
 ## 6. Stage 2 checklist (go-live, requires owner approval)
 
 1. Review the Stage 1b shadow log against the acceptance criteria above.

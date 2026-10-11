@@ -188,3 +188,33 @@ class UtilityAlertDelivery(Base):
     utility_alert_id = Column(Integer, ForeignKey("utility_alerts.id"), nullable=False, index=True)
     sent_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+
+class UtilityAlertShadowLog(Base):
+    """
+    FYP2 Stage 1b evidence store: durable copy of shadow-mode activity that would
+    otherwise only exist in the stdout log stream (flyctl logs is not an archive).
+    kind='poll': one row per detection cycle, payload = JSON summary (stability,
+    idempotency and per-source health evidence). kind='would_deliver': one row per
+    (telegram_id, utility_alert_id) the first time that pair becomes due — the
+    timestamp evidences quiet-hours holding (overnight alerts appear at/after 06:00)
+    and backs the rate-cap review. Rows are purged with DB_RETENTION_DAYS.
+    Written only while UTILITY_ALERT_SHADOW_MODE is on.
+    """
+
+    __tablename__ = "utility_alert_shadow_log"
+    __table_args__ = (
+        # Multiple NULLs are allowed in both Postgres and SQLite, so poll rows
+        # (NULL telegram_id/utility_alert_id) never collide; would_deliver rows
+        # dedupe to the first time each (user, alert) pair became due.
+        UniqueConstraint(
+            "kind", "telegram_id", "utility_alert_id", name="uq_shadow_log_kind_user_alert"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    kind = Column(String(16), nullable=False)  # poll | would_deliver
+    telegram_id = Column(BigInteger, nullable=True, index=True)
+    utility_alert_id = Column(Integer, nullable=True)
+    payload = Column(Text, nullable=False, default="")  # JSON (poll summary / alert title)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+

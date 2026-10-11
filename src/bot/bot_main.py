@@ -60,6 +60,7 @@ from src.core.utility_alert_service import (
     format_utility_alert_html,
     poll_utility_alerts,
     record_delivery,
+    record_shadow_would_delivers,
 )
 from src.core.services import (
     SCHEDULED_PUSH_SUMMARY_PENDING_SKIP_MARKER,
@@ -384,6 +385,9 @@ def main() -> None:
             )
             pending = await asyncio.to_thread(compute_pending_deliveries)
             if UTILITY_ALERT_SHADOW_MODE:
+                # Stage 1b: persist the would-be deliveries as durable evidence
+                # (DB survives flyctl log-stream rotation; backs the Stage 2 review).
+                await asyncio.to_thread(record_shadow_would_delivers, pending)
                 if summary.get("new"):
                     print(
                         f"[utility-alert][shadow] would deliver {len(pending)} "

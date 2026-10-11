@@ -15,3 +15,7 @@ assets
 terminals
 mcps
 agent-transcripts
+*.session
+tools
+logs
+*.pdf

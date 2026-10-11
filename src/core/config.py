@@ -690,6 +690,12 @@ UTILITY_ALERT_MAX_PER_HOUR_PER_USER: Final[int] = max(
     1,
     int((os.getenv("UTILITY_ALERT_MAX_PER_HOUR_PER_USER", "3").strip() or "3")),
 )
+# Stage 1b evidence: persist shadow-mode activity (poll summaries + first-due
+# would-deliver rows) to the DB so it survives log-stream rotation on Fly.io.
+# Only written while UTILITY_ALERT_SHADOW_MODE is on; rows follow DB_RETENTION_DAYS.
+UTILITY_ALERT_SHADOW_LOG: Final[bool] = os.getenv(
+    "UTILITY_ALERT_SHADOW_LOG", "true"
+).strip().lower() in {"1", "true", "yes", "y", "on"}
 UTILITY_ALERT_TELEGRAM_CHANNELS: Final[List[str]] = [
     x.strip().lower().lstrip("@")
     for x in (

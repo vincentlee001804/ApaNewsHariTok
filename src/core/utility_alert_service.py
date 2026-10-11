@@ -16,6 +16,7 @@ Delivery policy (owner-approved 2026-10-06):
 from __future__ import annotations
 
 import html
+import json
 import logging
 from datetime import datetime, timedelta
 
@@ -29,6 +30,7 @@ from src.core.config import (
     UTILITY_ALERT_LOOKBACK_HOURS,
     UTILITY_ALERT_MAX_PER_HOUR_PER_USER,
     UTILITY_ALERT_NEWS_QUERIES,
+    UTILITY_ALERT_SHADOW_LOG,
     UTILITY_ALERT_SHADOW_MODE,
     UTILITY_ALERT_TELEGRAM_CHANNELS,
     is_scheduled_push_quiet_hours_now,
@@ -38,6 +40,7 @@ from src.core.models import (
     UserPreference,
     UtilityAlert,
     UtilityAlertDelivery,
+    UtilityAlertShadowLog,
 )
 from src.core.services import _jaccard_similarity, _tokenize_for_story_dedup
 from src.scrapers.utility_alert_reader import (
@@ -186,7 +189,57 @@ def poll_utility_alerts() -> dict:
             )
 
     _cleanup_old_utility_alerts()
+    log_shadow_event("poll", payload=json.dumps(summary, sort_keys=True))
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Stage 1b durable evidence (survives log-stream rotation on Fly.io)
+# ---------------------------------------------------------------------------
+
+
+def log_shadow_event(
+    kind: str,
+    telegram_id: int | None = None,
+    utility_alert_id: int | None = None,
+    payload: str = "",
+) -> None:
+    """
+    Best-effort write to utility_alert_shadow_log. Only active in shadow mode;
+    never raises — evidence logging must not break the detection cycle.
+    Duplicate (kind, user, alert) rows are swallowed (would_deliver dedupes to
+    the first time the pair became due).
+    """
+    if not (UTILITY_ALERT_SHADOW_MODE and UTILITY_ALERT_SHADOW_LOG):
+        return
+    try:
+        with SessionLocal() as session:
+            session.add(
+                UtilityAlertShadowLog(
+                    kind=kind,
+                    telegram_id=telegram_id,
+                    utility_alert_id=utility_alert_id,
+                    payload=payload[:4000],
+                )
+            )
+            session.commit()
+    except IntegrityError:
+        pass
+    except Exception as e:  # noqa: BLE001 — evidence logging must never break the poll
+        logger.warning("[utility-alert] shadow log write failed: %s", e)
+
+
+def record_shadow_would_delivers(pending: list[tuple[int, UtilityAlert]]) -> None:
+    """Persist each (user, alert) pair that would be notified right now (Stage 1b)."""
+    for telegram_id, alert in pending:
+        log_shadow_event(
+            "would_deliver",
+            telegram_id=telegram_id,
+            utility_alert_id=alert.id,
+            payload=json.dumps(
+                {"title": (alert.title or "")[:300], "locations": alert.locations or ""}
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +404,11 @@ def _cleanup_old_utility_alerts() -> None:
             )
             session.execute(
                 delete(UtilityAlert).where(UtilityAlert.id.in_(old_ids))
+            )
+            session.execute(
+                delete(UtilityAlertShadowLog).where(
+                    UtilityAlertShadowLog.created_at < cutoff
+                )
             )
             session.commit()
             logger.info("[utility-alert] cleaned up %d old alert rows", len(old_ids))

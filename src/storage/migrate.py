@@ -523,6 +523,19 @@ def migrate_create_utility_alert_tables() -> None:
         print(f"Migration warning (utility alert tables): {e}")
 
 
+def migrate_create_utility_alert_shadow_log_table() -> None:
+    """
+    FYP2 Stage 1b: durable shadow-mode evidence log (poll summaries + first-due
+    would-deliver rows). Same portable metadata-create pattern as the alert tables.
+    """
+    try:
+        from src.core.models import UtilityAlertShadowLog
+
+        UtilityAlertShadowLog.__table__.create(bind=engine, checkfirst=True)
+    except Exception as e:
+        print(f"Migration warning (utility alert shadow log): {e}")
+
+
 if __name__ == "__main__":
     migrate_users_telegram_id_to_bigint()
     migrate_add_locations_column()

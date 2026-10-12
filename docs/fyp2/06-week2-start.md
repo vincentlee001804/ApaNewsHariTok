@@ -63,10 +63,9 @@ Everything scheduled through W7 is complete except the benchmark — roughly
    metrics + cross-model LLM judging. Production-relevant finding: the 384-token
    `OLLAMA_SUMMARY_NUM_PREDICT` cap truncates the reasoning model to empty output —
    raise it before relying on the cloud fallback.
-2. 🟡 **Dedup human-labeled tuning set** — sheet exported 10-12
-   (`benchmark/dedup_tuning_set_20261012.xlsx`, 40 pairs: 30 in the 0.65–0.97 decision
-   band sorted closest to the 0.85 threshold first + 5+5 anchors); owner labeling in
-   progress. Feeds back into the doc 03 threshold evidence.
+2. ~~**Dedup human-labeled tuning set**~~ — **complete 10-12**: 40 owner-labeled pairs
+   (`benchmark/dedup_tuning_set_20261012.xlsx`) + second-signal fix implemented and
+   validated (doc 03 §3.3–3.4; labeled-set F1 0.541 → 0.692; production A/B clean).
 3. **Utility-alert Stage 2 checklist** (04 §6): owner sign-off from shadow
    evidence, `/settings` toggle for `wants_urgent_alerts`, incident-level
    clustering, restoration threading, then `UTILITY_ALERT_SHADOW_MODE=false`.

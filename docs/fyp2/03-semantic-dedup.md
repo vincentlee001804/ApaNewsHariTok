@@ -149,6 +149,48 @@ Findings:
    this stratum's 32% are measuring different populations. The honest report claim is:
    merges are reliable for one-off incidents, unreliable for recurring-location events.
 
+## 3.4 Second-signal fix (2026-10-12)
+
+Implemented in `services.py` (`_evidence_tokens_for_story_dedup`,
+`_shared_distinctive_evidence`) with config in `src/core/config.py`:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CROSS_SOURCE_DEDUP_SEMANTIC_GRAY_ZONE_CEILING` | 0.95 | ≥ ceiling: cosine merges directly (clear same-story). Below: second signal required. |
+| `CROSS_SOURCE_DEDUP_SEMANTIC_SECOND_SIGNAL_ENABLED` | true | Master switch for the gray-zone gate. |
+| `CROSS_SOURCE_DEDUP_SEMANTIC_RARE_TOKEN_MAX_DF` | 3 | A content token is "distinctive" if it appears in ≤ this many batch articles. |
+
+Rule: merge iff cosine ≥ 0.85 **and** (cosine ≥ 0.95 **or** the pair shares
+distinctive evidence — an incident-grade numeric token, or a content token with batch
+df ≤ 3). Numeric hygiene excludes times ("8am"), day ordinals ("22nd") and bare years:
+the labeling showed those fire on any same-day pair regardless of story.
+
+**Replayed against the 40 human labels** (`scripts/eval_second_signal.py`):
+
+| Rule | Precision | Recall | F1 |
+|---|---|---|---|
+| cosine ≥ 0.85 (before) | 0.417 | 0.769 | 0.541 |
+| + second signal, rare cap 3 | **0.692** | 0.692 | **0.692** |
+| + second signal, rare cap 4 | 0.588 | 0.769 | 0.667 |
+| + second signal, rare cap 5 | 0.476 | 0.769 | 0.588 |
+
+Cap 3 chosen: best F1 and precision, and the product cost asymmetry (a false merge
+hides a story; a missed merge merely shows a duplicate) favors precision. Remaining
+errors at cap 3: 4 false merges (one is P32-type recurring roundup above the ceiling,
+which cosine alone cannot fix) and 4 missed merges (3 sit at cosine 0.8491–0.8499,
+just under the floor — the interleaving problem of §3.3 finding 1).
+
+**Evidence-boost below the threshold was tested and rejected:** allowing merges in
+cosine [0.80, 0.85) with shared evidence would recover 2 true merges but introduce 4
+false ones on the labeled set — the wrong trade under the cost asymmetry.
+
+**Production A/B** (14-day window, 537 articles, `dedup_second_signal_20261012.txt`):
+Jaccard-only 491 clusters → +cosine 421 → +second signal **427**; only 4 gray-zone
+merges blocked, all plausibly-correct blocks (scope-mismatched weather/haze/road-project
+pairs). Effect on the general stream is small and protective because true same-story
+pairs usually share evidence anyway; the labeled hard stratum is where the precision
+gain materializes.
+
 ## 4. Reproduction
 
 ```powershell

@@ -1,0 +1,70 @@
+corpus: 1579 articles in 45d, 1447 with embeddings
+pair CSV -> C:\Users\vince\Documents\UTS\2025_26 FEB Degree SEM 6\CSS 3714 FYP 1\MVP\docs\fyp2\benchmark\dedup_pair_cosines.csv  (246 pairs)
+jaccard_caught  n=40  min=0.755 p25=0.883 median=0.928 p75=0.959 max=0.995
+hard_positive   n=146 min=0.593 p25=0.678 median=0.707 p75=0.759 max=0.938
+negative        n=60  min=0.474 p25=0.625 median=0.651 p75=0.680 max=0.779
+
+clustering simulation: 537 articles from last 14d
+clusters before (Jaccard only): 491
+clusters after  (Jaccard+semantic): 427
+merges made ONLY by semantic pass: 73
+  cos=0.865 | Tiga lelaki ditahan curi kabel di Kuching, miliki rekod jenayah lampau
+           -> Seorang lelaki ditahan disyaki bakar premis di Kuching
+  cos=0.890 | Sarawak moves towards local certified paddy seed production
+           -> Premier: Sarawak gazettes 7,000 hectares of State land exclusively for
+  cos=0.874 | Sarawak safeguards land for paddy production
+           -> Premier: Sarawak gazettes 7,000 hectares of State land exclusively for
+  cos=0.882 | Man jailed one week for threatening neighbour with parang
+           -> ‘I’ll kill you’: Man with prior molest conviction pleads guilty to thr
+  cos=0.855 | Paddy can no longer be a ‘poverty crop’, says Premier as S’wak tackles
+           -> Sarawak to inject more funds, tap private-smallholder partnerships to 
+  cos=0.894 | Three crocodiles, including 4.75m giant, captured in Sarawak’s Batang 
+           -> Buaya 500 kg antara tiga ekor ditangkap di Kampung Kebuaw
+  cos=0.907 | General : Three Large-Sized Crocodiles Captured In Sarawak's Batang Ig
+           -> Buaya 500 kg antara tiga ekor ditangkap di Kampung Kebuaw
+  cos=0.853 | From stage to paddy fields: Robots could one day help plant paddy in S
+           -> AI, remote sensing to modernise paddy farm management
+  cos=0.861 | Kuching aims to become ASEAN hub
+           -> Kuching eyes Asean hub status with new airport, expanded regional air 
+  cos=0.855 | Interfaith thanksgiving ceremony among programmes for Sarawak TYT’s 80
+           -> Seven events lined up for TYT’s 80th birthday celebration
+  cos=0.938 | Four-day programme lined up for TYT’s 80th birthday
+           -> Seven events lined up for TYT’s 80th birthday celebration
+  cos=0.903 | Sarawak Governor’s 80th Birthday: Four-day celebration from Oct 8 to f
+           -> Seven events lined up for TYT’s 80th birthday celebration
+  cos=0.875 | Kuching roads to face closures, diversions for TYT’s 80th birthday cel
+           -> Seven events lined up for TYT’s 80th birthday celebration
+  cos=0.872 | Sarawak Tourism Board expands footprint in Tokyo, Osaka to attract Jap
+           -> AirBorneo to add flights as demand grows, says Abang Johari
+  cos=0.864 | Tourism Minister seeks stronger air links to boost Russian tourist arr
+           -> AirBorneo to add flights as demand grows, says Abang Johari
+  cos=0.881 | Man jailed two weeks for trespassing at house linked to Sarawak deputy
+           -> Foreigner jailed six months for overstaying in Malaysia
+  cos=0.885 | Sarawak Borneo Craft Festival targets RM3 mln in sales, 125,000 visito
+           -> BCG 2.0 targets 30,000 visitors
+  cos=0.855 | MBKS’s Ausome Park, Kuching Natural Farmers Market win at 2026 JCI M’s
+           -> SarawakPass clinches double honours at Digital Economy Awards 2026 for
+  cos=0.855 | Police seek witnesses of Sunday’s fatal motorcycle crash near Miri Sen
+           -> Motorcyclist dies after veering into opposite lane, plunging into drai
+  cos=0.888 | Sarawak to host international water conference in 2028
+           -> Kuching to make regional first as host of int’l World Water Congress &
+  cos=0.914 | Premier remembers Song Swee Guan as humble, dedicated leader with stro
+           -> Sarawak’s only Mayor-MP-Speaker: Leaders remember Datuk Song Swee Guan
+  cos=0.886 | Song remembered for putting people first
+           -> Sarawak’s only Mayor-MP-Speaker: Leaders remember Datuk Song Swee Guan
+  cos=0.869 | Pilot’s widow questions MOH silence following Long Lellang helicopter 
+           -> ‘I don’t want sympathy, I want results’: Zainol Afiq’s widow questions
+  cos=0.955 | S’wak unveils keteq.GaN, first locally designed gallium nitride power 
+           -> Sarawak Officially Unveils Its First Locally Designed GaN Power Semico
+  cos=0.909 | keteq.GaN marks S’wak’s push to expand semiconductor applications beyo
+           -> Sarawak Officially Unveils Its First Locally Designed GaN Power Semico
+  cos=0.946 | S’wak unveils keteq.GaN, first locally designed GaN power semiconducto
+           -> Sarawak Officially Unveils Its First Locally Designed GaN Power Semico
+  cos=0.869 | Balingian Rumah Spektra Permata scheme to provide 54 homes, first 22 u
+           -> Sarawak targets another 20,000 affordable homes
+  cos=0.943 | Kebocoran gas bawah tanah paksa operasi ladang sawit Kuala Baram dihen
+           -> Gas bawah tanah bocor, ladang sawit ditutup sementara
+  cos=0.885 | Underground gas leak prompts shutdown at Kuala Baram oil palm site
+           -> Gas bawah tanah bocor, ladang sawit ditutup sementara
+  cos=0.888 | 2 men on motorcycle allegedly hit cop at Jalan Padungan roadblock
+           -> Dua lelaki langgar anggota polis sedang dikesan

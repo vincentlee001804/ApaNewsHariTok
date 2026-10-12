@@ -491,6 +491,44 @@ CROSS_SOURCE_DEDUP_SEMANTIC_COSINE_THRESHOLD: Final[float] = min(
     ),
 )
 
+# FYP2 follow-up (doc 03 §3.3 human validation): pairs in the gray zone
+# [THRESHOLD, CEILING) are NOT merged on cosine alone — they must also share
+# distinctive evidence (a numeric token, or a rare content token by batch df),
+# because same-location recurring events (daily haze readings, same-road crashes)
+# false-merge there. At/above CEILING cosine merges directly (clear same-story).
+CROSS_SOURCE_DEDUP_SEMANTIC_GRAY_ZONE_CEILING: Final[float] = min(
+    1.0,
+    max(
+        0.0,
+        float(
+            (
+                os.getenv("CROSS_SOURCE_DEDUP_SEMANTIC_GRAY_ZONE_CEILING", "0.95").strip()
+                or "0.95"
+            )
+        ),
+    ),
+)
+CROSS_SOURCE_DEDUP_SEMANTIC_SECOND_SIGNAL_ENABLED: Final[bool] = os.getenv(
+    "CROSS_SOURCE_DEDUP_SEMANTIC_SECOND_SIGNAL_ENABLED", "true"
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+# A content token counts as "distinctive" if it appears in at most this many
+# batch articles (low document frequency = not a generic genre word).
+CROSS_SOURCE_DEDUP_SEMANTIC_RARE_TOKEN_MAX_DF: Final[int] = max(
+    1,
+    int(
+        (
+            os.getenv("CROSS_SOURCE_DEDUP_SEMANTIC_RARE_TOKEN_MAX_DF", "3").strip()
+            or "3"
+        )
+    ),
+)
+
 # Background RSS prefetch (store to DB while bot is running)
 PREFETCH_ENABLED: Final[bool] = os.getenv("PREFETCH_ENABLED", "true").strip().lower() in {
     "1",

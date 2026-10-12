@@ -26,6 +26,9 @@ from src.core.config import (
     CROSS_SOURCE_DEDUP_MIN_BODY_TOKENS,
     CROSS_SOURCE_DEDUP_SEMANTIC_COSINE_THRESHOLD,
     CROSS_SOURCE_DEDUP_SEMANTIC_ENABLED,
+    CROSS_SOURCE_DEDUP_SEMANTIC_GRAY_ZONE_CEILING,
+    CROSS_SOURCE_DEDUP_SEMANTIC_RARE_TOKEN_MAX_DF,
+    CROSS_SOURCE_DEDUP_SEMANTIC_SECOND_SIGNAL_ENABLED,
     CROSS_SOURCE_DEDUP_TITLE_JACCARD_THRESHOLD,
     DEDUPLICATION_ENABLED,
     NEWS_AGENT_WINDOW_HOURS,
@@ -102,6 +105,58 @@ def _normalized_title_key_for_story_dedup(title: str | None) -> str:
     return " ".join(tokens[:18])
 
 
+_NUMERIC_TOKEN_RE: Final[re.Pattern] = re.compile(r"[a-z0-9]+")
+# Numeric hygiene for the second signal: times ("8am"), day-of-month ordinals
+# ("22nd") and bare years are shared by most same-window pairs regardless of story,
+# so they must not count as incident evidence.
+_ORDINAL_RE: Final[re.Pattern] = re.compile(r"\d+(?:st|nd|rd|th)$")
+_YEAR_RE: Final[re.Pattern] = re.compile(r"(?:19|20)\d{2}$")
+
+
+def _is_incident_numeric(tok: str) -> bool:
+    if _ORDINAL_RE.match(tok) or _YEAR_RE.match(tok):
+        return False
+    if tok.isdigit() and int(tok) < 10:
+        return False
+    return True
+
+
+def _evidence_tokens_for_story_dedup(article: NewsArticle) -> tuple[set[str], set[str]]:
+    """(numeric tokens, rare-eligible content tokens) for the second-signal check.
+
+    Numeric tokens carry incident specifics (API readings, tolls, death counts).
+    Content tokens exclude _DEDUP_STOPWORDS; rareness is decided by the caller against
+    the batch document-frequency map (see _shared_distinctive_evidence).
+    """
+    text = f"{article.title or ''} {article.raw_summary or ''} {article.ai_summary or ''}".lower()
+    numeric: set[str] = set()
+    content: set[str] = set()
+    for tok in _NUMERIC_TOKEN_RE.findall(text):
+        if any(c.isdigit() for c in tok):
+            if _is_incident_numeric(tok):
+                numeric.add(tok)
+        elif len(tok) >= 4 and tok not in _DEDUP_STOPWORDS:
+            content.add(tok)
+    return numeric, content
+
+
+def _shared_distinctive_evidence(
+    a_content: set[str],
+    a_numeric: set[str],
+    b_content: set[str],
+    b_numeric: set[str],
+    token_df: dict[str, int],
+) -> bool:
+    """Second signal for the gray zone (doc 03 §3.3): a same-story pair almost always
+    shares incident specifics — a number, or a rare token — while same-location
+    recurring coverage shares only generic genre words."""
+    if a_numeric & b_numeric:
+        return True
+    rare_cap = CROSS_SOURCE_DEDUP_SEMANTIC_RARE_TOKEN_MAX_DF
+    shared = a_content & b_content
+    return any(token_df.get(t, 0) <= rare_cap for t in shared)
+
+
 def _find_cross_source_duplicate_story_match(
     *,
     title_tokens: set[str],
@@ -166,9 +221,31 @@ def _cluster_ranked_articles_cross_source(
         if ids:
             semantic_vecs = fetch_stored_vectors(ids) or {}
 
+    # FYP2 second signal (doc 03 §3.3 human validation): gray-zone cosine merges must
+    # ALSO share distinctive evidence (numeric token or rare content token), because
+    # same-location recurring events false-merge on embedding similarity alone.
+    evidence_numeric: dict[int, set[str]] = {}
+    evidence_content: dict[int, set[str]] = {}
+    token_df: dict[str, int] = {}
+    if (
+        CROSS_SOURCE_DEDUP_SEMANTIC_SECOND_SIGNAL_ENABLED
+        and semantic_vecs
+        and CROSS_SOURCE_DEDUP_SEMANTIC_GRAY_ZONE_CEILING
+        > CROSS_SOURCE_DEDUP_SEMANTIC_COSINE_THRESHOLD
+    ):
+        for art in ranked_articles:
+            if getattr(art, "id", None) is None:
+                continue
+            numeric, content = _evidence_tokens_for_story_dedup(art)
+            evidence_numeric[art.id] = numeric
+            evidence_content[art.id] = content
+            for tok in content:
+                token_df[tok] = token_df.get(tok, 0) + 1
+
     clusters: list[tuple[NewsArticle, list[NewsArticle]]] = []
     seen_signatures: list[tuple[set[str], set[str], set[str], str, str]] = []
     seen_vecs: list[list[float] | None] = []
+    seen_evidence: list[tuple[set[str], set[str]] | None] = []
     seen_links: set[str] = set()
 
     for art in ranked_articles:
@@ -210,12 +287,31 @@ def _cluster_ranked_articles_cross_source(
                     if seen_vec is None:
                         continue
                     cos = cosine_between(vec, seen_vec)
+                    if cos is None or cos < CROSS_SOURCE_DEDUP_SEMANTIC_COSINE_THRESHOLD:
+                        continue
+                    # Gray zone: embedding similarity alone is unreliable here
+                    # (same-location recurring events); require shared distinctive
+                    # evidence. Above the ceiling, cosine merges directly.
                     if (
-                        cos is not None
-                        and cos >= CROSS_SOURCE_DEDUP_SEMANTIC_COSINE_THRESHOLD
+                        evidence_content
+                        and cos < CROSS_SOURCE_DEDUP_SEMANTIC_GRAY_ZONE_CEILING
                     ):
+                        rep = seen_evidence[idx]
+                        if not (
+                            rep is not None
+                            and _shared_distinctive_evidence(
+                                evidence_content.get(art.id, set()),
+                                evidence_numeric.get(art.id, set()),
+                                rep[0],
+                                rep[1],
+                                token_df,
+                            )
+                        ):
+                            continue
+                        duplicate_match = (idx, "semantic+evidence", cos)
+                    else:
                         duplicate_match = (idx, "semantic", cos)
-                        break
+                    break
         if duplicate_match is not None:
             cluster_idx, match_by, score = duplicate_match
             clusters[cluster_idx][1].append(art)
@@ -236,6 +332,10 @@ def _cluster_ranked_articles_cross_source(
             (title_tokens, body_tokens, ai_summary_tokens, source_norm, title_key)
         )
         seen_vecs.append(semantic_vecs.get(art.id))
+        if evidence_content and art.id in evidence_content:
+            seen_evidence.append((evidence_content[art.id], evidence_numeric[art.id]))
+        else:
+            seen_evidence.append(None)
         clusters.append((art, [art]))
         if CROSS_SOURCE_DEDUP_DEBUG:
             logger.info(

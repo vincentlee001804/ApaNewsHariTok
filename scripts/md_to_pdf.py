@@ -151,5 +151,5 @@ def convert(md_path: Path, pdf_path: Path) -> None:
 if __name__ == "__main__":
     out_dir = Path("docs/fyp2/pdf")
     out_dir.mkdir(parents=True, exist_ok=True)
-    for md in sorted(Path("docs/fyp2").glob("0[0-5]-*.md")):
+    for md in sorted(Path("docs/fyp2").glob("0*.md")):
         convert(md, out_dir / f"{md.stem}.pdf")

@@ -70,7 +70,7 @@ notices; no off-topic or non-Sarawak content in the sample.
 | # | Item | Status |
 |---|---|---|
 | 1 | Shadow evidence review | ✅ this document (owner to confirm) |
-| 2 | `/settings` toggle for `wants_urgent_alerts` | ⬜ **recommended before go-live** — without it, 53 users are opted-in by default with no self-service off switch |
+| 2 | `/settings` toggle for `wants_urgent_alerts` | ✅ **already live** — correction to doc 04 §6: the `/settings` "🚨 Urgent Alerts: ON/OFF" toggle and its callback (`settings_toggle_urgent`) shipped earlier and the delivery path filters on it (`_matching_user_ids` requires `wants_urgent_alerts.is_(True)`). Verified in code 10-12. |
 | 3 | Incident clustering for news watch | ⬜ open (prevents duplicate alerts when multiple outlets cover one burst) |
 | 4 | Restoration threading | ⬜ open (link "restored" follow-ups to the original notice) |
 | 5 | rss.app FB bridge (optional, paid) | ⬜ owner decision deferred |
@@ -79,12 +79,10 @@ notices; no off-topic or non-Sarawak content in the sample.
 ## 6. Recommendation
 
 Evidence supports **go** on detection quality: precision is perfect on the sample,
-delivery math (rate cap, per-user skip, zero pushes) is verified, and the pipeline is
-stable at full cadence. However, **do not flip `SHADOW_MODE=false` yet**: ship the
-`/settings` opt-out toggle first (item 2) so users can control alerts before any push
-reaches them, and ideally item 3 (clustering) so the first live burst doesn't arrive
-as 3–4 duplicate alerts from different outlets. Items 3–4 can ship after go-live as
-refinements if the owner prefers an early live date limited to Telegram+JBALB sources.
-
-**Suggested order:** settings toggle → flip shadow off (Telegram+JBALB only) →
-clustering + restoration threading in Week 3.
+delivery math (rate cap, per-user skip, zero pushes, opt-in filter) is verified, and
+the pipeline is stable at full cadence. The opt-out toggle (item 2) turned out to be
+already live, so **the only remaining owner decision for go-live is item 6**: set
+`UTILITY_ALERT_SHADOW_MODE=false` and redeploy (Telegram + JBALB sources). Items 3–4
+(clustering, restoration threading) can ship after go-live as refinements — the known
+cost of going live without item 3 is that a burst covered by several outlets may
+arrive as multiple alerts (rate-capped at 3/user/h).

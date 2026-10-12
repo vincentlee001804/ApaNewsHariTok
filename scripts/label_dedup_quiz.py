@@ -7,6 +7,10 @@ buttons (or keys 1/2/3), optional note, progress bar. Labels save back to the SA
 incrementally, so you can quit anytime and resume later — already-labeled rows are
 skipped on startup.
 
+Keyboard shortcuts are disabled while the note box has focus (typing 's'/'d'/'u' inside
+a note must not submit an answer). Prev / Skip buttons move between pairs without
+losing your place; re-answering a pair overwrites its label.
+
 Run:  python scripts/label_dedup_quiz.py
 """
 
@@ -34,7 +38,7 @@ class Quiz(tk.Tk):
         super().__init__()
         self.csv_path = csv_path
         self.title(f"Dedup tuning labeler — {csv_path.name}")
-        self.geometry("1100x760")
+        self.geometry("1100x780")
 
         with csv_path.open(newline="", encoding="utf-8") as fh:
             self.rows = list(csv.DictReader(fh))
@@ -53,8 +57,10 @@ class Quiz(tk.Tk):
         self.progress = tk.Label(self, font=("Segoe UI", 11), anchor="w")
         self.progress.pack(fill="x", padx=12, pady=(10, 0))
 
-        meta = tk.Label(self, font=("Segoe UI", 10), fg="#555555", anchor="w")
-        self.meta = meta
+        self.cur_label_lbl = tk.Label(self, font=("Segoe UI", 10), fg="#1a237e", anchor="w")
+        self.cur_label_lbl.pack(fill="x", padx=12)
+
+        self.meta = tk.Label(self, font=("Segoe UI", 10), fg="#555555", anchor="w")
         self.meta.pack(fill="x", padx=12)
 
         panes = tk.PanedWindow(self, orient="horizontal", sashwidth=6)
@@ -64,15 +70,15 @@ class Quiz(tk.Tk):
         self.text_b = self._article_pane(panes, "ARTICLE B", "#f3fbf0")
 
         bottom = tk.Frame(self)
-        bottom.pack(fill="x", padx=12, pady=(0, 12))
+        bottom.pack(fill="x", padx=12, pady=(0, 8))
 
         tk.Label(bottom, text="Note (optional):", font=("Segoe UI", 9)).pack(side="left")
-        self.note = tk.Entry(bottom, font=("Segoe UI", 10), width=40)
+        self.note = tk.Entry(bottom, font=("Segoe UI", 10), width=44)
         self.note.pack(side="left", padx=6)
-        self.note.bind("<Return>", lambda _e: self._answer("same_story"))
 
+        # ---- answer buttons
         btns = tk.Frame(self)
-        btns.pack(fill="x", padx=12, pady=(0, 14))
+        btns.pack(fill="x", padx=12)
         for label, key, val, color in [
             ("[1] Same story", "1", "same_story", "#2e7d32"),
             ("[2] Different story", "2", "different_story", "#c62828"),
@@ -83,10 +89,29 @@ class Quiz(tk.Tk):
                 width=18, command=lambda v=val: self._answer(v),
             )
             b.pack(side="left", padx=8, expand=True, fill="x")
-            self.bind(key, lambda _e, v=val: self._answer(v))
-        self.bind("s", lambda _e: self._answer("same_story"))
-        self.bind("d", lambda _e: self._answer("different_story"))
-        self.bind("u", lambda _e: self._answer("unsure"))
+            self._bind_key(key, val)
+
+        # ---- navigation
+        nav = tk.Frame(self)
+        nav.pack(fill="x", padx=12, pady=(8, 14))
+        tk.Button(nav, text="◀ Prev", font=("Segoe UI", 10), width=12,
+                  command=self._prev).pack(side="left", padx=8)
+        tk.Button(nav, text="Skip ▶", font=("Segoe UI", 10), width=12,
+                  command=self._skip).pack(side="right", padx=8)
+        tk.Label(nav, text="Ctrl+Enter = submit while typing in note",
+                 font=("Segoe UI", 8), fg="#888888").pack(side="bottom")
+
+        # key shortcuts are ignored while the note box has focus, EXCEPT Ctrl+Enter
+        # which submits the current answer on purpose.
+        self.note.bind("<Control-Return>", lambda _e: self._answer("same_story"))
+
+    def _bind_key(self, key: str, val: str) -> None:
+        def handler(_e, v=val):
+            if self.focus_get() is self.note:
+                return  # user is typing a note; don't submit on s/d/u/1/2/3
+            self._answer(v)
+
+        self.bind(key, handler)
 
     def _article_pane(self, parent, banner, bg):
         frame = tk.Frame(parent, bg=bg, bd=1, relief="solid")
@@ -110,12 +135,19 @@ class Quiz(tk.Tk):
         widget.config(state="disabled")
 
     def _show(self) -> None:
+        if self.pos >= len(self.pending):
+            self._finish()
+            return
         idx = self.pending[self.pos]
         r = self.rows[idx]
         done = len([r for r in self.rows if (r.get("label") or "").strip()])
         self.progress.config(
             text=f"Pair {self.pos + 1} of {len(self.pending)} remaining   "
                  f"({done}/{len(self.rows)} total done)   —   {r['pair_id']}"
+        )
+        existing = (r.get("label") or "").strip()
+        self.cur_label_lbl.config(
+            text=f"current label: {existing}" if existing else "current label: —"
         )
         self.meta.config(
             text=f"stratum: {r['stratum']}   ·   cosine: {r['cosine']}   ·   "
@@ -128,6 +160,8 @@ class Quiz(tk.Tk):
             self.note.insert(0, r["notes"])
 
     def _answer(self, label: str) -> None:
+        if self.pos >= len(self.pending):
+            return
         idx = self.pending[self.pos]
         self.rows[idx]["label"] = label
         note = self.note.get().strip()
@@ -135,10 +169,16 @@ class Quiz(tk.Tk):
             self.rows[idx]["notes"] = note
         self._save()
         self.pos += 1
-        if self.pos >= len(self.pending):
-            self._finish()
-        else:
+        self._show()
+
+    def _prev(self) -> None:
+        if self.pos > 0:
+            self.pos -= 1
             self._show()
+
+    def _skip(self) -> None:
+        self.pos += 1
+        self._show()
 
     def _save(self) -> None:
         with self.csv_path.open("w", newline="", encoding="utf-8") as fh:
@@ -149,14 +189,17 @@ class Quiz(tk.Tk):
     def _finish(self) -> None:
         for w in self.winfo_children():
             w.destroy()
+        unlabeled = len([r for r in self.rows if not (r.get("label") or "").strip()])
         tk.Label(
-            self, text="All pairs labeled — nice work!", font=("Segoe UI", 16, "bold"),
+            self, text="End of the queue!", font=("Segoe UI", 16, "bold"),
         ).pack(expand=True)
-        tk.Label(
-            self,
-            text=f"Labels saved to:\n{self.csv_path}\n\nTell Kimi you're done to fold them into the doc 03 threshold analysis.",
-            font=("Segoe UI", 11), justify="center",
-        ).pack(expand=True)
+        tail = (
+            f"Labels saved to:\n{self.csv_path}\n\nTell Kimi you're done to fold them into the doc 03 threshold analysis."
+            if unlabeled == 0
+            else f"{unlabeled} pair(s) left unlabeled (skipped).\nLabels saved to:\n{self.csv_path}\n\n"
+                 "Restart the app to label the skipped ones."
+        )
+        tk.Label(self, text=tail, font=("Segoe UI", 11), justify="center").pack(expand=True)
         self._save()
 
 

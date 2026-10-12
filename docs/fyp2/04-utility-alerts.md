@@ -219,3 +219,14 @@ max, and the zero-push check — reviewable from a phone without opening Supabas
    Deliberately deferred as a documented limitation — the natural fix is a
    sub-area → division rollup in `_matching_user_ids`, to ship alongside the
    post-go-live refinements (clustering, restoration threading).
+7. **Go-live stale-notice burst (found and fixed 2026-10-12, same evening):** delivery
+   eligibility keyed on `created_at` (when *our bot* first stored a notice). JBALB
+   backfills days-old notices, so after the shadow→live flip the bot dumped every
+   notice stored in 48 h — including works dated 10-09/10-10 and a 14–16.10 future
+   window — to matched users (366 deliveries, draining at 3/user/h). Fix: eligibility
+   now uses the **event time** — `announced_at` must fall within
+   `[now − 36h, now + 48h]` (`UTILITY_ALERT_DELIVER_PAST_HOURS` /
+   `UTILITY_ALERT_DELIVER_FUTURE_HOURS`); undated rows get a one-shot 24 h storage
+   window. Post-fix dry run: pending collapsed from the stale backlog to the 3
+   same-day notices. Lesson for the Phase-4 playbook: any backlog-replay path must
+   filter on event time, never storage time.

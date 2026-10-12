@@ -74,7 +74,7 @@ notices; no off-topic or non-Sarawak content in the sample.
 | 3 | Incident clustering for news watch | ⬜ open (prevents duplicate alerts when multiple outlets cover one burst) |
 | 4 | Restoration threading | ⬜ open (link "restored" follow-ups to the original notice) |
 | 5 | rss.app FB bridge (optional, paid) | ⬜ owner decision deferred |
-| 6 | `UTILITY_ALERT_SHADOW_MODE=false` + redeploy | ✅ **done 2026-10-12** — owner-approved; live since 19:25 Asia/Kuching (Fly v120). First live cycle: 142 deliveries recorded; one dead test account (123456) failed gracefully ("Chat not found", logged, non-fatal). |
+| 6 | `UTILITY_ALERT_SHADOW_MODE=false` + redeploy | ✅ **done 2026-10-12** — owner-approved; live since 19:25 Asia/Kuching (Fly v120). **Incident same evening:** go-live replayed the stored backlog (366 deliveries of notices up to 3 days old) because eligibility keyed on storage time, not event time — fixed in v124 (`UTILITY_ALERT_DELIVER_PAST/FUTURE_HOURS`, event-time window; doc 04 §7.7). Verified: delivery count flat, only same-day notices remain pending. |
 
 ## 6. Recommendation
 

@@ -2,7 +2,8 @@
 
 **Thesis priority:** #2 (cross-source duplicate detection) from §5.5 Future Works.
 **Date:** 2026-10-06 (FYP 2, Week 1)
-**Status:** implemented and evaluated against the production corpus; default threshold 0.85.
+**Status:** implemented and evaluated against the production corpus; default threshold 0.85;
+human-labeled validation added 2026-10-12 (§3.3).
 
 ---
 
@@ -106,6 +107,48 @@ Cost of a false merge is **soft**: clustering controls what a digest displays; m
 members still contribute their source links to the cluster's "Sources:" line, so the
 reader can reach the suppressed article, but its title/summary are not shown.
 
+## 3.3 Human-labeled validation (2026-10-12, 40 pairs, owner-labeled)
+
+`benchmark/dedup_tuning_set_20261012.csv` (via `scripts/export_dedup_tuning_set.py` +
+quiz UI `scripts/label_dedup_quiz.py`): 30 pairs from the hard stratum (same location,
+≤48h, cross-source) closest to the 0.85 boundary + 5 positive / 5 negative anchors.
+
+| Stratum | n | same_story | different_story | unsure |
+|---|---|---|---|---|
+| band (0.65–0.97, closest-to-0.85 first) | 30 | 9 | 19 | 2 |
+| — of which cosine ≥ 0.85 (would merge) | 21 | 6 | 13 | 2 |
+| anchor_positive (≥ 0.95) | 5 | 4 | 1 | 0 |
+| anchor_negative (≤ 0.60) | 5 | 0 | 5 | 0 |
+
+Findings:
+
+1. **The decision boundary is genuinely hard.** On this deliberately-hardest stratum,
+   pairs at/above the 0.85 threshold are mostly *different* stories (13/19 excluding
+   unsure → ~32% merge precision here). True same-story pairs sit interleaved at
+   0.849–0.851 (e.g. P03, the Jalan Dudong crash, cos 0.8499). No single threshold
+   separates the two groups — raising it would break these true merges *and* the
+   cross-lingual true merges from §3.1 (0.856–0.869).
+2. **The dominant failure mode is exactly "same place, different incident."** The
+   labeled different-story pairs are overwhelmingly same-location recurring coverage:
+   day-after-day haze API roundups, same-road crashes on different days. Recurring
+   events at one location embed close together (the embedding input includes the
+   location text plus same genre/entities), so cosine alone cannot tell "same incident
+   re-reported" from "new incident, same place." A second gray-zone signal (shared
+   distinctive token / specific numeric value, per the mitigation in §5) is now the
+   recommended next step rather than a threshold move.
+3. **A labeling-policy subtlety surfaced:** several pairs are the *same underlying
+   event* but one article frames it locally and the other nationally ("A focus in
+   Sarawak only, B nationwide"). The owner labeled these different_story, i.e. the
+   product policy treats geographic scope as decisive, not just the underlying event.
+   This policy should be written into the report's dedup definition.
+4. One anchor exception: P32 (cos 0.9561, day-after-day Kanowit API updates) was
+   labeled different_story — recurring-event roundups can false-merge even well above
+   the threshold.
+5. **Caveat:** the band stratum is enriched for hard cases and is *not* representative
+   of all pairs the system merges; the §3.2 simulation merge precision (77% true) and
+   this stratum's 32% are measuring different populations. The honest report claim is:
+   merges are reliable for one-off incidents, unreliable for recurring-location events.
+
 ## 4. Reproduction
 
 ```powershell
@@ -114,9 +157,10 @@ python scripts/eval_semantic_dedup.py        # pair histograms + before/after cl
 
 ## 5. Threats to validity / risks
 
-1. **Heuristic labels**: `hard_positive` pairs are labeled by location+time heuristics,
-   not human annotation; the histogram (not the label) is the actual threshold evidence.
-   A proper human-labeled set is Phase 5 evaluation work.
+1. ~~**Heuristic labels**~~ — resolved 2026-10-12: 40-pair human-labeled tuning set (§3.3).
+   The labels confirmed 0.85 as the pragmatic operating point but exposed a systematic
+   weak spot: same-location *recurring* events (daily haze readings, same-road crashes)
+   false-merge at and above the threshold; a second gray-zone signal is the planned fix.
 2. **False merges hide distinct stories** (see §3.2): ~23% at 0.85 by manual sample.
    Mitigations if this hurts in practice: raise the threshold (cross-lingual catches
    start dropping above ~0.89) or require an additional weak signal (shared distinctive

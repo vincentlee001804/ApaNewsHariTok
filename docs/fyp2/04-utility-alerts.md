@@ -213,3 +213,9 @@ max, and the zero-push check — reviewable from a phone without opening Supabas
    location/date, but affected-area lists will be absent until the scraper is adjusted.
 4. False-positive alerts erode trust quickly — shadow mode exists exactly to measure
    precision before users see anything.
+5. **Location matching is exact set intersection with no parent/child rollup** (noted
+   at go-live, 2026-10-12): an alert extracted at division granularity ("Betong") does
+   not reach a user who subscribed only to a sub-area ("Saratok"), and vice versa.
+   Deliberately deferred as a documented limitation — the natural fix is a
+   sub-area → division rollup in `_matching_user_ids`, to ship alongside the
+   post-go-live refinements (clustering, restoration threading).

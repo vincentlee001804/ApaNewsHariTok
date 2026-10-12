@@ -12,6 +12,10 @@ PYTHONUNBUFFERED = "1"
 # budget on hidden reasoning and returns EMPTY output (done_reason=length). 1024 is
 # the benchmark-verified minimum (see docs/fyp2/07-summary-quality-benchmark.md §2.1).
 OLLAMA_SUMMARY_NUM_PREDICT = "1024"
+# Utility alerts GO-LIVE: owner-approved 2026-10-12 after the Stage 2 shadow review
+# (docs/fyp2/08-utility-alerts-stage2-signoff.md — 5/6 criteria pass, 1 untested).
+# true = detect + log only; false = real delivery to opted-in users.
+UTILITY_ALERT_SHADOW_MODE = "false"
 
 # Telegram polling + APScheduler need a process that stays up. Inbound HTTP to PORT is only
 # for Fly health checks — traffic is mostly outbound to Telegram, so autostop would suspend

@@ -8,6 +8,10 @@ dockerfile = "Dockerfile"
 PORT = "8080"
 # So print() and logging reach Fly log stream immediately (no line-buffer delay).
 PYTHONUNBUFFERED = "1"
+# gpt-oss:20b (cloud fallback) is a reasoning model: the 384 default burns the whole
+# budget on hidden reasoning and returns EMPTY output (done_reason=length). 1024 is
+# the benchmark-verified minimum (see docs/fyp2/07-summary-quality-benchmark.md §2.1).
+OLLAMA_SUMMARY_NUM_PREDICT = "1024"
 
 # Telegram polling + APScheduler need a process that stays up. Inbound HTTP to PORT is only
 # for Fly health checks — traffic is mostly outbound to Telegram, so autostop would suspend

@@ -724,6 +724,19 @@ UTILITY_ALERT_LOOKBACK_HOURS: Final[int] = max(
     1,
     int((os.getenv("UTILITY_ALERT_LOOKBACK_HOURS", "24").strip() or "24")),
 )
+# Delivery relevance window (go-live burst fix, 2026-10-12 — doc 08 incident note):
+# a notice is delivered only if its event/works time (announced_at) falls within
+# [now - PAST_HOURS, now + FUTURE_HOURS]. Keying on created_at ("when our bot first
+# stored it") dumps the whole stored backlog on users after any deploy gap; JBALB
+# backfills days-old notices (announced_at for JBALB is the works date from the title).
+UTILITY_ALERT_DELIVER_PAST_HOURS: Final[int] = max(
+    1,
+    int((os.getenv("UTILITY_ALERT_DELIVER_PAST_HOURS", "36").strip() or "36")),
+)
+UTILITY_ALERT_DELIVER_FUTURE_HOURS: Final[int] = max(
+    0,
+    int((os.getenv("UTILITY_ALERT_DELIVER_FUTURE_HOURS", "48").strip() or "48")),
+)
 UTILITY_ALERT_MAX_PER_HOUR_PER_USER: Final[int] = max(
     1,
     int((os.getenv("UTILITY_ALERT_MAX_PER_HOUR_PER_USER", "3").strip() or "3")),

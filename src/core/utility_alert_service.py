@@ -29,6 +29,8 @@ from src.core.config import (
     SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL,
     SCHEDULED_PUSH_QUIET_TIMEZONE,
     UTILITY_ALERT_JBALB_URLS,
+    UTILITY_ALERT_DELIVER_FUTURE_HOURS,
+    UTILITY_ALERT_DELIVER_PAST_HOURS,
     UTILITY_ALERT_LOOKBACK_HOURS,
     UTILITY_ALERT_MAX_PER_HOUR_PER_USER,
     UTILITY_ALERT_NEWS_QUERIES,
@@ -398,13 +400,31 @@ def compute_pending_deliveries() -> list[tuple[int, UtilityAlert]]:
     """
     if is_scheduled_push_quiet_hours_now():
         return []
-    cutoff = datetime.utcnow() - timedelta(hours=48)
+    now = datetime.utcnow()
+    # Relevance window on the EVENT time, not storage time — see config comment
+    # (go-live burst fix 2026-10-12). Rows without announced_at fall back to a
+    # tight storage-time window so an undated notice still has one chance to go out.
+    past_floor = now - timedelta(hours=UTILITY_ALERT_DELIVER_PAST_HOURS)
+    future_cap = now + timedelta(hours=UTILITY_ALERT_DELIVER_FUTURE_HOURS)
     with SessionLocal() as session:
-        alerts = session.execute(
+        dated = session.execute(
             select(UtilityAlert)
-            .where(UtilityAlert.created_at >= cutoff)
+            .where(
+                UtilityAlert.announced_at.isnot(None),
+                UtilityAlert.announced_at >= past_floor,
+                UtilityAlert.announced_at <= future_cap,
+            )
             .order_by(UtilityAlert.created_at.asc())
         ).scalars().all()
+        undated = session.execute(
+            select(UtilityAlert)
+            .where(
+                UtilityAlert.announced_at.is_(None),
+                UtilityAlert.created_at >= now - timedelta(hours=24),
+            )
+            .order_by(UtilityAlert.created_at.asc())
+        ).scalars().all()
+        alerts = dated + undated
         if not alerts:
             return []
         counts = _recent_delivery_counts(

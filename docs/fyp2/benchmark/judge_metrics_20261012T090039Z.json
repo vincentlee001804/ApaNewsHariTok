@@ -1,0 +1,20 @@
+{
+  "generated_utc": "20261012T090039Z",
+  "rubric": "1-5, cross-judged (no model grades its own output)",
+  "groups": {
+    "gptoss_v2": {
+      "judge_model": "llama3.1:latest",
+      "n": 5,
+      "mean_relevance": 5,
+      "mean_coherence": 5,
+      "mean_factuality": 5
+    },
+    "llama31_v2": {
+      "judge_model": "gpt-oss:20b",
+      "n": 10,
+      "mean_relevance": 3.9,
+      "mean_coherence": 4.7,
+      "mean_factuality": 3.3
+    }
+  }
+}

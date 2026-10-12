@@ -1,0 +1,30 @@
+{
+  "generated_utc": "20261012T085616Z",
+  "fixture": "C:\\Users\\vince\\Documents\\UTS\\2025_26 FEB Degree SEM 6\\CSS 3714 FYP 1\\MVP\\docs\\fyp2\\benchmark\\articles_fixture.json",
+  "summary_target_words": 30,
+  "note": "automatic proxies; see docs/fyp2/07-summary-quality-benchmark.md for rubric and limitations",
+  "groups": {
+    "llama31_v2": {
+      "model": "llama3.1:latest",
+      "summaries_scored": 10,
+      "abstentions": 0,
+      "abstention_rate": 0.0,
+      "mean_compression_ratio": 0.6972,
+      "mean_rougeL_f1": 0.2423,
+      "mean_rougeL_recall": 0.1942,
+      "mean_content_token_containment": 0.4755,
+      "mean_numeric_containment": 1.0
+    },
+    "gptoss_v2": {
+      "model": "gpt-oss:20b",
+      "summaries_scored": 5,
+      "abstentions": 5,
+      "abstention_rate": 0.5,
+      "mean_compression_ratio": 0.469,
+      "mean_rougeL_f1": 0.1767,
+      "mean_rougeL_recall": 0.1237,
+      "mean_content_token_containment": 0.4428,
+      "mean_numeric_containment": 1.0
+    }
+  }
+}

@@ -49,7 +49,7 @@ rate-cap — pending a larger stored-alert sample.
 | RAG & Hybrid Retrieval (W4) | ✅ done 10-06 |
 | Semantic Dedup & Tuning Set (W4–5) | 🟡 core done 10-06; human-labeled tuning set open |
 | Utility Alert Integration (W5) | 🟡 Stage 1 done 10-06; Stage 2 pending owner sign-off |
-| NLP Benchmarking (W6–7) | ⬜ not started (Ollama quota reset 10-12) |
+| NLP Benchmarking (W6–7) | ✅ done 10-12 (doc 07: llama3.1 local vs gpt-oss:20b cloud) |
 | Deployment + Repository URL (W6–7) | ✅ done 10-11 (Fly v113, repo public) |
 
 Everything scheduled through W7 is complete except the benchmark — roughly
@@ -57,9 +57,12 @@ Everything scheduled through W7 is complete except the benchmark — roughly
 
 ## 4. Open items to close the software phase (target: 2026-10-18)
 
-1. **NLP benchmark (mimo)** — the deferred Phase 1 production-model run over the
-   four dimensions (relevance, coherence, factual consistency, compression);
-   Ollama cloud quota resets today.
+1. ~~**NLP benchmark (mimo)**~~ — **done 10-12 as doc 07**, with a scope correction:
+   the cloud arm is **gpt-oss:20b** (the model the bot actually falls back to), not
+   MiMo (fallback_2, invalid key). Four-dimension framework executed with automatic
+   metrics + cross-model LLM judging. Production-relevant finding: the 384-token
+   `OLLAMA_SUMMARY_NUM_PREDICT` cap truncates the reasoning model to empty output —
+   raise it before relying on the cloud fallback.
 2. **Dedup human-labeled tuning set** — label ~a few dozen candidate pairs to
    validate/retune the 0.85 cosine threshold (was derived from 249 labeled pairs;
    final tuning set still owed per 00 §5).

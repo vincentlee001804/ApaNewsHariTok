@@ -1,0 +1,11 @@
+label,model,prompt_version,article_id,source,title,first_parse_ok,first_no_summary,first_final_words,first_over_limit,first_latency_s,retry_run,retry_final_words,retry_over_limit,final_words,final_summary
+gptoss_v2,gpt-oss:20b,v2,426583,Berita RTM,"Dua kedai serbaneka 24 jam di Kuching, Sri Aman jadi sasaran khianat",True,False,21,False,4.73,False,,,21,Two 24‑hour convenience stores on Jalan Green and King Centre in Kuching were set ablaze by suspected arson on Sunday night.
+gptoss_v2,gpt-oss:20b,v2,423257,Bernama,"General : SEZ To Focus On Investment, Services Sector And High-value Job Creation - Dr Sim",False,True,,,3.27,False,,,,
+gptoss_v2,gpt-oss:20b,v2,427773,Buletin TV3,"Penempatan doktor ke Sabah, Sarawak masih berlangsung – KKM",False,True,,,4.91,False,,,,
+gptoss_v2,gpt-oss:20b,v2,407993,Dayakdaily,S’wak govt seeks to continue cloud seeding ops as State braces for hotter October,True,False,19,False,6.75,False,,,19,The Sarawak government seeks to continue cloud seeding to refill storage dams as it braces for a hotter October.
+gptoss_v2,gpt-oss:20b,v2,431945,Freemalaysiatoday,"Minister moots panel to work out Sabah, S’wak federal seat increase",False,True,,,4.52,False,,,,
+gptoss_v2,gpt-oss:20b,v2,409421,Google News,Water Aid Targeted Within 12 Hours For Affected Sarawak Communities - Sarawak Tribune,False,True,,,4.97,False,,,,
+gptoss_v2,gpt-oss:20b,v2,406211,Hmetro,138 suspek bakar hutan di Indonesia didakwa - KJRI di Kuching,True,False,13,False,5.48,False,,,13,"In Kuching, Indonesian police received 200 forest fire reports and identified 138 suspects."
+gptoss_v2,gpt-oss:20b,v2,430064,Lowyat,A Valorant Player Got Banned Because Of A 2nd Hand Ryzen 7 5800X3D,True,False,25,False,4.17,False,,,25,"An unnamed Valorant player was banned for cheating after using a second‑hand Ryzen 7 5800X3D, which triggered a ban though they had no prior misconduct."
+gptoss_v2,gpt-oss:20b,v2,420030,Malaymail,"Haze: 30 areas across Malaysia record unhealthy air quality, including Ipoh, PJ, Shah Alam and Kuching",True,False,17,False,5.95,False,,,17,"Haze led to unhealthy air quality in 30 Malaysian areas, including Ipoh, PJ, Shah Alam and Kuching."
+gptoss_v2,gpt-oss:20b,v2,412074,Malaysiakini,"More Borneo seats needed, but Fadhli says adding 'Malay belt' constituencies more critical",False,True,,,5.88,False,,,,

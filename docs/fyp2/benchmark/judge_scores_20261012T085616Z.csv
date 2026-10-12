@@ -1,0 +1,10 @@
+label,judge_model,article_id,relevance,coherence,factuality,raw
+gptoss_v2,llama3.1:latest,426583,5,5,5,"{
+  ""relevance"": 5,
+  ""coherence"": 5,
+  ""factuality"": 5
+}"
+gptoss_v2,llama3.1:latest,407993,5,5,5,"{""relevance"": 5, ""coherence"": 5, ""factuality"": 5}"
+gptoss_v2,llama3.1:latest,406211,5,5,5,"{""relevance"": 5, ""coherence"": 5, ""factuality"": 5}"
+gptoss_v2,llama3.1:latest,430064,5,5,5,"{""relevance"": 5, ""coherence"": 5, ""factuality"": 5}"
+gptoss_v2,llama3.1:latest,420030,5,5,5,"{""relevance"": 5, ""coherence"": 5, ""factuality"": 5}"

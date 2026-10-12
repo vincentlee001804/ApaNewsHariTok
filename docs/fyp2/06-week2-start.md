@@ -48,7 +48,7 @@ rate-cap — pending a larger stored-alert sample.
 | Summary Length Consistency (W3) | ✅ done 10-05 |
 | RAG & Hybrid Retrieval (W4) | ✅ done 10-06 |
 | Semantic Dedup & Tuning Set (W4–5) | 🟡 core done 10-06; human-labeled tuning set open |
-| Utility Alert Integration (W5) | 🟡 Stage 1 done 10-06; Stage 2 pending owner sign-off |
+| Utility Alert Integration (W5) | ✅ **Stage 1 done 10-06; LIVE 10-12** (owner-approved after doc 08 sign-off; v120; clustering/threading remain as refinements) |
 | NLP Benchmarking (W6–7) | ✅ done 10-12 (doc 07: llama3.1 local vs gpt-oss:20b cloud) |
 | Deployment + Repository URL (W6–7) | ✅ done 10-11 (Fly v113, repo public) |
 

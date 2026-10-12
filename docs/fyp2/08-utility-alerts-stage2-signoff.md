@@ -74,15 +74,12 @@ notices; no off-topic or non-Sarawak content in the sample.
 | 3 | Incident clustering for news watch | ⬜ open (prevents duplicate alerts when multiple outlets cover one burst) |
 | 4 | Restoration threading | ⬜ open (link "restored" follow-ups to the original notice) |
 | 5 | rss.app FB bridge (optional, paid) | ⬜ owner decision deferred |
-| 6 | `UTILITY_ALERT_SHADOW_MODE=false` + redeploy | ⬜ **owner decision, after items 2–4** |
+| 6 | `UTILITY_ALERT_SHADOW_MODE=false` + redeploy | ✅ **done 2026-10-12** — owner-approved; live since 19:25 Asia/Kuching (Fly v120). First live cycle: 142 deliveries recorded; one dead test account (123456) failed gracefully ("Chat not found", logged, non-fatal). |
 
 ## 6. Recommendation
 
-Evidence supports **go** on detection quality: precision is perfect on the sample,
-delivery math (rate cap, per-user skip, zero pushes, opt-in filter) is verified, and
-the pipeline is stable at full cadence. The opt-out toggle (item 2) turned out to be
-already live, so **the only remaining owner decision for go-live is item 6**: set
-`UTILITY_ALERT_SHADOW_MODE=false` and redeploy (Telegram + JBALB sources). Items 3–4
-(clustering, restoration threading) can ship after go-live as refinements — the known
-cost of going live without item 3 is that a burst covered by several outlets may
-arrive as multiple alerts (rate-capped at 3/user/h).
+**Executed 2026-10-12:** item 6 flipped after owner approval; the module is live (see
+the status table). Post-go-live refinements remain: items 3–4 (clustering, restoration
+threading) and the optional item 5 — the known cost of going live without item 3 is
+that a burst covered by several outlets may arrive as multiple alerts (rate-capped at
+3/user/h).

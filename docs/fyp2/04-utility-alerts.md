@@ -2,10 +2,13 @@
 
 **Thesis link:** §5.4 limitation "Official utility alerts may arrive later than primary-source
 announcements"; §5.5 future work #3 "real-time official alerts".
-**Date:** 2026-10-06 (FYP 2, Week 1)
-**Status:** Stage 1 complete — detection, classification, dedup and would-be delivery
-computation run live in **shadow mode** (nothing is pushed to users). Stage 2 (enabling
-pushes) requires owner sign-off after shadow review.
+**Date:** 2026-10-06 (FYP 2, Week 1); **GO-LIVE 2026-10-12 19:25 Asia/Kuching** (owner-approved
+after the Stage 2 sign-off review, doc 08).
+**Status:** **LIVE in production (Fly deploy v120).** Detection, classification, dedup and
+per-user delivery active for opted-in users; opt-out via `/settings` → "🚨 Urgent Alerts".
+First live cycle: 142 deliveries recorded, one dead test account failed gracefully
+("Chat not found", logged, non-fatal). Open refinements: incident clustering and
+restoration threading (Stage 2 items 3–4).
 
 ---
 
@@ -187,15 +190,17 @@ max, and the zero-push check — reviewable from a phone without opening Supabas
 
 ## 6. Stage 2 checklist (go-live, requires owner approval)
 
-1. Review the Stage 1b shadow log against the acceptance criteria above.
-2. Add `/settings` toggle for `wants_urgent_alerts` (column already exists).
+1. Review the Stage 1b shadow log against the acceptance criteria above. ✅ done — doc 08 (2026-10-12).
+2. Add `/settings` toggle for `wants_urgent_alerts` (column already exists). ✅ **already live** (verified in code; correction recorded in doc 08).
 3. Incident-level clustering for the news watch (multiple outlets report the same burst;
-   reuse Phase 3 semantics) so users get one alert per incident, not per story.
+   reuse Phase 3 semantics) so users get one alert per incident, not per story. ⬜ refinement, post-go-live.
 4. Link "repair completed" follow-ups to their original notice (thread context) for
-   restoration notifications.
+   restoration notifications. ⬜ refinement, post-go-live.
 5. Optional: rss.app bridge on Sarawak Water South FB page for near-real-time Kuching
-   coverage (paid).
-6. Set `UTILITY_ALERT_SHADOW_MODE=false` and redeploy.
+   coverage (paid). ⬜ owner decision deferred.
+6. Set `UTILITY_ALERT_SHADOW_MODE=false` and redeploy. ✅ **done 2026-10-12** (owner-approved;
+   Fly v120, `UTILITY_ALERT_SHADOW_MODE=false` in `fly.toml`; first live cycle 142 deliveries,
+   one dead test account failed gracefully).
 
 ## 7. Threats to validity / risks
 

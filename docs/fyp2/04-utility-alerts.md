@@ -27,7 +27,19 @@ that closed official platforms (Facebook-first agencies) make these alerts arriv
 | JBALB (Rural Water Supply Dept) | Rural statewide | **Official .gov.my announcement list** — notices dated same-day | ✅ Integrated — direct scrape, polite (1.5 s between detail fetches) |
 | Google News RSS watches | All Sarawak (esp. South/North + power) | Free keyword watches | ✅ Integrated — 15–60 min lag behind official posts |
 | Sarawak Water South/North regions | Kuching/Miri | Facebook pages only | ❌ No public Telegram channel found (probed `swsbsouth`, `kwbnews`, `sarawakwater`); FB bridge = optional rss.app subscription (future, ~US$9/mo) |
-| Sarawak Energy | Power | Facebook + X + SEB Cares app | ❌ X API is paid (owner-verified) → documented negative result; FB app review impractical for FYP. Covered indirectly via Google News RSS + website media releases |
+| Sarawak Energy | Power | Facebook + X + SEB Cares app | ❌ X API is paid (owner-verified) → documented negative result; FB app review impractical for FYP. Covered indirectly via Google News RSS + website media releases. See §2.1 for the 2026-10-13 X-scraping re-check and the SEB Cares web-portal probe |
+| SEB Cares **web portal** (not just app) | Power | `https://sebcares.sarawakenergy.com` (AWS ALB, OutSystems app) — outage notices published here | 🔎 Probed 2026-10-13: portal reachable from server-side HTTP, announcements likely served by named OutSystems REST endpoints (top-level `rest/`/`api/` namespaces 404 — need browser network inspection to find the exact path) |
+| Sarawak Water (merged KWB/SWB/LAKU, Aug 2025) — re-confirmed | Central (Sibu) | Official app + Telegram | Already integrated (`t.me/swbnews` via session reader); the app is a shell around the same notices, no extra work needed |
+
+### 2.1 X-scraping landscape re-check (2026-10-13)
+
+Vincent re-asked whether a GitHub tool can scrape the Sarawak Energy X account directly. Current state of that route:
+
+- **Nitter: dead.** Received an X Corp cease-and-desist (2026-08-24); the project is archived and public instances are gone, taking every nitter-based scraper with it.
+- **twscrape v0.20.1 (2026-08-25): still works**, but requires your own account's `auth_token` + `ct0` cookies, violates X ToS, risks account bans, and breaks every 2–4 weeks as X rotates its internals. Twikit / Scweet / Tweety are the same account-cookie model with intermittent success.
+- **X official API: pay-per-use since Feb 2026**, no free tier — the cost finding from 2026-10-06 still stands.
+
+Verdict: scraping SEB's X profile is *technically* possible via twscrape but operationally unsuitable for a thesis deliverable (ToS violation, burner-account risk, constant maintenance). Recorded here as the negative result; the recommended route is the SEB Cares web-portal API instead.
 
 The X API cost and the Meta app-review wall are the recorded "attempt" for thesis §5.5
 #3 — "integrate **where feasible**"; the feasible routes are what shipped.

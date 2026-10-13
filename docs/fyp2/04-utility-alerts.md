@@ -28,7 +28,7 @@ that closed official platforms (Facebook-first agencies) make these alerts arriv
 | Google News RSS watches | All Sarawak (esp. South/North + power) | Free keyword watches | ✅ Integrated — 15–60 min lag behind official posts |
 | Sarawak Water South/North regions | Kuching/Miri | Facebook pages only | ❌ No public Telegram channel found (probed `swsbsouth`, `kwbnews`, `sarawakwater`); FB bridge = optional rss.app subscription (future, ~US$9/mo) |
 | Sarawak Energy | Power | Facebook + X + SEB Cares app | ❌ X API is paid (owner-verified) → documented negative result; FB app review impractical for FYP. Covered indirectly via Google News RSS + website media releases. See §2.1 for the 2026-10-13 X-scraping re-check and the SEB Cares web-portal probe |
-| SEB Cares **web portal** (not just app) | Power | `https://sebcares.sarawakenergy.com` (AWS ALB, OutSystems app) — outage notices published here | 🔎 Probed 2026-10-13: portal reachable from server-side HTTP, announcements likely served by named OutSystems REST endpoints (top-level `rest/`/`api/` namespaces 404 — need browser network inspection to find the exact path) |
+| SEB Cares **web portal** (not just app) | Power | `https://sebcares.sarawakenergy.com` (AWS ALB, OutSystems app) | ❌ Probed 2026-10-13 with headless-browser network capture: only public pages are Home and Login. Outage alerts come from `POST /SEBCares/screenservices/SEBCares/MainFlow/Home/DataActionGetOutageAlerts`, which returns `Invalid Login` for anonymous callers — alerts are personalized per account + subscribed station, not a public feed. Portal API route rejected; detail in §2.2 |
 | Sarawak Water (merged KWB/SWB/LAKU, Aug 2025) — re-confirmed | Central (Sibu) | Official app + Telegram | Already integrated (`t.me/swbnews` via session reader); the app is a shell around the same notices, no extra work needed |
 
 ### 2.1 X-scraping landscape re-check (2026-10-13)
@@ -40,6 +40,17 @@ Vincent re-asked whether a GitHub tool can scrape the Sarawak Energy X account d
 - **X official API: pay-per-use since Feb 2026**, no free tier — the cost finding from 2026-10-06 still stands.
 
 Verdict: scraping SEB's X profile is *technically* possible via twscrape but operationally unsuitable for a thesis deliverable (ToS violation, burner-account risk, constant maintenance). Recorded here as the negative result; the recommended route is the SEB Cares web-portal API instead.
+
+### 2.2 SEB Cares portal probe detail (2026-10-13)
+
+Method: Playwright headless browser with full network capture (`scripts/seb_network_probe.js`, kept for reference), plus direct `curl`/`nslookup` checks. Findings:
+
+- Domain: `sebcares.sarawakenergy.com` (`.com` — the `.com.my` variant does not resolve). AWS ALB, ap-southeast-1, OutSystems app.
+- Public surface: only `/SEBCares/Home` and `/SEBCares/Login`; the hamburger menu adds no public pages.
+- Outage-alert endpoint identified: `POST …/MainFlow/Home/DataActionGetOutageAlerts` — responds `{"exception":…"Invalid Login"}` without a session (verified by direct POST). The data model is per-account, per-subscribed-station (`CustomerServiceLocation`, `PowerAlertType`), so even a burner account would cover only manually subscribed stations.
+- Main corporate site (`www.sarawakenergy.com`, public): `media-info/announcements-publications` exists but carries corporate notices (discount extensions, lucky draws; last update Apr 2026), not operational outage notices. `media-info/maintenance-schedules` returns 404.
+
+**Conclusion:** Sarawak Energy publishes no public, machine-readable operational alert feed. Operational alerts go through app push (login-walled) and X/Facebook posts. The integrated Google News RSS watch remains the feasible automated route; bridging SEB's public Facebook page via rss.app (~US$9/mo, same mechanism already scoped for Sarawak Water South/North) is the only upgrade path and stays an optional future-work item.
 
 The X API cost and the Meta app-review wall are the recorded "attempt" for thesis §5.5
 #3 — "integrate **where feasible**"; the feasible routes are what shipped.

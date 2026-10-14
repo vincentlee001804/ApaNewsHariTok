@@ -101,6 +101,13 @@ the local DB only.
 `RSS_Sources.txt`: one URL per line; `#` comments; `telegram:@channel|session_name`.
 New settings go through `config.py`, never scattered `os.getenv` calls.
 
+**Feed fetch health (2026-10-14 audit, see `docs/fyp2/09-feed-source-audit.md`):**
+RSS fetches use a browser-like Chrome User-Agent (`src/scrapers/rss_reader.py`) —
+self-identifying bot UAs get 403 from some publishers. Three sources (See Hua, Borneo
+Post, Free Malaysia Today) block Fly.io's datacenter IP range regardless of UA; they work
+from local/dev networks only unless proxied. The dead rss.app feed is commented out in
+`RSS_Sources.txt`.
+
 ## 5. Data model notes
 
 - `User.telegram_id` is **BigInteger** — never shrink (32-bit overflow).

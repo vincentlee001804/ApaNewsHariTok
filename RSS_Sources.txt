@@ -9,7 +9,9 @@ https://www.freemalaysiatoday.com/category/nation/feed/
 http://www.hmetro.com.my/utama.xml
 http://www.hmetro.com.my/mutakhir.xml
 https://dayakdaily.com/feed/
-https://rss.app/feeds/EYJxxljrFQtbWR8K.xml
+# 2026-10-14: lapsed paid rss.app subscription returns HTTP 402 on every fetch; disabled.
+# See docs/fyp2/09-feed-source-audit.md.
+##https://rss.app/feeds/EYJxxljrFQtbWR8K.xml
 ##https://rsshub.app/telegram/channel/swbnews
 https://www.sarawakedition.com/feed/
 https://cms.buletintv3.my/feed/

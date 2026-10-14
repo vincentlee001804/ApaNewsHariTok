@@ -35,10 +35,20 @@ def fetch_latest_items(
         try:
             # fetch via requests with an explicit timeout: bare feedparser.parse() can
             # block forever on a stalled connection and wedge the whole prefetch job.
+            # Browser-like UA: several Sarawak/news publishers (e.g. TV Sarawak) return
+            # 403 for obvious bot user-agents. A real Chrome UA string recovers them;
+            # see docs/fyp2/09-feed-source-audit.md for the 2026-10-14 audit evidence.
             response = requests.get(
                 feed_url,
                 timeout=RSS_FETCH_TIMEOUT_SEC,
-                headers={"User-Agent": "Mozilla/5.0 (ApaNewsHariTok bot)"},
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/129.0.0.0 Safari/537.36"
+                    ),
+                    "Accept": "application/rss+xml, application/xml, text/xml, */*",
+                },
             )
             response.raise_for_status()
             parsed = feedparser.parse(response.content)

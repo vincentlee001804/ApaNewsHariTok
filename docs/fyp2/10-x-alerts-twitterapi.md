@@ -54,6 +54,10 @@ and the first weeks.
   supply interruption…"), timestamps parsed, rule classifier labelled them
   `power/restored` / `power/unscheduled` with locations (sri aman, kuching, betong).
   Credit spend for the whole test: well under 1,000 credits.
+- 2026-10-14 production: poll log shows `'x': 10` — 10 alerts stored, only the
+  ≤36 h-old tweet is delivery-eligible (past-window guard works). Note: `TWITTERAPI_IO_API_KEY`
+  must be a **Fly secret**; a leading-whitespace line in `.env` silently produced an
+  empty secret on the first attempt (extract/verify length before `secrets set`).
 
 ## Reproduce
 

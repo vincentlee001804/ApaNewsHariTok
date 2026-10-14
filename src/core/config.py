@@ -777,6 +777,34 @@ UTILITY_ALERT_NEWS_QUERIES: Final[List[str]] = [
     ).split(",")
     if x.strip()
 ]
+# X (Twitter) source via twitterapi.io (third-party pay-per-use API, ~$0.15/1k tweets).
+# Sarawak Water regional accounts are Facebook-only, so the X leg covers Sarawak Energy
+# (@1SarawakEnergy — note spelling) only; see docs/fyp2/10-x-alerts-twitterapi.md.
+# Empty key or handles -> the fetcher no-ops and the poll continues (graceful
+# degradation, AGENTS.md rule #8). The account's profile is login-walled on X, so
+# the fetcher searches disruption phrases (UTILITY_ALERT_X_QUERIES) and filters by
+# author instead of using user-lookup endpoints.
+TWITTERAPI_IO_API_KEY: Final[str] = os.getenv("TWITTERAPI_IO_API_KEY", "").strip()
+UTILITY_ALERT_X_HANDLES: Final[List[str]] = [
+    x.strip().lstrip("@")
+    for x in (
+        os.getenv("UTILITY_ALERT_X_HANDLES", "1SarawakEnergy").strip()
+        or "1SarawakEnergy"
+    ).split(",")
+    if x.strip()
+]
+UTILITY_ALERT_X_QUERIES: Final[List[str]] = [
+    x.strip()
+    for x in (
+        os.getenv(
+            "UTILITY_ALERT_X_QUERIES",
+            "Sarawak Energy supply interruption, Sarawak Energy power outage, "
+            "Sarawak Energy gangguan bekalan elektrik, Sarawak Energy gangguan elektrik",
+        ).strip()
+        or "Sarawak Energy supply interruption"
+    ).split(",")
+    if x.strip()
+]
 
 
 # /testpush and /devwaze: developer commands (scheduled preview + Waze-only preview). Disable in production if desired.

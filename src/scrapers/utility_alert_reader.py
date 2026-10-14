@@ -6,6 +6,8 @@ Sources (scouting record in docs/fyp2/04-utility-alerts.md):
   - telegram: official Sarawak Water regional channel(s) via the existing session reader
   - jbalb:    Rural Water Supply Department .gov.my announcement list (direct scrape)
   - news:     Google News RSS keyword watches (catches FB/X-only agencies via republishing)
+  - x:        Sarawak Energy official X account via twitterapi.io (FB-only agencies stay
+              on the telegram/news legs; Sarawak Water N/S have no X presence)
 
 Everything degrades gracefully: a failed source returns [] and the poll continues
 (AGENTS.md rule #8). Classification is rule-based (en + ms keywords) so the detector
@@ -383,4 +385,125 @@ def fetch_telegram_alerts(channels: list[str], *, max_age_hours: int) -> list[Ra
                 published=pub,
             )
         )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# X (Twitter) source via twitterapi.io — FYP2 real-time official alerts.
+# Only @1SarawakEnergy is on X; Sarawak Water regional accounts are Facebook-only
+# (documented limitation). Billed per request/tweet returned (~$0.00015 each);
+# max_per_handle caps spend per poll. No key / any failure -> [] so the poll
+# cycle never breaks.
+#
+# Why advanced_search instead of /user/last-tweets: the official account's profile
+# is login-walled on X, so twitterapi.io's user-lookup endpoints report
+# "user not found" while its search index carries the tweets. We therefore search
+# disruption phrases and keep only tweets whose author is a configured handle.
+# Verified 2026-10-14 (docs/fyp2/10-x-alerts-twitterapi.md).
+# ---------------------------------------------------------------------------
+
+_TWITTERAPI_IO_SEARCH = "https://api.twitterapi.io/twitter/tweet/advanced_search"
+
+# Search phrases scoped to the official account's disruption vocabulary (the
+# classifier drops anything that is not a disruption anyway — this pre-filter
+# also saves per-tweet credits). Overridable via UTILITY_ALERT_X_QUERIES.
+_X_DEFAULT_QUERIES = (
+    "Sarawak Energy supply interruption",
+    "Sarawak Energy power outage",
+    "Sarawak Energy gangguan bekalan elektrik",
+    "Sarawak Energy gangguan elektrik",
+)
+
+
+def _parse_x_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    raw = str(value).strip()
+    # twitterapi.io returns Twitter's v1 format: "Tue Oct 13 23:38:47 +0000 2026"
+    for fmt in ("%a %b %d %H:%M:%S %z %Y", "%Y-%m-%dT%H:%M:%S%z"):
+        try:
+            return datetime.strptime(raw.replace("Z", "+0000"), fmt).replace(
+                tzinfo=None
+            )
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def fetch_x_alerts(
+    handles: list[str], *, max_per_handle: int = 10
+) -> list[RawAlert]:
+    """
+    Tweets from the configured official X handle(s) via twitterapi.io search.
+    Searches disruption phrases and keeps only tweets authored by the configured
+    handles (the account's profile is login-walled, so user-lookup endpoints fail).
+    """
+    from src.core.config import TWITTERAPI_IO_API_KEY, UTILITY_ALERT_X_QUERIES
+
+    if not TWITTERAPI_IO_API_KEY or not handles:
+        return []
+
+    allowed = {h.strip().lstrip("@").lower() for h in handles}
+    queries = UTILITY_ALERT_X_QUERIES or list(_X_DEFAULT_QUERIES)
+    headers = {"x-api-key": TWITTERAPI_IO_API_KEY}
+    per_handle: dict[str, list[RawAlert]] = {h: [] for h in allowed}
+    seen: set[str] = set()
+
+    for i, query in enumerate(queries):
+        if i:
+            time.sleep(6)  # free-tier QPS: 1 request / 5s (429 otherwise)
+        try:
+            r = requests.get(
+                _TWITTERAPI_IO_SEARCH,
+                params={"query": query, "limit": str(max_per_handle)},
+                headers=headers,
+                timeout=RSS_FETCH_TIMEOUT_SEC,
+            )
+            if r.status_code == 429:
+                logger.warning("[utility-alert] x search %r rate-limited", query)
+                time.sleep(6)
+                r = requests.get(
+                    _TWITTERAPI_IO_SEARCH,
+                    params={"query": query, "limit": str(max_per_handle)},
+                    headers=headers,
+                    timeout=RSS_FETCH_TIMEOUT_SEC,
+                )
+            if r.status_code != 200:
+                logger.warning(
+                    "[utility-alert] x search %r -> HTTP %s", query, r.status_code
+                )
+                continue
+            tweets = r.json().get("tweets") or []
+        except (requests.RequestException, ValueError) as e:
+            logger.warning("[utility-alert] x search %r failed: %s", query, e)
+            continue
+        for tw in tweets:
+            author = ((tw.get("author") or {}).get("userName") or "").lower()
+            if author not in allowed:
+                continue  # keyword matches from other accounts/replies
+            tweet_id = str(tw.get("id") or "")
+            text = (tw.get("text") or "").strip()
+            if not text:
+                continue
+            ref = tweet_id or f"{author}:{text[:80]}"
+            if ref in seen:
+                continue
+            seen.add(ref)
+            per_handle[author].append(
+                RawAlert(
+                    source="x",
+                    source_ref=(tw.get("url") or "").strip()
+                    or (f"https://x.com/{author}/status/{tweet_id}" if tweet_id else ""),
+                    title=text[:120].splitlines()[0],
+                    text=text[:4000],
+                    published=_parse_x_timestamp(tw.get("createdAt")),
+                )
+            )
+
+    out: list[RawAlert] = []
+    for handle in handles:
+        out.extend(per_handle[handle.strip().lstrip("@").lower()][:max_per_handle])
     return out

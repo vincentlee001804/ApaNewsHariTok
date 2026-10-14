@@ -37,6 +37,7 @@ from src.core.config import (
     UTILITY_ALERT_SHADOW_LOG,
     UTILITY_ALERT_SHADOW_MODE,
     UTILITY_ALERT_TELEGRAM_CHANNELS,
+    UTILITY_ALERT_X_HANDLES,
     is_scheduled_push_quiet_hours_now,
 )
 from src.core.models import (
@@ -54,6 +55,7 @@ from src.scrapers.utility_alert_reader import (
     fetch_jbalb_notices,
     fetch_news_watch_alerts,
     fetch_telegram_alerts,
+    fetch_x_alerts,
 )
 from src.storage.database import SessionLocal
 
@@ -131,6 +133,7 @@ def poll_utility_alerts() -> dict:
             UTILITY_ALERT_NEWS_QUERIES,
             max_age_hours=max(UTILITY_ALERT_LOOKBACK_HOURS, 48),
         ),
+        "x": lambda: fetch_x_alerts(UTILITY_ALERT_X_HANDLES),
     }
     for source, fn in fetchers.items():
         try:

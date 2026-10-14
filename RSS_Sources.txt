@@ -19,6 +19,10 @@ https://berita.rtm.gov.my/feed/
 https://news.google.com/rss/search?q=Sarawak%20water
 https://news.google.com/rss/search?q=Sarawak%20energy
 https://www.tvsarawak.my/feed/
+# 2026-10-14 additions: verified working from the Fly machine (see docs/fyp2/09-feed-source-audit.md)
+https://www.astroawani.com/rss.xml
+https://www.bharian.com.my/feed
+https://www.thesun.my/rss
 # Telegram source entries (optional):
 # TELEGRAM_SOURCE_SESSION_NAME=sibuwb_session
 # TELEGRAM_SOURCE_CHANNELS=swbnews,anotherchannel

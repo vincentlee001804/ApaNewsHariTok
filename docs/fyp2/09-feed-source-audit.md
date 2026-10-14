@@ -66,6 +66,30 @@ preference for a future phase:
 
 Do not attempt UA rotation/cookies for these — the block is IP-based, not UA-based.
 
+## 2026-10-14 additions (same day)
+
+Source-expansion sweep: 25+ candidates tested locally, then re-verified **from inside the
+Fly machine** so production behavior is known in advance. Added to `RSS_Sources.txt`:
+
+| Source | Feed URL | Items/cycle | Rationale |
+|--------|----------|-------------|-----------|
+| Astro Awani | `https://www.astroawani.com/rss.xml` | 10 | Strong Sarawak coverage, national TV news |
+| Berita Harian | `https://www.bharian.com.my/feed` | 50 | Major Malay daily; complements Harian Metro |
+| The Sun Daily | `https://www.thesun.my/rss` | 10 | National English, low load |
+
+Verified-but-not-added (kept in reserve; The Vibes and Malaysian Insight return 100
+items/cycle each, which is heavy for a 1 GB machine):
+`https://www.thevibes.com/rss`, `https://www.nst.com.my/feed`,
+`https://www.themalaysianinsight.com/feed/`, `https://focusmalaysia.my/feed/`,
+`https://www.therakyatpost.com/feed/`, `https://www.malaysianow.com/feed/`
+
+**No public RSS (rejected):** Utusan Borneo (biggest Sarawak gap), Sin Chew, China Press,
+Oriental Daily, Sinar Harian, The Star, The Edge, official Sarawak gov / UKAS portals.
+These would need an RSSHub/proxy route (same solution as the 3 IP-blocked sources).
+
+**Infra:** `fly.toml` VM memory raised 512 MB → 1 GB (shared-cpu-1x) to head off memory
+pressure from the wider source list; deployed 2026-10-14.
+
 ## Reproduce
 
 ```powershell

@@ -536,6 +536,60 @@ def migrate_create_utility_alert_shadow_log_table() -> None:
         print(f"Migration warning (utility alert shadow log): {e}")
 
 
+def migrate_user_fk_on_delete_cascade() -> None:
+    """
+    ON DELETE CASCADE on the three FKs pointing at users.id (user_preferences,
+    user_article_delivery, utility_alert_delivery). Without it, deleting a user
+    row is rejected while child rows exist (observed 2026-10-15 in Supabase when
+    deleting test user 123456). Postgres-only: SQLite cannot alter FK constraints;
+    there the service layer deletes children explicitly before the parent.
+
+    Idempotent: each FK is only dropped/re-added when its current delete rule is
+    not CASCADE, so existing databases start cleanly after this change.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    child_tables = ("user_preferences", "user_article_delivery", "utility_alert_delivery")
+    try:
+        insp = inspect(engine)
+        tables = set(insp.get_table_names())
+        if not all(t in tables for t in child_tables):
+            return
+        with SessionLocal() as session:
+            for table in child_tables:
+                fk = session.execute(
+                    text(
+                        """
+                        SELECT c.conname, c.confdeltype
+                        FROM pg_constraint c
+                        JOIN pg_class t ON t.oid = c.conrelid
+                        JOIN pg_namespace n ON n.oid = t.relnamespace
+                        WHERE c.contype = 'f'
+                          AND n.nspname = 'public'
+                          AND t.relname = :table
+                          AND pg_get_constraintdef(c.oid) LIKE 'FOREIGN KEY (user_id)%REFERENCES users(id)%'
+                        """
+                    ),
+                    {"table": table},
+                ).fetchone()
+                if not fk:
+                    continue
+                name, deltype = fk
+                if deltype == "c":  # 'c' = CASCADE, 'a' = NO ACTION
+                    continue
+                session.execute(text(f'ALTER TABLE {table} DROP CONSTRAINT "{name}"'))
+                session.execute(
+                    text(
+                        f'ALTER TABLE {table} ADD CONSTRAINT "{name}" '
+                        f"FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+                    )
+                )
+                session.commit()
+                print(f"✓ {table}.{name}: ON DELETE CASCADE applied.")
+    except Exception as e:
+        print(f"Migration warning (user FK cascade): {e}")
+
+
 if __name__ == "__main__":
     migrate_users_telegram_id_to_bigint()
     migrate_add_locations_column()

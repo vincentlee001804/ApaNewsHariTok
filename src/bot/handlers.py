@@ -40,6 +40,7 @@ from src.core.services import (
     summarize_channel_post_for_push,
 )
 from src.core.user_service import (
+    delete_user_account,
     digest_greeting_period_name,
     get_or_create_user,
     get_user_preference,
@@ -190,7 +191,8 @@ HELP_TEXT: Final[str] = (
     "• /start – welcome and quick start\n"
     "• /help – this help message\n"
     "• /latest – latest personalized news with summaries\n"
-    "• /settings – categories, locations, area keywords, frequency, and subscribe/unsubscribe\n\n"
+    "• /settings – categories, locations, area keywords, frequency, and subscribe/unsubscribe\n"
+    "• /deleteaccount – permanently delete your account and all stored data\n\n"
     "*Tips:*\n"
     "- Use Area Keywords for roads or neighborhoods (example: Jalan Song, Tabuan).\n"
     "- If you only want manual checks, set subscription to OFF inside /settings.\n\n"
@@ -2371,3 +2373,78 @@ async def delete_demo_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         logger.exception("Delete demo failed")
         await update.message.reply_text(f"Cleanup failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# /deleteaccount — user-initiated account deletion (privacy/GDPR-style).
+# Two-step: command shows a confirm keyboard; the callback performs the deletion
+# through the service layer (which also cleans child rows on SQLite, where the
+# ON DELETE CASCADE migration cannot run — see migrate_user_fk_on_delete_cascade).
+# ---------------------------------------------------------------------------
+
+
+async def delete_account_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /deleteaccount: ask for confirmation before deleting everything."""
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await update.message.reply_text("Use /deleteaccount in a private chat with the bot.")
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Yes, delete my account", callback_data="delacc_confirm"),
+                InlineKeyboardButton("Cancel", callback_data="delacc_cancel"),
+            ]
+        ]
+    )
+    await update.message.reply_text(
+        "⚠️ <b>Delete your account?</b>\n\n"
+        "This permanently removes your profile, preferences, delivery history, "
+        "and utility-alert records. This cannot be undone.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=keyboard,
+    )
+
+
+async def delete_account_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /deleteaccount confirmation buttons."""
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await query.answer()
+
+    if query.data == "delacc_cancel":
+        await _safe_query_edit_message_text(
+            query,
+            "Account deletion cancelled. Your data is unchanged.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    telegram_id = query.from_user.id
+    try:
+        deleted = await asyncio.to_thread(delete_user_account, telegram_id)
+    except Exception:
+        logger.exception("delete_user_account failed")
+        await _safe_query_edit_message_text(
+            query,
+            "Something went wrong while deleting your account. Please try again later.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if deleted:
+        await _safe_query_edit_message_text(
+            query,
+            "✅ Your account and all associated data have been deleted. "
+            "Sorry to see you go — send /start anytime to rejoin.",
+            parse_mode=ParseMode.HTML,
+        )
+    else:
+        await _safe_query_edit_message_text(
+            query,
+            "No account was found for you, so there is nothing to delete.",
+            parse_mode=ParseMode.HTML,
+        )

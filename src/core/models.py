@@ -46,7 +46,7 @@ class UserPreference(Base):
     __tablename__ = "user_preferences"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
     # Categories: comma-separated lowercase tokens matched against NewsArticle.category
     # (same taxonomy as news_categories.NEWS_ARTICLE_CATEGORY_LABELS + token "sarawak"), e.g. infrastructure, weather.
     # Empty means all. Token "sarawak" also matches state=sarawak, label Local, or text "sarawak".
@@ -139,7 +139,7 @@ class UserArticleDelivery(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     article_id = Column(Integer, ForeignKey("news_articles.id"), nullable=False, index=True)
     sent_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -184,7 +184,7 @@ class UtilityAlertDelivery(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     utility_alert_id = Column(Integer, ForeignKey("utility_alerts.id"), nullable=False, index=True)
     sent_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

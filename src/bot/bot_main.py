@@ -18,6 +18,8 @@ from src.bot.handlers import (
     cancel_awaiting_area_keywords,
     help_command,
     conversational_message,
+    delete_account_callback,
+    delete_account_command,
     ingest_channel_post,
     latest_demo,
     setareas_command,
@@ -139,6 +141,8 @@ def main() -> None:
     application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(CommandHandler("fetch", force_fetch_command))
     application.add_handler(CommandHandler("deletedemo", delete_demo_command))
+    application.add_handler(CommandHandler("deleteaccount", delete_account_command))
+    application.add_handler(CallbackQueryHandler(delete_account_callback, pattern="^delacc_"))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, ingest_channel_post))
     application.add_handler(
         MessageHandler(

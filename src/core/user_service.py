@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from src.core.config import SCHEDULED_PUSH_QUIET_TIMEZONE
 from src.core.models import User, UserPreference
@@ -315,3 +315,41 @@ def is_user_active(telegram_id: int) -> bool:
         if not user:
             return True
         return bool(user.is_active)
+
+def delete_user_account(telegram_id: int) -> bool:
+    """
+    Delete a user and everything tied to them: preferences, per-article delivery
+    records, utility-alert deliveries, and shadow-log rows (keyed by telegram_id,
+    no FK). Returns True when a user row was actually removed.
+
+    Child rows are deleted explicitly first so this works on SQLite too, where FK
+    constraints cannot be altered after table creation; on Postgres the
+    ON DELETE CASCADE migration (migrate_user_fk_on_delete_cascade) makes the
+    explicit deletes redundant but harmless.
+    """
+    with SessionLocal() as session:
+        user: User | None = session.execute(
+            select(User).where(User.telegram_id == telegram_id)
+        ).scalar_one_or_none()
+        if not user:
+            return False
+        user_id = user.id
+        session.execute(
+            text("DELETE FROM utility_alert_shadow_log WHERE telegram_id = :tid"),
+            {"tid": telegram_id},
+        )
+        session.execute(
+            text("DELETE FROM utility_alert_delivery WHERE user_id = :uid"),
+            {"uid": user_id},
+        )
+        session.execute(
+            text("DELETE FROM user_article_delivery WHERE user_id = :uid"),
+            {"uid": user_id},
+        )
+        session.execute(
+            text("DELETE FROM user_preferences WHERE user_id = :uid"),
+            {"uid": user_id},
+        )
+        session.delete(user)
+        session.commit()
+        return True

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, List
 
+import html
+
 import feedparser
 import requests
+from bs4 import BeautifulSoup
 
 from src.core.config import RSS_FETCH_TIMEOUT_SEC
 
@@ -17,6 +21,21 @@ class RssItem:
     source: str
     summary: str | None = None
     published: datetime | None = None
+
+
+def _plain_text_from_html(text: str, max_chars: int = 8000) -> str:
+    """Strip HTML tags/decode entities and cap length. Keeps readable plain text."""
+    if not text:
+        return ""
+    # feedparser may double-escape; unescape first so tags are real tags.
+    text = html.unescape(text)
+    if "<" in text and ">" in text:
+        text = BeautifulSoup(text, "lxml").get_text(separator=" ", strip=True)
+        text = html.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > max_chars:
+        text = text[:max_chars].rsplit(" ", 1)[0] + "..."
+    return text
 
 
 def fetch_latest_items(
@@ -55,12 +74,16 @@ def fetch_latest_items(
             for entry in parsed.entries[:limit_per_feed]:
                 title = getattr(entry, "title", "").strip()
                 link = getattr(entry, "link", "").strip()
-                # Many feeds expose 'summary' or 'description'. Fallback to empty string.
+                # Many feeds expose 'summary' or 'description'.
+                # Some (e.g. TV Sarawak) put the full article in 'content'.
                 raw_summary = getattr(entry, "summary", "") or getattr(
                     entry, "description", ""
                 )
-                summary = raw_summary.strip() or None
-                
+                content_parts = getattr(entry, "content", None)
+                if content_parts and isinstance(content_parts, list):
+                    raw_summary = content_parts[0].get("value", raw_summary) or raw_summary
+                summary = _plain_text_from_html(raw_summary).strip() or None
+
                 if not title or not link:
                     continue
                 

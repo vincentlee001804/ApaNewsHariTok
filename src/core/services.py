@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import re
 from typing import Any, Final, List
@@ -33,6 +33,7 @@ from src.core.config import (
     DEDUPLICATION_ENABLED,
     NEWS_AGENT_WINDOW_HOURS,
     RAG_AGENT_POOL_SIZE,
+    SCHEDULED_PUSH_QUIET_TIMEZONE,
     RAG_ENABLED,
     RAG_NEWS_TOP_K,
     RSS_FEEDS,
@@ -2529,6 +2530,80 @@ def _article_is_relevant_to_question(art: NewsArticle, user_text: str) -> bool:
     )
 
 
+def _fallback_temporal_cutoff(user_text: str | None) -> datetime | None:
+    """If the user asks for a specific time window, return a UTC cutoff for the fallback."""
+    text = (user_text or "").lower()
+    if not any(keyword in text for keyword in ("today", "yesterday", "this week", "last week", "this month", "last month")):
+        return None
+    from zoneinfo import ZoneInfo
+
+    try:
+        tz = ZoneInfo(SCHEDULED_PUSH_QUIET_TIMEZONE)
+    except Exception:
+        tz = ZoneInfo("Asia/Kuching")
+    now_local = datetime.now(tz)
+
+    if "today" in text:
+        start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif "yesterday" in text:
+        start_local = (now_local - timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+    elif "this week" in text or "last week" in text:
+        start_local = (now_local - timedelta(days=7)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+    elif "this month" in text or "last month" in text:
+        start_local = (now_local - timedelta(days=30)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+    else:
+        return None
+    return start_local.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _fallback_time_label(cutoff: datetime) -> str:
+    """Human label for the fallback cutoff, used when nothing matches."""
+    now = datetime.utcnow()
+    hours = (now - cutoff).total_seconds() / 3600.0
+    if hours <= 26:
+        return "today"
+    if hours <= 50:
+        return "today or yesterday"
+    if hours <= 170:
+        return "this week"
+    return "this period"
+
+
+def _format_temporal_no_related_news_html(
+    articles: list[NewsArticle], user_text: str
+) -> str:
+    """Build the 'no related news' response, respecting any time window the user asked for."""
+    cutoff = _fallback_temporal_cutoff(user_text)
+    filtered = articles
+    if cutoff:
+        filtered = [a for a in articles if a.created_at and a.created_at >= cutoff]
+    if not filtered:
+        label = _fallback_time_label(cutoff) if cutoff else "the current window"
+        return (
+            "<b>🗞️ News agent</b>\n"
+            "I couldn't find related news for your question, "
+            f"and no articles from {label} either."
+        )
+    fallback_rows: list[dict[str, str]] = []
+    for art in filtered[:2]:
+        fallback_rows.append(
+            {
+                "title": _display_title_text(art.title, art.ai_title),
+                "summary": art.ai_summary or art.raw_summary or art.title or "",
+                "source": _get_source_name(art.source),
+                "link": art.link or "",
+                "category": category_label_for_article(art),
+            }
+        )
+    return _format_no_related_news_html(fallback_rows=fallback_rows)
+
+
 def _format_news_agent_html(
     *,
     answer: str,
@@ -2644,7 +2719,12 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     # If the DB isn't warmed up, fetch RSS as evidence.
     if not candidates:
         eff_lim = effective_rss_limit_per_feed(12)
-        items = _fetch_combined_latest_items(limit_per_feed=eff_lim, max_age_hours=24)
+        temporal_cutoff = _fallback_temporal_cutoff(user_text)
+        if temporal_cutoff:
+            rss_hours = max(1, int((datetime.utcnow() - temporal_cutoff).total_seconds() / 3600) + 1)
+        else:
+            rss_hours = 24
+        items = _fetch_combined_latest_items(limit_per_feed=eff_lim, max_age_hours=rss_hours)
         # Use title+snippet for evidence set.
         evidence_lines: List[str] = []
         for it in items[:12]:
@@ -2706,6 +2786,35 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
             if _article_is_relevant_to_question(pseudo, user_text):
                 evidence_rows.append(row)
         if not answer or not evidence_rows:
+            cutoff = _fallback_temporal_cutoff(user_text)
+            if cutoff:
+                def _item_time_ok(it: RssItem) -> bool:
+                    pub = it.published
+                    if not pub:
+                        return False
+                    if pub.tzinfo:
+                        pub = pub.astimezone(timezone.utc).replace(tzinfo=None)
+                    return pub >= cutoff
+
+                filtered_items = [it for it in items if _item_time_ok(it)]
+                if not filtered_items:
+                    return (
+                        "<b>🗞️ News agent</b>\n"
+                        "I couldn't find related news for your question, "
+                        f"and no articles from {_fallback_time_label(cutoff)} either."
+                    )
+                fallback_rows = []
+                for it in filtered_items[:2]:
+                    row = {
+                        "title": _fallback_display_title_from_text(it.title or ""),
+                        "summary": it.summary or it.title or "",
+                        "source": _get_source_name(it.source),
+                        "link": it.link or "",
+                        "category": _get_category_with_llm_fallback(
+                            it.title or "", it.summary or ""
+                        ),
+                    }
+                    fallback_rows.append(row)
             return _format_no_related_news_html(fallback_rows=fallback_rows)
         return _format_news_agent_html(answer=answer, evidence_rows=evidence_rows)
 
@@ -2746,18 +2855,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
         if semantic_hits:
             chosen = semantic_hits
     if not chosen:
-        fallback_rows = []
-        for art in fallback_chosen[:2]:
-            fallback_rows.append(
-                {
-                    "title": _display_title_text(art.title, art.ai_title),
-                    "summary": art.ai_summary or art.raw_summary or art.title or "",
-                    "source": _get_source_name(art.source),
-                    "link": art.link or "",
-                    "category": category_label_for_article(art),
-                }
-            )
-        return _format_no_related_news_html(fallback_rows=fallback_rows)
+        return _format_temporal_no_related_news_html(fallback_chosen, user_text)
 
     evidence_lines: List[str] = []
     for art in chosen:
@@ -2783,16 +2881,5 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
             }
         )
     if not answer or not evidence_rows:
-        fallback_rows = []
-        for art in chosen[:2]:
-            fallback_rows.append(
-                {
-                    "title": _display_title_text(art.title, art.ai_title),
-                    "summary": art.ai_summary or art.raw_summary or art.title or "",
-                    "source": _get_source_name(art.source),
-                    "link": art.link or "",
-                    "category": category_label_for_article(art),
-                }
-            )
-        return _format_no_related_news_html(fallback_rows=fallback_rows)
+        return _format_temporal_no_related_news_html(chosen, user_text)
     return _format_news_agent_html(answer=answer, evidence_rows=evidence_rows)

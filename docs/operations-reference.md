@@ -65,6 +65,7 @@ logs/  tools/            # local-only, gitignored
 | `db_prefetch` | `PREFETCH_INTERVAL_MINUTES` (15) | RSS + Telegram sources -> new `NewsArticle` rows -> optional AI summary/title backfill |
 | `scheduled_push` | 60 s | per-user digest (evening-only) or frequent-mode sends; skips quiet hours 00:00–06:00 Asia/Kuching |
 | `db_cleanup` | `DB_CLEANUP_INTERVAL_HOURS` (24) | delete articles/deliveries older than `DB_RETENTION_DAYS` (30) |
+| `ai_summary_watchdog` | startup + `AI_SUMMARY_ALERT_INTERVAL_HOURS` (6) | if recent new articles have zero AI summaries, send one private outage alert per incident to `AI_SUMMARY_ALERT_TELEGRAM_ID` |
 | `utility_alert` | `UTILITY_ALERT_POLL_MINUTES` (10) | FYP2: official disruption sources -> classify -> store -> stage deliveries. **Stage 1 = shadow mode (no pushes)** until `UTILITY_ALERT_SHADOW_MODE=false` |
 
 ### Delivery modes (per `UserPreference`)
@@ -97,9 +98,17 @@ the local DB only.
 - **Toggles:** `PREFETCH_ENABLED`, `PREFETCH_AI_SUMMARY`, `DEDUPLICATION_ENABLED`,
   `CROSS_SOURCE_DEDUP_*`, `RAG_ENABLED`, quiet/digest hours, `DB_*`, `WAZE_*`, `TEST_PUSH_*`,
   `UTILITY_ALERT_*` (FYP2 — see `docs/fyp2/04-utility-alerts.md`)
+- **AI-summary watchdog:** `AI_SUMMARY_ALERT_ENABLED` (default true),
+  `AI_SUMMARY_ALERT_TELEGRAM_ID` (numeric private recipient; required to activate),
+  `AI_SUMMARY_ALERT_WINDOW_HOURS` and `AI_SUMMARY_ALERT_INTERVAL_HOURS` (both default 6).
+  No alert when the window has no new articles; one alert per outage until summaries recover.
 
 `RSS_Sources.txt`: one URL per line; `#` comments; `telegram:@channel|session_name`.
 New settings go through `config.py`, never scattered `os.getenv` calls.
+
+To backfill today's missing summaries from a development machine using local Ollama only
+(cloud fallbacks disabled), run `.venv\Scripts\python.exe scripts\backfill_local_summaries.py`.
+Optional flags: `--model llama3.1` and `--limit N`.
 
 **Feed fetch health (2026-10-14 audit, see `docs/fyp2/09-feed-source-audit.md`):**
 RSS fetches use a browser-like Chrome User-Agent (`src/scrapers/rss_reader.py`) —

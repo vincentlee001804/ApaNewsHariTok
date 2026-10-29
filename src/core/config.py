@@ -844,6 +844,24 @@ def is_test_push_allowed(telegram_id: int) -> bool:
     return telegram_id in TEST_PUSH_ALLOWED_TELEGRAM_IDS
 
 
+# Private AI-summary outage watchdog. No recipient = watchdog stays disabled.
+AI_SUMMARY_ALERT_ENABLED: Final[bool] = os.getenv(
+    "AI_SUMMARY_ALERT_ENABLED", "true"
+).strip().lower() in {"1", "true", "yes", "y", "on"}
+_ai_summary_alert_ids = _parse_telegram_id_list(
+    os.getenv("AI_SUMMARY_ALERT_TELEGRAM_ID", "")
+)
+AI_SUMMARY_ALERT_TELEGRAM_ID: Final[int | None] = (
+    _ai_summary_alert_ids[0] if _ai_summary_alert_ids else None
+)
+AI_SUMMARY_ALERT_WINDOW_HOURS: Final[int] = max(
+    1, int((os.getenv("AI_SUMMARY_ALERT_WINDOW_HOURS", "6") or "6").strip() or "6")
+)
+AI_SUMMARY_ALERT_INTERVAL_HOURS: Final[int] = max(
+    1, int((os.getenv("AI_SUMMARY_ALERT_INTERVAL_HOURS", "6") or "6").strip() or "6")
+)
+
+
 def require_bot_token() -> str:
     """
     Retrieve the Telegram bot token or raise a clear error message.

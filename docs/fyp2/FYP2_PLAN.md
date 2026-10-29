@@ -69,13 +69,13 @@ simulation on a 14-day batch: 312 → 249 clusters, 71 semantic-only merges incl
 cross-lingual pairs Jaccard cannot catch; manual sample ~23% false-merge rate, soft cost
 (merged members keep their source links). Human-labeled tuning set deferred to Phase 5.
 
-### Phase 4 — Real-time official alerts (Weeks 10–14, time-boxed) → DELIVERED AS UTILITY ALERT MODULE, STAGE 1 SHADOW MODE
+### Phase 4 — Real-time official alerts (Weeks 10–14, time-boxed) → STAGE 2 LIVE SINCE 2026-10-12
 *Thesis priority #3. Originally the highest-risk phase; resolved ahead of schedule by reusing the existing Telegram session reader instead of chasing paid APIs.*
 
 - **Delivered 2026-10-06** as `src/scrapers/utility_alert_reader.py` + `src/core/utility_alert_service.py`: polls three approved sources every 10 min — official Sarawak Water Telegram channel (Central Region), JBALB .gov.my notices, Google News RSS disruption queries — classifies water/power disruption notices (restored > scheduled > unscheduled), extracts Sarawak locations, dedups, and stages per-user deliveries.
 - **Shadow mode** (default on): alerts are stored and "would-be" deliveries computed, but nothing is pushed. First shadow run: 10 alerts stored (7 locations), idempotent re-poll, 6 non-Sarawak stories rejected. Full evidence in `docs/fyp2/04-utility-alerts.md` + `docs/fyp2/benchmark/utility_alerts_shadow_20261006.txt`.
 - Platform restrictions found (documented in 04): X/Twitter API is paid (owner-verified), Facebook pages require app review (impractical), no official Telegram channels found for South/North regions — covered by scope note below.
-- **Stage 2 go-live checklist** (needs owner approval, in 04 §5): flip `UTILITY_ALERT_SHADOW_MODE=false`, add a `/settings` toggle so users can opt out, then monitor `[utility-alert]` logs.
+- **Stage 2 go-live (DONE 2026-10-12):** `UTILITY_ALERT_SHADOW_MODE=false` in `fly.toml` env after the doc 08 owner-approved sign-off (5/6 criteria pass). Live evidence 2026-10-12 → 10-16: **934 real deliveries, 52 users reached, 7 opted out of 99**, `/settings` opt-out toggle verified in the delivery path. Full record in `docs/fyp2/12-utility-alerts-go-live.md`. Only remaining open item: quiet-hours hold still awaits the first overnight announcement.
 - Scope note retained: if a new official source (e.g. Sarawak Energy app API, South/North region channels) becomes accessible, it plugs in as one more reader function — no schema change needed.
 
 ### Phase 5 — Evaluation expansion (Weeks 12–16, parallel)

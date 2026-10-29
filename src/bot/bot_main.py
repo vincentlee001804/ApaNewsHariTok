@@ -35,6 +35,10 @@ from src.bot.handlers import (
     delete_demo_command,
 )
 from src.core.config import (
+    AI_SUMMARY_ALERT_ENABLED,
+    AI_SUMMARY_ALERT_INTERVAL_HOURS,
+    AI_SUMMARY_ALERT_TELEGRAM_ID,
+    AI_SUMMARY_ALERT_WINDOW_HOURS,
     DB_CLEANUP_ENABLED,
     DB_CLEANUP_INTERVAL_HOURS,
     DB_RETENTION_DAYS,
@@ -58,6 +62,7 @@ from src.core.config import (
 )
 from src.core.cleanup_service import cleanup_old_news_data
 from src.core.prefetch_service import prefetch_latest_articles_to_db
+from src.core.summary_health_service import count_recent_summary_activity
 from src.core.utility_alert_service import (
     compute_pending_deliveries,
     format_utility_alert_html,
@@ -375,6 +380,37 @@ def main() -> None:
         except Exception as e:
             print(f"[cleanup] error: {e}")
 
+    async def _ai_summary_watchdog_job(context) -> None:
+        """Privately warn the owner when new articles receive no AI summaries."""
+        state_key = "ai_summary_outage_alert_active"
+        try:
+            total, summarized = await asyncio.to_thread(
+                count_recent_summary_activity, AI_SUMMARY_ALERT_WINDOW_HOURS
+            )
+            if total == 0 or summarized > 0:
+                context.application.bot_data[state_key] = False
+                return
+            if context.application.bot_data.get(state_key):
+                return
+
+            await context.application.bot.send_message(
+                chat_id=AI_SUMMARY_ALERT_TELEGRAM_ID,
+                text=(
+                    "⚠️ AI summary generation may be stuck.\n\n"
+                    f"{total} new article(s) were added in the last "
+                    f"{AI_SUMMARY_ALERT_WINDOW_HOURS} hours, but none has an AI summary. "
+                    "Scheduled news delivery may be paused. Please check the Ollama "
+                    "service and your cloud usage."
+                ),
+            )
+            context.application.bot_data[state_key] = True
+            print(
+                f"[summary-watchdog] private outage alert sent ({total} unsummarized articles)",
+                flush=True,
+            )
+        except Exception as e:
+            print(f"[summary-watchdog] error: {type(e).__name__}", flush=True)
+
     async def _utility_alert_job(context) -> None:
         """
         FYP2 utility disruption alerts: poll official sources, dedupe, store, notify.
@@ -459,6 +495,19 @@ def main() -> None:
         print(
             "DB cleanup enabled: every "
             f"{DB_CLEANUP_INTERVAL_HOURS} hours (retention={DB_RETENTION_DAYS} days)"
+        )
+
+    if AI_SUMMARY_ALERT_ENABLED and AI_SUMMARY_ALERT_TELEGRAM_ID is not None:
+        application.job_queue.run_repeating(
+            _ai_summary_watchdog_job,
+            interval=AI_SUMMARY_ALERT_INTERVAL_HOURS * 3600,
+            first=60,
+            name="ai_summary_watchdog",
+        )
+        print(
+            "AI summary watchdog: startup check, then every "
+            f"{AI_SUMMARY_ALERT_INTERVAL_HOURS} hours "
+            f"(window={AI_SUMMARY_ALERT_WINDOW_HOURS} hours; private alert configured)."
         )
 
     if UTILITY_ALERT_ENABLED:

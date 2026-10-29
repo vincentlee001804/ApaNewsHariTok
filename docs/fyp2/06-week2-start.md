@@ -9,6 +9,12 @@ collected on Fly.io. All implementation bars through W7 of the approved chart ar
 done or nearly done; software completion targeted by end of Week 2 (2026-10-18).
 **Code:** `main` @ `be8ac2f` deployed as Fly release v113
 
+> **Addendum (2026-10-16):** this report describes the state at Week 2 start, when
+> utility alerts were still in shadow mode. The Stage 2 sign-off (doc 08) closed the
+> same day, and the **go-live flip was executed 2026-10-12** — by the time of this
+> addendum the module had delivered 934 real alerts to 52 users over 4 days
+> (docs/fyp2/12-utility-alerts-go-live.md).
+
 ---
 
 ## 1. Gantt chart approved (2026-10-12)

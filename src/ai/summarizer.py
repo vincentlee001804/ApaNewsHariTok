@@ -9,6 +9,7 @@ from typing import Any, List, Optional
 import requests
 
 from src.core.config import (
+    OLLAMA_KEEP_ALIVE,
     OLLAMA_MODEL,
     OLLAMA_PRIMARY_TIMEOUT_SEC,
     OLLAMA_SUMMARY_NUM_PREDICT,
@@ -228,6 +229,10 @@ def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
             payload = openai_payload
         else:
             payload = {**body, "model": model}
+            # Keep models resident between requests so we don't pay the 5–7 s reload
+            # cost on every /latest, RAG query, or prefetch batch.
+            if OLLAMA_KEEP_ALIVE and "keep_alive" not in payload:
+                payload["keep_alive"] = OLLAMA_KEEP_ALIVE
             # Disable chain-of-thought for reasoning models on Ollama (/api/generate).
             # Our tasks (short summaries, titles, category tags) don't need thinking, and
             # thinking tokens count against num_predict — gpt-oss was returning empty

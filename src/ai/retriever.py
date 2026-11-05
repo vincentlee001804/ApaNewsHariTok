@@ -11,6 +11,7 @@ from sqlalchemy import bindparam, inspect, text
 
 from src.core.config import (
     OLLAMA_EMBED_MODEL,
+    OLLAMA_KEEP_ALIVE,
     OLLAMA_PRIMARY_TIMEOUT_SEC,
     RAG_HYBRID_ENABLED,
     RAG_HYBRID_RECALL_MIN_OVERLAP,
@@ -80,13 +81,16 @@ def _vector_table_available() -> bool:
     cached = _TABLE_CHECK_CACHE.get("ok")
     if cached is not None:
         return cached
-    try:
-        ok = (
-            engine.dialect.name == "postgresql"
-            and inspect(engine).has_table("article_embeddings")
-        )
-    except Exception:
-        ok = False
+    ok = False
+    if engine.dialect.name == "postgresql":
+        try:
+            with SessionLocal() as session:
+                row = session.execute(
+                    text("SELECT 1 FROM pg_tables WHERE tablename = 'article_embeddings'")
+                ).fetchone()
+                ok = bool(row)
+        except Exception:
+            ok = False
     _TABLE_CHECK_CACHE["ok"] = ok
     return ok
 
@@ -118,9 +122,15 @@ def _embed_text(text: str, timeout: int = 30, *, kind: str = "document") -> list
         headers = ollama_headers_for_endpoint(embed_url, is_fallback=not use_short_timeout)
         req_timeout = min(timeout, OLLAMA_PRIMARY_TIMEOUT_SEC) if multi and use_short_timeout else timeout
         try:
+            embed_payload = {
+                "model": OLLAMA_EMBED_MODEL or model,
+                "prompt": normalized,
+            }
+            if OLLAMA_KEEP_ALIVE:
+                embed_payload["keep_alive"] = OLLAMA_KEEP_ALIVE
             response = requests.post(
                 embed_url,
-                json={"model": OLLAMA_EMBED_MODEL or model, "prompt": normalized},
+                json=embed_payload,
                 headers=headers,
                 timeout=req_timeout,
             )
@@ -224,33 +234,47 @@ def _vector_top_articles(
     return [aid for aid, _ in scored]
 
 
-def fetch_stored_vectors(article_ids: Sequence[int]) -> dict[int, list[float]] | None:
+def fetch_stored_vectors(
+    article_ids: Sequence[int],
+    session=None,
+) -> dict[int, list[float]] | None:
     """
     FYP2 (semantic dedup): one SQL fetch of stored embeddings for ``article_ids``.
     Returns {article_id: vector} for the ids that have rows, or None when vector storage
     is unavailable (disabled, not Postgres, table missing, or any SQL error) so callers
     skip the semantic pass and keep the Jaccard-only behavior.
+
+    When ``session`` is provided, the query runs on that session (avoids a second
+    connection when the caller already holds one). Otherwise a fresh SessionLocal is used.
     """
     ids = [int(i) for i in article_ids if i is not None]
     if not ids or not RAG_VECTOR_ENABLED:
         return None
-    if not _vector_table_available():
+    # When a session is passed in, skip the slow table-availability reflection check
+    # and just try the query; a missing table becomes a graceful fallback.
+    if session is None and not _vector_table_available():
         return None
-    try:
-        with SessionLocal() as session:
-            rows = session.execute(
-                text(
-                    "SELECT article_id, embedding FROM article_embeddings "
-                    "WHERE article_id IN :ids"
-                ).bindparams(bindparam("ids", expanding=True)),
-                {"ids": ids},
-            ).all()
+
+    def _run_query(sess):
+        rows = sess.execute(
+            text(
+                "SELECT article_id, embedding FROM article_embeddings "
+                "WHERE article_id IN :ids"
+            ).bindparams(bindparam("ids", expanding=True)),
+            {"ids": ids},
+        ).all()
         out: dict[int, list[float]] = {}
         for r in rows:
             vec = _coerce_vector(r[1])
             if vec is not None:
                 out[int(r[0])] = vec
         return out or None
+
+    try:
+        if session is not None:
+            return _run_query(session)
+        with SessionLocal() as session:
+            return _run_query(session)
     except Exception as e:
         logger.warning("[rag] stored-vector fetch failed, semantic dedup skipped: %s", e)
         return None

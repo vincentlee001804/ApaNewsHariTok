@@ -31,6 +31,12 @@ def _build_ollama_url(base_url: str) -> str:
 OLLAMA_GENERATE_URL: Final[str] = _build_ollama_url(_OLLAMA_API_BASE)
 OLLAMA_API_KEY: Final[str | None] = (os.getenv("OLLAMA_API_KEY") or "").strip() or None
 OLLAMA_MODEL: Final[str] = (os.getenv("OLLAMA_MODEL", "llama3.1").strip() or "llama3.1")
+# How long Ollama keeps a model resident in memory after a request (default 30m).
+# Use "-1" to keep forever. Passed per-request so it works whether the server is
+# started from the tray or `ollama serve`.
+OLLAMA_KEEP_ALIVE: Final[str] = (
+    (os.getenv("OLLAMA_KEEP_ALIVE") or "30m").strip() or "30m"
+)
 OLLAMA_EMBED_MODEL: Final[str] = (
     os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text").strip() or "nomic-embed-text"
 )
@@ -95,6 +101,13 @@ RAG_HYBRID_RECALL_MIN_OVERLAP: Final[float] = _env_float("RAG_HYBRID_RECALL_MIN_
 NEWS_AGENT_WINDOW_HOURS: Final[int] = max(
     1,
     int((os.getenv("NEWS_AGENT_WINDOW_HOURS", "720").strip() or "720")),
+)
+# Hard cap on how many recent articles the news agent loads from the DB. Loading thousands
+# of ORM rows (especially with large TEXT summaries) dominates response time, so this keeps
+# retrieval fast while the vector/hybrid ranker still sees the most recent evidence.
+NEWS_AGENT_MAX_CANDIDATES: Final[int] = max(
+    100,
+    int((os.getenv("NEWS_AGENT_MAX_CANDIDATES", "1500").strip() or "1500")),
 )
 # Candidate pool size fed to semantic ranking in the news agent (FYP1 effectively 15).
 # Large enough that hybrid metadata recall (location/keyword union) is not capped off —

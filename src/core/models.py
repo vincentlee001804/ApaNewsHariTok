@@ -9,6 +9,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -88,6 +89,7 @@ class NewsArticle(Base):
     __tablename__ = "news_articles"
     __table_args__ = (
         UniqueConstraint("link", name="uq_news_link"),
+        Index("ix_news_articles_created_at", "created_at"),
     )
 
     id = Column(Integer, primary_key=True, index=True)

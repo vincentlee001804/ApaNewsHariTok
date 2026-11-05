@@ -92,7 +92,9 @@ the local DB only.
 - **Database:** `DATABASE_URL` (default `sqlite:///mvp.db`; Postgres URL in production)
 - **Ollama:** `OLLAMA_API_BASE`, `OLLAMA_MODEL`, `OLLAMA_EMBED_MODEL`, `OLLAMA_API_KEY` +
   fallback chain (`OLLAMA_API_BASE_FALLBACK` / `OLLAMA_FALLBACK_API_KEY` / `OLLAMA_MODEL_FALLBACK`,
-  `_2` variants); `OLLAMA_PRIMARY_TIMEOUT_SEC` (8) fails fast to fallbacks
+  `_2` variants); `OLLAMA_PRIMARY_TIMEOUT_SEC` (8) fails fast to fallbacks;
+  `OLLAMA_KEEP_ALIVE` (default `30m`) keeps models resident between requests to avoid
+  repeated 5–7 s reloads on local GPUs
 - **Telegram sources (Telethon):** `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and either
   `TELEGRAM_SESSION_STRING` (preferred on servers) or `TELEGRAM_PHONE` + session file
 - **Toggles:** `PREFETCH_ENABLED`, `PREFETCH_AI_SUMMARY`, `DEDUPLICATION_ENABLED`,

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import logging
 import re
+import time
 from typing import Any, Final, List
 
 from sqlalchemy import exists, func, select
@@ -31,6 +34,7 @@ from src.core.config import (
     CROSS_SOURCE_DEDUP_SEMANTIC_SECOND_SIGNAL_ENABLED,
     CROSS_SOURCE_DEDUP_TITLE_JACCARD_THRESHOLD,
     DEDUPLICATION_ENABLED,
+    NEWS_AGENT_MAX_CANDIDATES,
     NEWS_AGENT_WINDOW_HOURS,
     RAG_AGENT_POOL_SIZE,
     SCHEDULED_PUSH_QUIET_TIMEZONE,
@@ -203,24 +207,33 @@ def _find_cross_source_duplicate_story_match(
 
 
 def _cluster_ranked_articles_cross_source(
-    ranked_articles: list[NewsArticle], *, max_items: int
+    ranked_articles: list[NewsArticle],
+    *,
+    max_items: int,
+    session=None,
 ) -> list[tuple[NewsArticle, list[NewsArticle]]]:
     if not ranked_articles:
         return []
     if not CROSS_SOURCE_DEDUP_ENABLED:
         return [(art, [art]) for art in ranked_articles[:max_items]]
 
+    t_cluster_0 = time.perf_counter()
+
     # FYP2 Phase 3 (semantic dedup): stored embeddings let us catch same-story pairs whose
     # wording differs too much for Jaccard (thesis limitation: cross-source duplicates).
     # Lazy import (services<->retriever boundary); silently skipped when vector storage
     # is unavailable or articles lack embeddings (graceful degradation, rule #8).
     semantic_vecs: dict[int, list[float]] = {}
+    t_vec_0 = time.perf_counter()
     if CROSS_SOURCE_DEDUP_SEMANTIC_ENABLED:
         from src.ai.retriever import fetch_stored_vectors
 
         ids = [a.id for a in ranked_articles if getattr(a, "id", None) is not None]
         if ids:
-            semantic_vecs = fetch_stored_vectors(ids) or {}
+            semantic_vecs = fetch_stored_vectors(ids, session=session) or {}
+    t_vec = time.perf_counter() - t_vec_0
+
+    # FYP2 second signal (doc 03 §3.3 human validation): gray-zone cosine merges must
 
     # FYP2 second signal (doc 03 §3.3 human validation): gray-zone cosine merges must
     # ALSO share distinctive evidence (numeric token or rare content token), because
@@ -350,6 +363,13 @@ def _cluster_ranked_articles_cross_source(
         if len(clusters) >= max_items:
             break
 
+    logger.info(
+        "[latest-time] cross_source_dedup: %.3fs (vec_fetch=%.3fs), articles=%d, clusters=%d",
+        time.perf_counter() - t_cluster_0,
+        t_vec,
+        len(ranked_articles),
+        len(clusters),
+    )
     return clusters
 
 
@@ -954,30 +974,50 @@ def summarize_channel_post_for_push(title: str, body: str, source_display: str) 
     return normalize_stored_ai_summary(build_urgent_preview(title, body, max_words=48))
 
 
-def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
+@dataclass
+class BackfillResult:
+    saved: int = 0
+    failed: int = 0
+    skipped: int = 0
+
+
+def backfill_ai_summaries_for_article_ids(
+    article_ids: List[int],
+    *,
+    force: bool = False,
+    verbose: bool = False,
+) -> BackfillResult:
     """
-    Fill missing ai_summary and/or ai_title for the given news_articles rows (same logic as
-    get_latest_news_text_for_user: optional full-page scrape, Ollama summarize, deterministic
-    fallback). Commits per row so one failure does not block the rest.
+    Fill missing ai_summary and/or ai_title for the given news_articles rows.
+    Commits per row so one failure does not block the rest.
+
+    Returns counts of saved (newly populated), failed (exception or AI returned
+    nothing), and skipped (already complete unless force=True) rows.
     """
     if not article_ids:
-        return 0
+        return BackfillResult()
     from src.scrapers.article_scraper import extract_article_content
 
-    updated = 0
+    result = BackfillResult()
     with SessionLocal() as session:
         for aid in article_ids:
             art = session.get(NewsArticle, aid)
             if art is None:
+                logger.warning("[backfill] article_id=%s not found", aid)
+                result.failed += 1
                 continue
             has_summary = bool((art.ai_summary or "").strip())
             has_title = bool((art.ai_title or "").strip())
-            if has_summary and has_title:
+            if has_summary and has_title and not force:
+                result.skipped += 1
                 continue
             try:
                 article_text = extract_article_content(art.link)
                 source_text = article_text or art.raw_summary or art.title or ""
-                if not has_summary:
+                summary_generated = False
+                title_generated = False
+
+                if not has_summary or force:
                     ai = _generate_ai_summary_text(
                         title=art.title or "",
                         raw=art.raw_summary,
@@ -986,37 +1026,52 @@ def backfill_ai_summaries_for_article_ids(article_ids: List[int]) -> int:
                     )
                     if ai:
                         art.ai_summary = normalize_stored_ai_summary(ai)
-                    else:
+                        summary_generated = True
+                    elif not has_summary:
                         art.ai_summary = None
-                if not has_title:
+                    # If force=True and has_summary but ai is None, leave existing summary intact.
+
+                if not has_title or force:
                     ai_title = generate_display_title(
                         text=art.ai_summary or art.raw_summary or source_text,
                         title_hint=art.title or "",
                         max_words=14,
                     )
-                    art.ai_title = ai_title if ai_title else None
+                    if ai_title:
+                        art.ai_title = ai_title
+                        title_generated = True
+                    elif not has_title:
+                        art.ai_title = None
+                    # If force=True and has_title but ai_title is None, leave existing title intact.
+
                 session.commit()
-                updated += 1
+                if summary_generated or title_generated:
+                    result.saved += 1
+                else:
+                    result.failed += 1
+                if verbose:
+                    status = "saved" if (summary_generated or title_generated) else "failed"
+                    logger.info(
+                        "[backfill] id=%s %s | title=%r",
+                        aid,
+                        status,
+                        (art.title or "")[:80],
+                    )
             except Exception:
                 session.rollback()
-                try:
-                    art2 = session.get(NewsArticle, aid)
-                    if art2 is not None:
-                        if not (art2.ai_summary or "").strip():
-                            art2.ai_summary = None
-                        if not (art2.ai_title or "").strip():
-                            art2.ai_title = None
-                        session.commit()
-                        updated += 1
-                except Exception:
-                    session.rollback()
+                logger.exception(
+                    "[backfill] failed for article_id=%s title=%r",
+                    aid,
+                    (art.title or "")[:80],
+                )
+                result.failed += 1
     # FYP2 (pgvector RAG): keep stored embeddings fresh for newly ingested articles.
     # Best-effort: never let embedding failures affect the prefetch pipeline.
     try:
         embed_articles_for_ids(article_ids)
     except Exception:
         pass
-    return updated
+    return result
 
 
 def embed_articles_for_ids(article_ids: List[int]) -> int:
@@ -1751,6 +1806,105 @@ SCHEDULED_PUSH_SUMMARY_PENDING_USER_MESSAGE: Final[str] = (
 )
 
 
+def _enrich_article_worker(
+    art_id: int,
+    title: str,
+    raw_summary: str | None,
+    link: str,
+    source: str,
+    existing_ai_summary: str | None,
+    existing_ai_title: str | None,
+) -> tuple[int, str | None, str | None]:
+    """
+    Thread-safe worker: scrape + generate AI summary/title for one article.
+    Returns (article_id, ai_summary, ai_title). Does NOT touch the DB session.
+    """
+    from src.scrapers.article_scraper import extract_article_content
+
+    t0 = time.perf_counter()
+    # Skip HTTP scrape if we already have a decent RSS summary.
+    raw = (raw_summary or "").strip()
+    if len(raw) >= 80:
+        source_text = raw
+    else:
+        article_text = extract_article_content(link)
+        source_text = article_text or raw or title
+    t_scrape = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    ai_summary = existing_ai_summary
+    if not (ai_summary or "").strip():
+        ai = _generate_ai_summary_text(
+            title=title or "",
+            raw=raw_summary,
+            source_text=source_text,
+            item_source=source or "",
+        )
+        ai_summary = normalize_stored_ai_summary(ai) if ai else None
+    t_summary = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    ai_title = existing_ai_title
+    if not (ai_title or "").strip():
+        generated_title = generate_display_title(
+            text=ai_summary or raw or source_text or title or "",
+            title_hint=title or "",
+            max_words=14,
+        )
+        ai_title = generated_title if generated_title else None
+    t_title = time.perf_counter() - t0
+
+    logger.info(
+        "[latest-time] enrich_article_id=%s scrape=%.3fs summary=%.3fs title=%.3fs",
+        art_id,
+        t_scrape,
+        t_summary,
+        t_title,
+    )
+    return art_id, ai_summary, ai_title
+
+
+def _enrich_rss_item_worker(
+    title: str,
+    raw_summary: str | None,
+    link: str,
+    source: str,
+) -> tuple[str | None, str | None]:
+    """
+    Thread-safe worker for the RSS fallback path. Returns (ai_summary, display_title).
+    """
+    from src.scrapers.article_scraper import extract_article_content
+
+    raw = (raw_summary or "").strip()
+    if len(raw) >= 80:
+        source_text = raw
+    else:
+        article_text = extract_article_content(link)
+        source_text = article_text or raw or title
+
+    ai_summary = _generate_ai_summary_text(
+        title=title or "",
+        raw=raw_summary,
+        source_text=source_text,
+        item_source=source or "",
+    )
+    if not ai_summary:
+        ai_summary = _fallback_summary_from_text(
+            raw_summary or title, max_words=80
+        )
+
+    display_title = (
+        generate_display_title(
+            text=ai_summary or raw or source_text or title or "",
+            title_hint=title or "",
+            max_words=14,
+        )
+        or _fallback_display_title_from_text(title or "")
+    )
+
+    return ai_summary, display_title
+
+
 def get_latest_news_text_for_user(
     telegram_id: int,
     max_items: int = 3,
@@ -1776,6 +1930,7 @@ def get_latest_news_text_for_user(
     """
     from src.core.user_service import get_or_create_user, get_user_preference
 
+    t_start = time.perf_counter()
     get_or_create_user(telegram_id, username=None)
     preference = get_user_preference(telegram_id)
     categories_filter = preference.categories if preference else ""
@@ -1809,7 +1964,13 @@ def get_latest_news_text_for_user(
             )
             stmt = stmt.where(~already_delivered)
 
+        t_db_0 = time.perf_counter()
         candidates: List[NewsArticle] = list(session.execute(stmt).scalars().all())
+        logger.info(
+            "[latest-time] db_fetch: %.3fs, candidates=%d",
+            time.perf_counter() - t_db_0,
+            len(candidates),
+        )
         use_area_priority = _should_apply_area_priority(
             records=[(art.title or "", art.ai_summary or art.raw_summary or "") for art in candidates],
             area_keywords_filter=area_keywords_filter,
@@ -1845,26 +2006,50 @@ def get_latest_news_text_for_user(
             ranked_pick = [t for t in ranked if (t[2].ai_summary or "").strip()]
 
         ranked_articles: List[NewsArticle] = [t[2] for t in ranked_pick]
+        t_cluster_0 = time.perf_counter()
         chosen_clusters = _cluster_ranked_articles_cross_source(
-            ranked_articles, max_items=max_items
+            ranked_articles, max_items=max_items, session=session
         )
         chosen: List[NewsArticle] = [primary for primary, _members in chosen_clusters]
+        logger.info(
+            "[latest-time] rank_cluster: %.3fs, chosen=%d",
+            time.perf_counter() - t_cluster_0,
+            len(chosen),
+        )
 
         if not chosen:
             if scheduled_push:
                 if ranked:
+                    logger.info(
+                        "[latest-time] total: %.3fs (scheduled, pending summary)",
+                        time.perf_counter() - t_start,
+                    )
                     return SCHEDULED_PUSH_SUMMARY_PENDING_USER_MESSAGE
+                logger.info(
+                    "[latest-time] total: %.3fs (scheduled, no ranked)",
+                    time.perf_counter() - t_start,
+                )
                 return (
                     "No new headlines since your last request.\n"
                     "<i>You are up to date with the latest news from these sources.</i>"
                 )
             # Fallback: live RSS fetch if DB has nothing yet
+            t_rss_0 = time.perf_counter()
             eff_rss = effective_rss_limit_per_feed(15)
             items: List[RssItem] = _fetch_combined_latest_items(
                 limit_per_feed=eff_rss, max_age_hours=24
             )
+            logger.info(
+                "[latest-time] rss_fallback_fetch: %.3fs, items=%d",
+                time.perf_counter() - t_rss_0,
+                len(items),
+            )
             sorted_items = _sort_items_by_date(items)
             if not sorted_items:
+                logger.info(
+                    "[latest-time] total: %.3fs (rss fallback, no items)",
+                    time.perf_counter() - t_start,
+                )
                 return (
                     "I couldn't fetch any news items right now.\n"
                     "<i>This might be a temporary network issue or the sources are unavailable.</i>"
@@ -1877,6 +2062,10 @@ def get_latest_news_text_for_user(
             ]
             if not kw_sorted:
                 if local_keyword_filter_enabled():
+                    logger.info(
+                        "[latest-time] total: %.3fs (rss fallback, keyword filter empty)",
+                        time.perf_counter() - t_start,
+                    )
                     return (
                         "No recent items matched your local keyword list "
                         "(<code>Sarawak_Local_Keywords.txt</code>).\n"
@@ -1884,9 +2073,14 @@ def get_latest_news_text_for_user(
                     )
                 kw_sorted = sorted_items
 
+
             unique_items = _deduplicate_items(kw_sorted, max_items=max_items * 3)
 
             if not unique_items:
+                logger.info(
+                    "[latest-time] total: %.3fs (rss fallback, dedup empty)",
+                    time.perf_counter() - t_start,
+                )
                 return (
                     "I couldn't fetch any news items right now.\n"
                     "<i>This might be a temporary network issue or the sources are unavailable.</i>"
@@ -1935,6 +2129,10 @@ def get_latest_news_text_for_user(
             ranked_rss_items: List[RssItem] = [t[2] for t in ranked_items]
 
             if not ranked_rss_items:
+                logger.info(
+                    "[latest-time] total: %.3fs (rss fallback, filter empty)",
+                    time.perf_counter() - t_start,
+                )
                 return (
                     "No news items match your current filters (categories/locations).\n"
                     "<i>Try adjusting your settings with /settings to see more news.</i>"
@@ -1969,39 +2167,37 @@ def get_latest_news_text_for_user(
             session.commit()
 
             if not to_display:
+                logger.info(
+                    "[latest-time] total: %.3fs (rss fallback, all duplicates)",
+                    time.perf_counter() - t_start,
+                )
                 return (
                     "No new headlines since your last request.\n"
                     "<i>You are up to date with the latest news from these sources.</i>"
                 )
 
-            from src.scrapers.article_scraper import extract_article_content
-
+            t_enrich_0 = time.perf_counter()
             lines: List[str] = list(_latest_news_heading_lines(max_items))
+
+            with ThreadPoolExecutor(max_workers=min(len(to_display), 4)) as executor:
+                enrich_futures = {
+                    item: executor.submit(
+                        _enrich_rss_item_worker,
+                        item.title or "",
+                        item.summary,
+                        item.link or "",
+                        item.source or "",
+                    )
+                    for item in to_display
+                }
+                enrich_results = {item: f.result() for item, f in enrich_futures.items()}
+
             for item in to_display:
                 category = _get_category_with_llm_fallback(item.title, item.summary)
-                article_text = extract_article_content(item.link)
-                source_text = article_text or item.summary or item.title
-                ai_summary = _generate_ai_summary_text(
-                    title=item.title or "",
-                    raw=item.summary,
-                    source_text=source_text,
-                    item_source=item.source or "",
-                )
-                if not ai_summary:
-                    ai_summary = _fallback_summary_from_text(
-                        item.summary or item.title, max_words=80
-                    )
+                ai_summary, display_title = enrich_results.get(item, (None, None))
                 source_name = _get_source_name(item.source)
 
-                display_title = (
-                    generate_display_title(
-                        text=ai_summary or item.summary or source_text or item.title or "",
-                        title_hint=item.title or "",
-                        max_words=14,
-                    )
-                    or _fallback_display_title_from_text(item.title or "")
-                )
-                escaped_title = escape_html(display_title)
+                escaped_title = escape_html(display_title or _fallback_display_title_from_text(item.title or ""))
                 escaped_summary = escape_html(
                     normalize_stored_ai_summary(ai_summary or "")
                 )
@@ -2016,35 +2212,53 @@ def get_latest_news_text_for_user(
 
             if lines and lines[-1] == "────────────":
                 lines.pop()
+            logger.info(
+                "[latest-time] total: %.3fs (rss fallback, enriched=%d)",
+                time.perf_counter() - t_start,
+                len(to_display),
+            )
             return "\n".join(lines)
 
         # Ensure ai_summary exists (cache); scheduled pushes only use rows already summarized.
-        from src.scrapers.article_scraper import extract_article_content
-
+        t_enrich_0 = time.perf_counter()
+        enriched_count = 0
         if not scheduled_push:
-            for art in chosen:
-                if art.ai_summary and (art.ai_title or "").strip():
-                    continue
-                article_text = extract_article_content(art.link)
-                source_text = article_text or art.raw_summary or art.title
-                if not art.ai_summary:
-                    ai = _generate_ai_summary_text(
-                        title=art.title or "",
-                        raw=art.raw_summary,
-                        source_text=source_text,
-                        item_source=art.source or "",
-                    )
-                    if ai:
-                        art.ai_summary = normalize_stored_ai_summary(ai)
-                    else:
-                        art.ai_summary = None
-                if not (art.ai_title or "").strip():
-                    ai_title = generate_display_title(
-                        text=art.ai_summary or art.raw_summary or source_text or art.title or "",
-                        title_hint=art.title or "",
-                        max_words=14,
-                    )
-                    art.ai_title = ai_title if ai_title else None
+            to_enrich = [
+                art for art in chosen
+                if not (art.ai_summary and (art.ai_title or "").strip())
+            ]
+            enriched_count = len(to_enrich)
+            if to_enrich:
+                # Parallelize scrape + LLM calls across articles (I/O bound).
+                with ThreadPoolExecutor(max_workers=min(len(to_enrich), 4)) as executor:
+                    futures = [
+                        executor.submit(
+                            _enrich_article_worker,
+                            art.id,
+                            art.title or "",
+                            art.raw_summary,
+                            art.link or "",
+                            art.source or "",
+                            art.ai_summary,
+                            art.ai_title,
+                        )
+                        for art in to_enrich
+                    ]
+                    results = [f.result() for f in futures]
+
+                updates = {aid: (s, t) for aid, s, t in results}
+                for art in to_enrich:
+                    new_summary, new_title = updates.get(art.id, (None, None))
+                    if new_summary is not None:
+                        art.ai_summary = new_summary
+                    if new_title is not None:
+                        art.ai_title = new_title
+
+        logger.info(
+            "[latest-time] db_enrich: %.3fs, enriched=%d",
+            time.perf_counter() - t_enrich_0,
+            enriched_count,
+        )
 
         if DEDUPLICATION_ENABLED and user_id is not None:
             delivered_all_members = [
@@ -2083,6 +2297,11 @@ def get_latest_news_text_for_user(
 
         if lines and lines[-1] == "────────────":
             lines.pop()
+        logger.info(
+            "[latest-time] total: %.3fs (db path, displayed=%d)",
+            time.perf_counter() - t_start,
+            len(chosen_clusters),
+        )
         return "\n".join(lines)
 
 
@@ -2530,6 +2749,54 @@ def _article_is_relevant_to_question(art: NewsArticle, user_text: str) -> bool:
     )
 
 
+def _answer_evidence_overlap(answer: str, title: str, summary: str) -> float:
+    """
+    Fraction of the answer's distinctive tokens that appear in an evidence article's
+    title or summary. Used to drop articles the LLM answer did not actually draw on.
+    """
+    answer_tokens = _tokenize_for_story_dedup(answer)
+    if not answer_tokens:
+        return 0.0
+    blob = f"{title or ''} {summary or ''}".lower()
+    article_tokens = _tokenize_for_story_dedup(blob)
+    if not article_tokens:
+        return 0.0
+    return len(answer_tokens & article_tokens) / len(answer_tokens)
+
+
+def _filter_evidence_rows_by_answer(
+    answer: str,
+    evidence_rows: list[dict[str, str]],
+    *,
+    min_overlap: float = 0.08,
+) -> list[dict[str, str]]:
+    """
+    Keep only evidence rows that share meaningful tokens with the generated answer.
+    Always keeps at least the highest-overlap row so the user never sees zero sources.
+    """
+    if not evidence_rows:
+        return []
+
+    scored = [
+        (
+            _answer_evidence_overlap(
+                answer,
+                row.get("title", ""),
+                row.get("summary", ""),
+            ),
+            row,
+        )
+        for row in evidence_rows
+    ]
+    filtered = [row for score, row in scored if score >= min_overlap]
+    if filtered:
+        return filtered
+
+    # Fallback: show the single most relevant source even if overlap is weak.
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return [scored[0][1]]
+
+
 def _fallback_temporal_cutoff(user_text: str | None) -> datetime | None:
     """If the user asks for a specific time window, return a UTC cutoff for the fallback."""
     text = (user_text or "").lower()
@@ -2697,6 +2964,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     from src.ai.summarizer import answer_news_question
     from src.ai.retriever import semantic_rank_articles
 
+    t_start = time.perf_counter()
     preference = get_user_preference(telegram_id)
     categories_filter = preference.categories if preference else ""
     locations_filter = preference.locations if preference else ""
@@ -2707,14 +2975,22 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     # wider pool affordable and stops old-but-relevant stories being invisible.
     cutoff = now - timedelta(hours=NEWS_AGENT_WINDOW_HOURS)
 
+    t_db_0 = time.perf_counter()
     with SessionLocal() as session:
         candidates: List[NewsArticle] = list(
             session.execute(
                 select(NewsArticle)
                 .where(NewsArticle.created_at >= cutoff)
                 .order_by(NewsArticle.created_at.desc())
+                .limit(NEWS_AGENT_MAX_CANDIDATES)
             ).scalars().all()
         )
+    logger.info(
+        "[rag-time] db_fetch: %.3fs, candidates=%d (cap=%d)",
+        time.perf_counter() - t_db_0,
+        len(candidates),
+        NEWS_AGENT_MAX_CANDIDATES,
+    )
 
     # If the DB isn't warmed up, fetch RSS as evidence.
     if not candidates:
@@ -2724,7 +3000,13 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
             rss_hours = max(1, int((datetime.utcnow() - temporal_cutoff).total_seconds() / 3600) + 1)
         else:
             rss_hours = 24
+        t_rss_0 = time.perf_counter()
         items = _fetch_combined_latest_items(limit_per_feed=eff_lim, max_age_hours=rss_hours)
+        logger.info(
+            "[rag-time] rss_fallback_fetch: %.3fs, items=%d",
+            time.perf_counter() - t_rss_0,
+            len(items),
+        )
         # Use title+snippet for evidence set.
         evidence_lines: List[str] = []
         for it in items[:12]:
@@ -2763,7 +3045,13 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
             evidence_lines.append(f"- {title}\n  {_truncate_text(snippet, max_chars=450)}")
 
         items_text = "\n".join(evidence_lines).strip()
+        t_llm_0 = time.perf_counter()
         answer = answer_news_question(user_text, items_text)
+        logger.info(
+            "[rag-time] rss_fallback_llm_answer: %.3fs, has_answer=%s",
+            time.perf_counter() - t_llm_0,
+            bool(answer),
+        )
         evidence_rows = []
         fallback_rows = []
         for it in items:
@@ -2785,6 +3073,8 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
             )
             if _article_is_relevant_to_question(pseudo, user_text):
                 evidence_rows.append(row)
+        if answer:
+            evidence_rows = _filter_evidence_rows_by_answer(answer, evidence_rows)
         if not answer or not evidence_rows:
             cutoff = _fallback_temporal_cutoff(user_text)
             if cutoff:
@@ -2798,6 +3088,10 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
 
                 filtered_items = [it for it in items if _item_time_ok(it)]
                 if not filtered_items:
+                    logger.info(
+                        "[rag-time] total: %.3fs (rss fallback, no relevant items)",
+                        time.perf_counter() - t_start,
+                    )
                     return (
                         "<b>🗞️ News agent</b>\n"
                         "I couldn't find related news for your question, "
@@ -2815,9 +3109,18 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
                         ),
                     }
                     fallback_rows.append(row)
+            logger.info(
+                "[rag-time] total: %.3fs (rss fallback, no_related)",
+                time.perf_counter() - t_start,
+            )
             return _format_no_related_news_html(fallback_rows=fallback_rows)
+        logger.info(
+            "[rag-time] total: %.3fs (rss fallback, answered)",
+            time.perf_counter() - t_start,
+        )
         return _format_news_agent_html(answer=answer, evidence_rows=evidence_rows)
 
+    t_filter_0 = time.perf_counter()
     ranked: List[tuple[int, datetime, NewsArticle]] = []
     for art in candidates:
         summary_for_rank = art.raw_summary or art.ai_summary or art.title or ""
@@ -2842,19 +3145,35 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     intent_filtered = [t for t in ranked if _article_matches_question_intent(t[2], user_text)]
     if intent_filtered:
         ranked = intent_filtered
+    logger.info(
+        "[rag-time] filter_rank: %.3fs, ranked=%d",
+        time.perf_counter() - t_filter_0,
+        len(ranked),
+    )
 
     fallback_chosen = [t[2] for t in ranked[:10]]
     candidate_pool = [t[2] for t in ranked[:RAG_AGENT_POOL_SIZE]]
     chosen = fallback_chosen
     if RAG_ENABLED and candidate_pool:
+        t_retrieve_0 = time.perf_counter()
         semantic_hits = semantic_rank_articles(
             query=user_text,
             articles=candidate_pool,
             top_k=RAG_NEWS_TOP_K,
         )
+        logger.info(
+            "[rag-time] semantic_retrieve: %.3fs, hits=%d, pool=%d",
+            time.perf_counter() - t_retrieve_0,
+            len(semantic_hits) if semantic_hits else 0,
+            len(candidate_pool),
+        )
         if semantic_hits:
             chosen = semantic_hits
     if not chosen:
+        logger.info(
+            "[rag-time] total: %.3fs (db path, no chosen)",
+            time.perf_counter() - t_start,
+        )
         return _format_temporal_no_related_news_html(fallback_chosen, user_text)
 
     evidence_lines: List[str] = []
@@ -2866,7 +3185,13 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
             evidence_lines.append(f"- {title}\n  {snippet}")
 
     items_text = "\n".join(evidence_lines).strip()
+    t_llm_0 = time.perf_counter()
     answer = answer_news_question(user_text, items_text)
+    logger.info(
+        "[rag-time] llm_answer: %.3fs, has_answer=%s",
+        time.perf_counter() - t_llm_0,
+        bool(answer),
+    )
     evidence_rows = []
     for art in chosen:
         if not _article_is_relevant_to_question(art, user_text):
@@ -2880,6 +3205,16 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
                 "category": category_label_for_article(art),
             }
         )
+    if answer:
+        evidence_rows = _filter_evidence_rows_by_answer(answer, evidence_rows)
     if not answer or not evidence_rows:
+        logger.info(
+            "[rag-time] total: %.3fs (db path, no answer/evidence)",
+            time.perf_counter() - t_start,
+        )
         return _format_temporal_no_related_news_html(chosen, user_text)
+    logger.info(
+        "[rag-time] total: %.3fs (db path, answered)",
+        time.perf_counter() - t_start,
+    )
     return _format_news_agent_html(answer=answer, evidence_rows=evidence_rows)

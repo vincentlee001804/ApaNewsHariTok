@@ -356,6 +356,28 @@ def backfill_news_article_category() -> None:
         pass
 
 
+def migrate_add_news_articles_created_at_index() -> None:
+    """
+    Add an index on news_articles.created_at to speed up the news-agent candidate query.
+    Idempotent for Postgres and SQLite.
+    """
+    try:
+        insp = inspect(engine)
+        if "news_articles" not in insp.get_table_names():
+            return
+        existing = {idx["name"] for idx in insp.get_indexes("news_articles")}
+        if "ix_news_articles_created_at" in existing:
+            return
+        with SessionLocal() as session:
+            session.execute(
+                text("CREATE INDEX ix_news_articles_created_at ON news_articles (created_at DESC)")
+            )
+            session.commit()
+            print("Added ix_news_articles_created_at index.")
+    except Exception as e:
+        print(f"Migration warning (news_articles created_at index): {e}")
+
+
 def migrate_create_article_embeddings_table() -> None:
     """
     FYP2 (pgvector RAG): create article_embeddings (one vector per article) with an HNSW

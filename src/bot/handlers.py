@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Final
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.constants import ChatType, ParseMode
+from telegram.constants import ChatAction, ChatType, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 from sqlalchemy import func, select
@@ -614,6 +614,11 @@ async def latest_demo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     # Local import to avoid circular dependency at import time
     from src.core.services import get_latest_news_text_for_user
+
+    if update.effective_chat:
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id, action=ChatAction.TYPING
+        )
 
     try:
         text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id)
@@ -2184,6 +2189,12 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
 
     # Default: "news agent" Q&A mode.
     from src.core.services import get_news_agent_response_for_user
+
+    # Show typing indicator while the agent retrieves and answers.
+    if update.effective_chat:
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id, action=ChatAction.TYPING
+        )
 
     response = await asyncio.to_thread(
         get_news_agent_response_for_user, telegram_id, message_text

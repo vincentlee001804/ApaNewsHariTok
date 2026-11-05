@@ -473,15 +473,15 @@ def main() -> None:
             else ""
         )
         print(
-            f"Global fetch: every {PREFETCH_INTERVAL_MINUTES} min — RSS{tg_note} → database (same for all users)."
+            f"Global fetch: every {PREFETCH_INTERVAL_MINUTES} min - RSS{tg_note} -> database (same for all users)."
         )
         print(
-            "Scheduled push: each user's /settings frequency (15m / 30m / 1h / …); eligibility checked every 60s."
+            "Scheduled push: each user's /settings frequency (15m / 30m / 1h / ...); eligibility checked every 60s."
         )
         if SCHEDULED_PUSH_QUIET_HOURS_ENABLED:
             print(
                 "Scheduled push quiet hours: "
-                f"{SCHEDULED_PUSH_QUIET_START_HOUR_LOCAL:02d}:00–{SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL:02d}:00 "
+                f"{SCHEDULED_PUSH_QUIET_START_HOUR_LOCAL:02d}:00-{SCHEDULED_PUSH_QUIET_END_HOUR_LOCAL:02d}:00 "
                 f"local ({SCHEDULED_PUSH_QUIET_TIMEZONE}); set SCHEDULED_PUSH_QUIET_HOURS_ENABLED=false to disable."
             )
 

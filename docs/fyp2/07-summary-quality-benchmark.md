@@ -16,7 +16,7 @@ actually deploys:
 | Arm | Model | Hosting | Role |
 |---|---|---|---|
 | `llama31_v2` | llama3.1 (8B) | local Ollama (self-hosted) | primary; thesis "local AI" identity |
-| `gptoss_v2` | gpt-oss:20b | Ollama Cloud (remote API) | production cloud fallback |
+| `gptoss_v2` | gpt-oss:20b | Ollama Cloud (remote API) | former cloud fallback (benchmark-only arm; since replaced by `Beelzebub4883/llama3.2-3b-cloud` for testing) |
 
 The local-vs-cloud pairing doubles as evidence for the self-hosting future-work
 narrative: it measures what a self-hosted open SLM gives up (or keeps) versus a
@@ -53,6 +53,12 @@ The benchmark arm therefore ran with a benchmark-only override of 1024 tokens
 (`scripts/_cloud_bench.py` sets the env var; production config and `.env` untouched).
 **Follow-up recommendation:** raise `OLLAMA_SUMMARY_NUM_PREDICT` (or make it
 model-dependent) before relying on the gpt-oss fallback in production.
+
+**Post-benchmark action (2026-11-08):** `gpt-oss:20b` was replaced as the cloud
+testing fallback by `Beelzebub4883/llama3.2-3b-cloud`, because Qwen 2.5 was not
+available on Ollama Cloud and `gpt-oss` had moved to a paid tier. The results
+above remain valid as a one-time comparison of the local primary versus a larger
+cloud reasoning model.
 
 ## 3. Results
 

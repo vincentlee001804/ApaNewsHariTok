@@ -138,7 +138,7 @@ While preparing the benchmark, the planned candidate models were probed:
 | Candidate | Status | Evidence |
 |---|---|---|
 | `ministral-3:8b-cloud` | **Unavailable** — model retired by Ollama Cloud (HTTP 410, retired 2026-07-15) | Replace with another small-model candidate |
-| `gpt-oss:20b` (cloud fallback) | **Quota exhausted** — free-tier usage limit reached (HTTP 429) | Production may currently be failing over further; check Oracle logs |
+| `gpt-oss:20b` (cloud fallback) | **Quota exhausted / paid-tier** — free-tier usage limit reached (HTTP 429); later confirmed as a paid-tier cloud model (`$$$$`) | Replaced with `Beelzebub4883/llama3.2-3b-cloud` for testing fallback |
 | `mimo-v2.5` (fallback_2, `api.xiaomimimo.com`) | Working — ~7 s/article, valid JSON, 29 words on probe | Likely the **de-facto production summarizer**; verify in Oracle container logs |
 | `glm-5.2:cloud` (local Ollama) | **Unauthorized** — local Ollama not signed in to ollama.com | Run `ollama signin` or drop the model |
 | `llama3.1:latest` (local) | Working — ~4–80 s/article (first call loads the model into RAM) | Dev baseline used above |

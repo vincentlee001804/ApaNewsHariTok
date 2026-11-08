@@ -8,9 +8,9 @@ dockerfile = "Dockerfile"
 PORT = "8080"
 # So print() and logging reach Fly log stream immediately (no line-buffer delay).
 PYTHONUNBUFFERED = "1"
-# gpt-oss:20b (cloud fallback) is a reasoning model: the 384 default burns the whole
-# budget on hidden reasoning and returns EMPTY output (done_reason=length). 1024 is
-# the benchmark-verified minimum (see docs/fyp2/07-summary-quality-benchmark.md §2.1).
+# Cloud fallback model is now Beelzebub4883/llama3.2-3b-cloud (non-reasoning).
+# 1024 remains the token ceiling so any future reasoning-model fallback has headroom
+# and so 30-word summaries are never truncated (see docs/fyp2/07-summary-quality-benchmark.md §2.1).
 OLLAMA_SUMMARY_NUM_PREDICT = "1024"
 # Utility alerts GO-LIVE: owner-approved 2026-10-12 after the Stage 2 shadow review
 # (docs/fyp2/08-utility-alerts-stage2-signoff.md — 5/6 criteria pass, 1 untested).

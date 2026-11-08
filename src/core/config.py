@@ -17,7 +17,7 @@ def _env_float(key: str, default: str) -> float:
 TELEGRAM_BOT_TOKEN: str | None = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # Ollama: primary = local or any URL. Optional OLLAMA_API_BASE_FALLBACK = Ollama Cloud when primary is down.
-# Cloud: https://ollama.com + API key (https://ollama.com/settings/keys). Use a cloud tag, e.g. ministral-3:8b-cloud.
+# Cloud: https://ollama.com + API key (https://ollama.com/settings/keys). Use a cloud tag, e.g. Beelzebub4883/llama3.2-3b-cloud.
 _OLLAMA_API_BASE: Final[str] = (
     (os.getenv("OLLAMA_API_BASE", "http://localhost:11434").strip() or "http://localhost:11434").rstrip("/")
 )

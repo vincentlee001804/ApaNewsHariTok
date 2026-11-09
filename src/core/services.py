@@ -11,6 +11,8 @@ from typing import Any, Final, List
 from sqlalchemy import exists, func, select
 
 from src.ai.summarizer import (
+    answer_news_question,
+    answer_news_question_with_history,
     classify_category,
     clip_plain_text_to_word_limit,
     generate_display_title,
@@ -21,6 +23,7 @@ from src.ai.summarizer import (
     summarize,
     waze_alerts_to_news_sentences,
 )
+from src.core.conversation_service import expand_followup_query
 from src.core.config import (
     CROSS_SOURCE_DEDUP_AI_SUMMARY_JACCARD_THRESHOLD,
     CROSS_SOURCE_DEDUP_BODY_JACCARD_THRESHOLD,
@@ -2954,17 +2957,27 @@ def _format_no_related_news_html(
     return "\n".join(lines).strip()
 
 
-def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
+def get_news_agent_response_for_user(
+    telegram_id: int,
+    user_text: str,
+    conversation_history: list[dict[str, str]] | None = None,
+) -> str:
     """
     "News agent" mode:
     - Uses DB (configurable NEWS_AGENT_WINDOW_HOURS, default 30d) to build the evidence set.
     - Uses Ollama to answer the user's question strictly from those items.
+    - When conversation_history is provided, vague follow-ups are expanded using the
+      previous assistant response and the history is included in the answer prompt.
     """
     from src.core.user_service import get_user_preference
-    from src.ai.summarizer import answer_news_question
     from src.ai.retriever import semantic_rank_articles
 
     t_start = time.perf_counter()
+    history = conversation_history or []
+    expanded_query, _ = expand_followup_query(user_text, history)
+    if not expanded_query:
+        expanded_query = user_text
+
     preference = get_user_preference(telegram_id)
     categories_filter = preference.categories if preference else ""
     locations_filter = preference.locations if preference else ""
@@ -2995,7 +3008,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     # If the DB isn't warmed up, fetch RSS as evidence.
     if not candidates:
         eff_lim = effective_rss_limit_per_feed(12)
-        temporal_cutoff = _fallback_temporal_cutoff(user_text)
+        temporal_cutoff = _fallback_temporal_cutoff(expanded_query)
         if temporal_cutoff:
             rss_hours = max(1, int((datetime.utcnow() - temporal_cutoff).total_seconds() / 3600) + 1)
         else:
@@ -3046,7 +3059,10 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
 
         items_text = "\n".join(evidence_lines).strip()
         t_llm_0 = time.perf_counter()
-        answer = answer_news_question(user_text, items_text)
+        if history:
+            answer = answer_news_question_with_history(expanded_query, items_text, history)
+        else:
+            answer = answer_news_question(expanded_query, items_text)
         logger.info(
             "[rag-time] rss_fallback_llm_answer: %.3fs, has_answer=%s",
             time.perf_counter() - t_llm_0,
@@ -3071,12 +3087,12 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
                 link=row["link"],
                 category=row["category"],
             )
-            if _article_is_relevant_to_question(pseudo, user_text):
+            if _article_is_relevant_to_question(pseudo, expanded_query):
                 evidence_rows.append(row)
         if answer:
             evidence_rows = _filter_evidence_rows_by_answer(answer, evidence_rows)
         if not answer or not evidence_rows:
-            cutoff = _fallback_temporal_cutoff(user_text)
+            cutoff = _fallback_temporal_cutoff(expanded_query)
             if cutoff:
                 def _item_time_ok(it: RssItem) -> bool:
                     pub = it.published
@@ -3142,7 +3158,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
         ranked.append((rank, art.created_at, art))
 
     ranked.sort(key=lambda t: (t[0], -t[1].timestamp()))
-    intent_filtered = [t for t in ranked if _article_matches_question_intent(t[2], user_text)]
+    intent_filtered = [t for t in ranked if _article_matches_question_intent(t[2], expanded_query)]
     if intent_filtered:
         ranked = intent_filtered
     logger.info(
@@ -3157,7 +3173,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     if RAG_ENABLED and candidate_pool:
         t_retrieve_0 = time.perf_counter()
         semantic_hits = semantic_rank_articles(
-            query=user_text,
+            query=expanded_query,
             articles=candidate_pool,
             top_k=RAG_NEWS_TOP_K,
         )
@@ -3174,7 +3190,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
             "[rag-time] total: %.3fs (db path, no chosen)",
             time.perf_counter() - t_start,
         )
-        return _format_temporal_no_related_news_html(fallback_chosen, user_text)
+        return _format_temporal_no_related_news_html(fallback_chosen, expanded_query)
 
     evidence_lines: List[str] = []
     for art in chosen:
@@ -3186,7 +3202,10 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
 
     items_text = "\n".join(evidence_lines).strip()
     t_llm_0 = time.perf_counter()
-    answer = answer_news_question(user_text, items_text)
+    if history:
+        answer = answer_news_question_with_history(expanded_query, items_text, history)
+    else:
+        answer = answer_news_question(expanded_query, items_text)
     logger.info(
         "[rag-time] llm_answer: %.3fs, has_answer=%s",
         time.perf_counter() - t_llm_0,
@@ -3194,7 +3213,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
     )
     evidence_rows = []
     for art in chosen:
-        if not _article_is_relevant_to_question(art, user_text):
+        if not _article_is_relevant_to_question(art, expanded_query):
             continue
         evidence_rows.append(
             {
@@ -3212,7 +3231,7 @@ def get_news_agent_response_for_user(telegram_id: int, user_text: str) -> str:
             "[rag-time] total: %.3fs (db path, no answer/evidence)",
             time.perf_counter() - t_start,
         )
-        return _format_temporal_no_related_news_html(chosen, user_text)
+        return _format_temporal_no_related_news_html(chosen, expanded_query)
     logger.info(
         "[rag-time] total: %.3fs (db path, answered)",
         time.perf_counter() - t_start,

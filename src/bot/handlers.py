@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Final
 
@@ -71,6 +72,37 @@ async def _safe_query_edit_message_text(query, *args, **kwargs):
         if "message is not modified" in str(e).lower():
             return None
         raise
+
+
+async def _typing_loop(bot, chat_id: int) -> None:
+    """Send ChatAction.TYPING repeatedly until the task is cancelled."""
+    try:
+        while True:
+            try:
+                await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            except Exception:
+                # Best-effort; ignore Telegram/network hiccups.
+                pass
+            await asyncio.sleep(4.5)
+    except asyncio.CancelledError:
+        return
+
+
+@asynccontextmanager
+async def _typing_indicator(bot, chat_id: int | None):
+    """Keep the typing indicator alive while the wrapped work runs."""
+    task = None
+    if chat_id is not None:
+        task = asyncio.create_task(_typing_loop(bot, chat_id))
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 # Category picker in /settings: first page = common filters; second = rest of taxonomy.
@@ -2186,11 +2218,14 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
         if not expanded_query:
             expanded_query = message_text
 
+    chat_id = update.effective_chat.id if update.effective_chat else None
+
     if not is_followup and "latest" in lowered:
         from src.core.services import get_latest_news_text_for_user
 
         max_items = _requested_latest_count(message_text)
-        text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id, max_items)
+        async with _typing_indicator(context.bot, chat_id):
+            text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id, max_items)
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
         save_conversation_turn(telegram_id, "assistant", _plain_text_from_html(text), interaction_type="latest")
         return
@@ -2198,7 +2233,8 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
     if not is_followup and _looks_like_todays_summary_request(message_text):
         from src.core.services import get_todays_news_digest_for_user
 
-        digest = await asyncio.to_thread(get_todays_news_digest_for_user, telegram_id, 6)
+        async with _typing_indicator(context.bot, chat_id):
+            digest = await asyncio.to_thread(get_todays_news_digest_for_user, telegram_id, 6)
         if not digest:
             await update.message.reply_text(
                 "I couldn't generate today's summary yet. Try `/latest`.",
@@ -2223,18 +2259,13 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
     # Default: "news agent" Q&A mode (also used for follow-ups after /latest or digest).
     from src.core.services import get_news_agent_response_for_user
 
-    # Show typing indicator while the agent retrieves and answers.
-    if update.effective_chat:
-        await context.bot.send_chat_action(
-            chat_id=update.effective_chat.id, action=ChatAction.TYPING
+    async with _typing_indicator(context.bot, chat_id):
+        response = await asyncio.to_thread(
+            get_news_agent_response_for_user,
+            telegram_id,
+            expanded_query,
+            conversation_history=history,
         )
-
-    response = await asyncio.to_thread(
-        get_news_agent_response_for_user,
-        telegram_id,
-        expanded_query,
-        conversation_history=history,
-    )
     await update.message.reply_text(response, parse_mode=ParseMode.HTML)
     save_conversation_turn(telegram_id, "assistant", _plain_text_from_html(response), interaction_type="qa")
 

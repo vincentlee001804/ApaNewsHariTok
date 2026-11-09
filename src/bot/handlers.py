@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Final
 
@@ -23,6 +24,12 @@ from src.core.config import (
     SCHEDULED_PUSH_QUIET_TIMEZONE,
     TELEGRAM_SOURCE_CHANNELS,
     is_test_push_allowed,
+)
+from src.core.conversation_service import (
+    expand_followup_query,
+    get_recent_conversation_turns,
+    is_followup_query,
+    save_conversation_turn,
 )
 from src.core.location_extractor import extract_location_and_state
 from src.core.models import NewsArticle
@@ -105,6 +112,12 @@ def _category_settings_keyboard_rows(page: int) -> list[list[InlineKeyboardButto
 # user_data flag: after tapping Area Keywords, next plain-text message updates area_keywords.
 AWAITING_AREA_KEYWORDS_UD_KEY: Final[str] = "awaiting_area_keywords"
 BACKFILL_TITLES_TASK_KEY: Final[str] = "backfill_titles_task"
+
+
+def _plain_text_from_html(html_text: str) -> str:
+    """Strip HTML tags and collapse whitespace for conversation storage."""
+    text = re.sub(r"<[^>]+>", " ", html_text or "")
+    return " ".join(text.split())
 
 
 def _normalize_area_keywords_raw(raw: str) -> str:
@@ -2161,15 +2174,28 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
 
-    if "latest" in lowered:
+    # Load conversation history and persist the user's message.
+    history = get_recent_conversation_turns(telegram_id)
+    save_conversation_turn(telegram_id, "user", message_text)
+
+    # Follow-ups always switch to conversational Q&A so pronouns and short replies work.
+    is_followup = is_followup_query(message_text, history)
+    expanded_query = message_text
+    if is_followup:
+        expanded_query, _ = expand_followup_query(message_text, history)
+        if not expanded_query:
+            expanded_query = message_text
+
+    if not is_followup and "latest" in lowered:
         from src.core.services import get_latest_news_text_for_user
 
         max_items = _requested_latest_count(message_text)
         text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id, max_items)
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+        save_conversation_turn(telegram_id, "assistant", _plain_text_from_html(text), interaction_type="latest")
         return
 
-    if _looks_like_todays_summary_request(message_text):
+    if not is_followup and _looks_like_todays_summary_request(message_text):
         from src.core.services import get_todays_news_digest_for_user
 
         digest = await asyncio.to_thread(get_todays_news_digest_for_user, telegram_id, 6)
@@ -2178,6 +2204,12 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
                 "I couldn't generate today's summary yet. Try `/latest`.",
                 parse_mode=ParseMode.HTML,
             )
+            save_conversation_turn(
+                telegram_id,
+                "assistant",
+                "I couldn't generate today's summary yet. Try /latest.",
+                interaction_type="digest_summary",
+            )
             return
 
         await update.message.reply_text(
@@ -2185,9 +2217,10 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
+        save_conversation_turn(telegram_id, "assistant", _plain_text_from_html(digest), interaction_type="digest_summary")
         return
 
-    # Default: "news agent" Q&A mode.
+    # Default: "news agent" Q&A mode (also used for follow-ups after /latest or digest).
     from src.core.services import get_news_agent_response_for_user
 
     # Show typing indicator while the agent retrieves and answers.
@@ -2197,9 +2230,13 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
         )
 
     response = await asyncio.to_thread(
-        get_news_agent_response_for_user, telegram_id, message_text
+        get_news_agent_response_for_user,
+        telegram_id,
+        expanded_query,
+        conversation_history=history,
     )
     await update.message.reply_text(response, parse_mode=ParseMode.HTML)
+    save_conversation_turn(telegram_id, "assistant", _plain_text_from_html(response), interaction_type="qa")
 
 
 async def cancel_awaiting_area_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

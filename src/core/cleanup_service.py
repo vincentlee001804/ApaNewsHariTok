@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import delete, select
 
 from src.core.config import DB_RETENTION_DAYS
-from src.core.models import NewsArticle, UserArticleDelivery
+from src.core.models import ConversationMessage, NewsArticle, UserArticleDelivery
 from src.storage.database import SessionLocal, engine
 
 logger = logging.getLogger(__name__)
@@ -58,10 +58,19 @@ def cleanup_old_news_data(retention_days: int | None = None) -> dict[str, int]:
             delete(NewsArticle).where(NewsArticle.id.in_(old_article_ids))
         ).rowcount or 0
 
+        # Purge old conversation memory alongside other user data.
+        conversation_cutoff = datetime.utcnow() - timedelta(days=days)
+        conversation_deleted = session.execute(
+            delete(ConversationMessage).where(
+                ConversationMessage.created_at < conversation_cutoff
+            )
+        ).rowcount or 0
+
         session.commit()
         return {
             "articles_deleted": int(articles_deleted),
             "deliveries_deleted": int(deliveries_deleted),
             "embeddings_deleted": int(embeddings_deleted),
+            "conversation_deleted": int(conversation_deleted),
         }
 

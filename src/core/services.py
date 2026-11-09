@@ -2717,14 +2717,15 @@ def _article_matches_question_intent(art: NewsArticle, user_text: str) -> bool:
 
 
 def _question_location_keywords(user_text: str) -> list[str]:
-    text = f" {(user_text or '').lower()} "
+    """Return canonical Sarawak locations named anywhere in the question."""
+    text = (user_text or "").lower()
     matched: list[str] = []
     for canonical, aliases in SARAWAK_LOCATION_ALIASES.items():
         for alias in aliases:
             alias_token = alias.strip().lower()
             if not alias_token:
                 continue
-            if f" {alias_token} " in text:
+            if re.search(rf"\b{re.escape(alias_token)}\b", text):
                 matched.append(canonical)
                 break
     return list(dict.fromkeys(matched))

@@ -347,6 +347,10 @@ def delete_user_account(telegram_id: int) -> bool:
             {"uid": user_id},
         )
         session.execute(
+            text("DELETE FROM conversation_messages WHERE user_id = :uid"),
+            {"uid": user_id},
+        )
+        session.execute(
             text("DELETE FROM user_preferences WHERE user_id = :uid"),
             {"uid": user_id},
         )

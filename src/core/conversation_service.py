@@ -206,14 +206,14 @@ def get_recent_conversation_turns(
 
 def _extract_locations(text: str) -> set[str]:
     """Return canonical Sarawak locations mentioned anywhere in the text."""
-    text = f" {(text or '').lower()} "
+    text = (text or "").lower()
     found: set[str] = set()
     for canonical, aliases in SARAWAK_LOCATION_ALIASES.items():
         for alias in aliases:
             alias_token = alias.strip().lower()
             if not alias_token:
                 continue
-            if f" {alias_token} " in text:
+            if re.search(rf"\b{re.escape(alias_token)}\b", text):
                 found.add(canonical)
                 break
     return found
@@ -222,7 +222,7 @@ def _extract_locations(text: str) -> set[str]:
 def _extract_topic(text: str) -> str | None:
     """
     Best-effort topic extraction from user query or assistant response.
-    Prefers category labels / common news topic keywords.
+    Prefers category labels / common news topic keywords. Ignores location names.
     """
     text = (text or "").strip()
     if not text:
@@ -232,10 +232,15 @@ def _extract_topic(text: str) -> str | None:
 
     # Prefer explicit category / topic keywords.
     for token in sorted(_TOPIC_TOKENS, key=len, reverse=True):
-        if f" {token} " in f" {lowered} " or lowered.startswith(token + " "):
+        if re.search(rf"\b{re.escape(token)}\b", lowered):
             return token
 
-    # Fallback: take the first substantive phrase by dropping common question words.
+    # Fallback: take the first substantive phrase by dropping common question words
+    # and any location aliases.
+    location_tokens: set[str] = set()
+    for aliases in SARAWAK_LOCATION_ALIASES.values():
+        location_tokens.update(a.strip().lower() for a in aliases if a.strip())
+
     cleaned = re.sub(r"[?!.,;:]", " ", lowered)
     stop_words = {
         "a", "an", "the", "any", "some", "more", "about", "in", "on", "at", "for",
@@ -243,7 +248,11 @@ def _extract_topic(text: str) -> str | None:
         "there", "here", "today", "latest", "news", "summary", "ringkasan", "berita",
         "tell", "me", "give", "show", "what", "how", "when", "where", "who", "why",
     }
-    words = [w for w in cleaned.split() if w and w not in stop_words]
+    words = [
+        w
+        for w in cleaned.split()
+        if w and w not in stop_words and w not in location_tokens
+    ]
     if words:
         # Return up to first 3 meaningful words as a compact topic phrase.
         return " ".join(words[:3])

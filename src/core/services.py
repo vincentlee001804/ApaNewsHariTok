@@ -2862,14 +2862,39 @@ def _topic_appears_in_article(art: NewsArticle, topic: str) -> bool:
     return False
 
 
+# Map a missed topic to categories the user is likely to also care about.
+_TOPIC_RELATED_CATEGORIES: dict[str, list[str]] = {
+    "accident": ["transport", "health", "infrastructure"],
+    "accidents": ["transport", "health", "infrastructure"],
+    "road accident": ["transport", "health", "infrastructure"],
+    "crash": ["transport", "health", "infrastructure"],
+    "collision": ["transport", "health", "infrastructure"],
+    "flood": ["weather", "environment", "infrastructure", "emergency"],
+    "floods": ["weather", "environment", "infrastructure", "emergency"],
+    "landslide": ["weather", "environment", "infrastructure", "emergency"],
+    "power outage": ["infrastructure", "emergency"],
+    "blackout": ["infrastructure", "emergency"],
+    "water outage": ["infrastructure", "health"],
+    "water disruption": ["infrastructure", "health"],
+    "pipe burst": ["infrastructure", "health"],
+    "fire": ["emergency", "health"],
+    "haze": ["weather", "environment", "health"],
+    "dengue": ["health"],
+    "covid": ["health"],
+    "election": ["politics"],
+    "by-election": ["politics"],
+}
+
+
 def _generate_suggested_followups(
     articles: list[NewsArticle],
     query_locations: list[str],
     exclude_topic: str,
 ) -> list[str]:
     """
-    Build 2-3 generic category/topic follow-up suggestions from a set of articles.
-    Example: ['Any health news in Miri?', 'Any tourism updates in Miri?']
+    Build 2-3 follow-up suggestions. Prefer categories related to the missed
+    topic, then fill with categories derived from the fallback articles.
+    Example: ['Any Transport news in Kuching?', 'Any Health news in Kuching?']
     """
     exclude = exclude_topic.strip().lower()
     seen: set[str] = set()
@@ -2877,23 +2902,33 @@ def _generate_suggested_followups(
 
     location_label = ", ".join(loc.title() for loc in query_locations) or "Sarawak"
 
+    # 1. Suggest categories semantically related to the missed topic first.
+    for related_topic in _TOPIC_RELATED_CATEGORIES.get(exclude, []):
+        if len(suggestions) >= 3:
+            break
+        if related_topic in seen:
+            continue
+        seen.add(related_topic)
+        suggestions.append(f"Any {related_topic.title()} news in {location_label}?")
+
+    # 2. Fill remaining slots with categories from the actual fallback articles.
     for art in articles:
         if len(suggestions) >= 3:
             break
-        topic = (art.category or "").strip()
+        topic = (art.category or "").strip().lower()
         if not topic:
-            topic = _extract_topic(
-                f"{art.title or ''} {art.ai_summary or ''} {art.raw_summary or ''}"
-            ) or ""
-        topic = topic.strip().lower()
+            topic = (
+                _extract_topic(
+                    f"{art.title or ''} {art.ai_summary or ''} {art.raw_summary or ''}"
+                )
+                or ""
+            ).strip().lower()
         if not topic or topic == exclude or topic in seen:
             continue
-        # Map category slugs/labels to a nice phrase.
-        display = topic.title()
         seen.add(topic)
-        suggestions.append(f"Any {display} news in {location_label}?")
+        suggestions.append(f"Any {topic.title()} news in {location_label}?")
 
-    # Fallback if the articles had no usable topics.
+    # Fallback if nothing was found.
     if not suggestions and query_locations:
         suggestions.append(f"Any recent news in {location_label}?")
 

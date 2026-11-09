@@ -222,6 +222,22 @@ def _extract_locations(text: str) -> set[str]:
     return found
 
 
+def _extract_failed_topic_from_response(text: str) -> str | None:
+    """
+    When the previous assistant response was a 'no + suggest' response,
+    extract the topic from the phrase 'I couldn't find <topic> news...'.
+    This is more reliable than generic topic extraction because suggestions
+    in the response can confuse the generic extractor.
+    """
+    lowered = (text or "").lower()
+    m = re.search(r"i couldn't find ([\w\s]+?) news\b", lowered)
+    if m:
+        topic = m.group(1).strip()
+        if topic:
+            return topic
+    return None
+
+
 def _extract_topic(text: str) -> str | None:
     """
     Best-effort topic extraction from user query or assistant response.
@@ -328,7 +344,11 @@ def expand_followup_query(
         return query, None
 
     prev_content = last_assistant.get("content", "")
-    prev_topic = _extract_topic(prev_content) or _extract_topic(last_user.get("content", ""))
+    prev_topic = (
+        _extract_failed_topic_from_response(prev_content)
+        or _extract_topic(prev_content)
+        or _extract_topic(last_user.get("content", ""))
+    )
     prev_locations = _extract_locations(prev_content)
 
     current_locations = _extract_locations(query)

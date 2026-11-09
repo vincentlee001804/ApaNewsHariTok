@@ -220,3 +220,31 @@ class UtilityAlertShadowLog(Base):
     payload = Column(Text, nullable=False, default="")  # JSON (poll summary / alert title)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
+
+class ConversationMessage(Base):
+    """
+    Short-term conversation memory per user. Stores the last few user/assistant
+    turns so follow-up questions ("What about Miri?", "tell me more") can be
+    interpreted in context. Rows are purged with DB_RETENTION_DAYS and cascade
+    when a user deletes their account.
+    """
+
+    __tablename__ = "conversation_messages"
+    __table_args__ = (
+        Index("ix_conversation_messages_user_id_created_at", "user_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    role = Column(String(16), nullable=False)  # user | assistant
+    content = Column(Text, nullable=False)
+    interaction_type = Column(
+        String(32), nullable=True
+    )  # qa | latest | digest_summary
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+

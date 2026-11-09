@@ -117,6 +117,21 @@ RAG_AGENT_POOL_SIZE: Final[int] = max(
     int((os.getenv("RAG_AGENT_POOL_SIZE", "400").strip() or "400")),
 )
 
+# Conversation memory for multi-turn news Q&A.
+CONVERSATION_MEMORY_ENABLED: Final[bool] = os.getenv(
+    "CONVERSATION_MEMORY_ENABLED", "true"
+).strip().lower() in {"1", "true", "yes", "y", "on"}
+# Number of complete user/assistant turns to keep (1 turn = user + assistant).
+CONVERSATION_MAX_TURNS: Final[int] = max(
+    1,
+    int((os.getenv("CONVERSATION_MAX_TURNS", "3").strip() or "3")),
+)
+# Drop conversation turns older than this many hours.
+CONVERSATION_MAX_AGE_HOURS: Final[int] = max(
+    1,
+    int((os.getenv("CONVERSATION_MAX_AGE_HOURS", "24").strip() or "24")),
+)
+
 _fb_base_raw = (os.getenv("OLLAMA_API_BASE_FALLBACK") or "").strip().rstrip("/")
 OLLAMA_API_BASE_FALLBACK: Final[str | None] = _fb_base_raw or None
 OLLAMA_FALLBACK_API_KEY: Final[str | None] = (os.getenv("OLLAMA_FALLBACK_API_KEY") or "").strip() or None

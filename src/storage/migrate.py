@@ -612,6 +612,19 @@ def migrate_user_fk_on_delete_cascade() -> None:
         print(f"Migration warning (user FK cascade): {e}")
 
 
+def migrate_create_conversation_messages_table() -> None:
+    """
+    Conversation memory: one row per user/assistant turn.
+    Same portable metadata-create pattern as the utility alert tables.
+    """
+    try:
+        from src.core.models import ConversationMessage
+
+        ConversationMessage.__table__.create(bind=engine, checkfirst=True)
+    except Exception as e:
+        print(f"Migration warning (conversation_messages): {e}")
+
+
 if __name__ == "__main__":
     migrate_users_telegram_id_to_bigint()
     migrate_add_locations_column()
@@ -625,3 +638,4 @@ if __name__ == "__main__":
     migrate_add_last_scheduled_push_at_column()
     backfill_news_article_location_and_state()
     backfill_news_article_category()
+    migrate_create_conversation_messages_table()

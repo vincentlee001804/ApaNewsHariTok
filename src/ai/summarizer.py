@@ -995,6 +995,7 @@ def answer_news_question(question: str, items_text: str, max_words: int = 90) ->
         - Use plain text only (no HTML, no Markdown).
         - Use simple, easy-to-understand English (translate if needed).
         - Use 1 short paragraph. Avoid long lists.
+        - Do NOT start your answer with "News agent" or repeat the question. Begin directly with the answer.
 
         User question:
         {question.strip()}
@@ -1091,6 +1092,7 @@ def answer_news_question_with_history(
         - Use plain text only (no HTML, no Markdown).
         - Use simple, easy-to-understand English (translate if needed).
         - Use 1 short paragraph. Avoid long lists.
+        - Do NOT start your answer with "News agent" or repeat the question. Begin directly with the answer.
 
         {history_block}
         Latest user question:

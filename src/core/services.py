@@ -23,7 +23,7 @@ from src.ai.summarizer import (
     summarize,
     waze_alerts_to_news_sentences,
 )
-from src.core.conversation_service import expand_followup_query
+from src.core.conversation_service import _extract_topic, expand_followup_query
 from src.core.config import (
     CROSS_SOURCE_DEDUP_AI_SUMMARY_JACCARD_THRESHOLD,
     CROSS_SOURCE_DEDUP_BODY_JACCARD_THRESHOLD,
@@ -2845,6 +2845,83 @@ def _fallback_time_label(cutoff: datetime) -> str:
     return "this period"
 
 
+def _topic_appears_in_article(art: NewsArticle, topic: str) -> bool:
+    """Best-effort check whether a topic word/phrase appears in an article."""
+    if not topic:
+        return False
+    blob = (
+        f"{art.title or ''} {art.ai_summary or ''} {art.raw_summary or ''} {art.category or ''}"
+    ).lower()
+    topic = topic.strip().lower()
+    if topic in blob:
+        return True
+    words = topic.split()
+    if len(words) > 1:
+        return all(w in blob for w in words)
+    return False
+
+
+def _generate_suggested_followups(
+    articles: list[NewsArticle],
+    query_locations: list[str],
+    exclude_topic: str,
+) -> list[str]:
+    """
+    Build 2-3 generic category/topic follow-up suggestions from a set of articles.
+    Example: ['Any health news in Miri?', 'Any tourism updates in Miri?']
+    """
+    exclude = exclude_topic.strip().lower()
+    seen: set[str] = set()
+    suggestions: list[str] = []
+
+    location_label = ", ".join(loc.title() for loc in query_locations) or "Sarawak"
+
+    for art in articles:
+        if len(suggestions) >= 3:
+            break
+        topic = (art.category or "").strip()
+        if not topic:
+            topic = _extract_topic(
+                f"{art.title or ''} {art.ai_summary or ''} {art.raw_summary or ''}"
+            ) or ""
+        topic = topic.strip().lower()
+        if not topic or topic == exclude or topic in seen:
+            continue
+        # Map category slugs/labels to a nice phrase.
+        display = topic.title()
+        seen.add(topic)
+        suggestions.append(f"Any {display} news in {location_label}?")
+
+    # Fallback if the articles had no usable topics.
+    if not suggestions and query_locations:
+        suggestions.append(f"Any recent news in {location_label}?")
+
+    return suggestions[:3]
+
+
+def _format_no_topic_match_html(
+    topic: str,
+    query_locations: list[str],
+    suggestions: list[str],
+) -> str:
+    """
+    'I couldn't find <topic> news in <location>, but you could ask...'
+    """
+    topic_display = topic.strip().lower()
+    location_label = ", ".join(loc.title() for loc in query_locations) or "Sarawak"
+
+    lines: list[str] = ["<b>🗞️ News agent</b>"]
+    lines.append(
+        f"I couldn't find {topic_display} news in {location_label} right now."
+    )
+    if suggestions:
+        lines.append("")
+        lines.append("You could ask:")
+        for suggestion in suggestions:
+            lines.append(f"• {suggestion}")
+    return "\n".join(lines)
+
+
 def _format_temporal_no_related_news_html(
     articles: list[NewsArticle], user_text: str
 ) -> str:
@@ -3191,6 +3268,29 @@ def get_news_agent_response_for_user(
             time.perf_counter() - t_start,
         )
         return _format_temporal_no_related_news_html(fallback_chosen, expanded_query)
+
+    # Topic-relevance gate: if the expanded query has a clear topic but the top
+    # retrieved articles do not mention it, say no and suggest related questions
+    # instead of forcing the LLM to hallucinate an answer.
+    expanded_topic = _extract_topic(expanded_query)
+    if expanded_topic and chosen:
+        topic_present_in_hits = any(
+            _topic_appears_in_article(art, expanded_topic)
+            for art in chosen[:RAG_NEWS_TOP_K]
+        )
+        if not topic_present_in_hits:
+            query_locations = _question_location_keywords(expanded_query)
+            suggestions = _generate_suggested_followups(
+                fallback_chosen, query_locations, expanded_topic
+            )
+            logger.info(
+                "[rag-time] total: %.3fs (db path, topic_gate: %s not in hits)",
+                time.perf_counter() - t_start,
+                expanded_topic,
+            )
+            return _format_no_topic_match_html(
+                expanded_topic, query_locations, suggestions
+            )
 
     evidence_lines: List[str] = []
     for art in chosen:

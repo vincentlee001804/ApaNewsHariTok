@@ -1045,6 +1045,101 @@ def answer_news_question(question: str, items_text: str, max_words: int = 90) ->
         return None
 
 
+def answer_news_question_with_history(
+    question: str,
+    items_text: str,
+    history: list[dict[str, str]],
+    max_words: int = 90,
+) -> Optional[str]:
+    """
+    Answer a user question using the provided news items and recent conversation history.
+    History is a list of {"role": "user"|"assistant", "content": "..."} dicts in
+    chronological order.
+    """
+    if not question or not question.strip():
+        return None
+    if not items_text or not items_text.strip():
+        return None
+
+    history_block = ""
+    if history:
+        lines: list[str] = ["Recent conversation:"]
+        for turn in history:
+            role = (turn.get("role") or "").capitalize()
+            content = (turn.get("content") or "").strip()
+            if role and content:
+                lines.append(f"{role}: {content}")
+        lines.append("")
+        history_block = "\n".join(lines)
+
+    prompt = textwrap.dedent(
+        f"""
+        You are "Apa News Hari Tok?", an AI local news assistant for Sarawak (Malaysia).
+        Role and boundaries:
+        - You summarize and answer questions using ONLY the provided local news items.
+        - You do not browse the web or invent facts outside those items.
+        - If no relevant article exists in the provided items, you must say so clearly.
+
+        You will be given a user question, a short recent conversation, and a set of news items (titles + short snippets).
+
+        Rules:
+        - Answer the LATEST user question ONLY using the provided news items.
+        - You may use the recent conversation to interpret pronouns or follow-ups (e.g., "What about Miri?" or "tell me more").
+        - If the provided items do not contain enough relevant information, say:
+          "I couldn't find relevant information in the news items I have."
+        - Keep the answer short (<= {max_words} words).
+        - Use plain text only (no HTML, no Markdown).
+        - Use simple, easy-to-understand English (translate if needed).
+        - Use 1 short paragraph. Avoid long lists.
+
+        {history_block}
+        Latest user question:
+        {question.strip()}
+
+        News items:
+        \"\"\"{items_text.strip()}\"\"\"
+        """
+    ).strip()
+
+    try:
+        response = _ollama_post(
+            {
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"num_predict": max(OLLAMA_SUMMARY_NUM_PREDICT, 512)},
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = response.json()
+        answer = (data.get("response", "") or "").strip()
+        if not answer:
+            return None
+
+        lowered = answer.lower()
+        rejection_markers = [
+            "no_summary",
+            "i don't have",
+            "i do not have",
+            "unable",
+            "can't",
+        ]
+        if any(marker in lowered for marker in rejection_markers):
+            if "couldn't find relevant information" in lowered:
+                return finalize_summary_plain_text(
+                    strip_markdown_artifacts_for_plain_text(answer)
+                )
+            return None
+
+        answer = strip_markdown_artifacts_for_plain_text(answer)
+        answer = clip_plain_text_to_word_limit(answer, max_words)
+        answer = finalize_summary_plain_text(answer)
+        return answer or None
+    except Exception:
+        return None
+
+
 def fallback_waze_alert_sentence(alert: dict[str, Any]) -> str:
     """
     Deterministic one-liner when Ollama is down or batch parsing fails.

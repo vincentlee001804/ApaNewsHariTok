@@ -399,13 +399,24 @@ def classify_category(text: str) -> Optional[str]:
         Rules:
         - Output EXACTLY one category label from the list above (same spelling and capitalization as listed).
         - No extra words, no punctuation, no quotes, no explanation.
-        - Pick the MAIN subject. Use "Politics" only when government, elections, policy, or legislation
-          is central—not merely because an MP or minister is mentioned at a community event
-          (then prefer Social, Local, Infrastructure, Culture, or Religion as appropriate).
-        - Use "Infrastructure" for roads, bridges, utilities, water supply, resurfacing projects.
-        - Use "Social" for community gatherings, welfare, NGOs, village requests, surau upgrades unless
-          the focus is clearly Religion or Infrastructure.
-        - If unsure, output "General".
+        - Pick the MAIN subject of the article, not who is quoted in it.
+
+        Category guidance with examples:
+        - "Technology": cybersecurity, digital economy, ICT, AI, smart school, e-commerce, fintech, data centre.
+          Example: "Sarawak Needs More Legal Experts for Cybersecurity and Digital Economy" -> Technology.
+        - "Environment": solar/renewable energy, climate, pollution, conservation, wildlife, recycling, green initiatives.
+          Example: "Sarawak to harness Sungai Kuap with floating solar power facility" -> Environment.
+        - "Infrastructure": roads, bridges, water supply, electricity, drainage, public buildings, utilities.
+          Example: "New hostel and sports complex for SMK [school]" -> Infrastructure.
+        - "Politics": ONLY when government, elections, policy, or legislation is the central subject.
+          Do NOT use Politics just because a Premier, minister, or MP is quoted.
+        - "Emergency": floods, fires, accidents, crashes, disasters, explosions, evacuations.
+          Do NOT use Emergency for routine power/road projects or solar facilities.
+        - "Health": hospitals, diseases, medical treatment, public health, clinics.
+        - "Sports": athletic competitions, teams, tournaments.
+        - "Social": community gatherings, welfare, NGOs, village requests, donations.
+        - "Tourism": travel, attractions, hotels, destinations.
+        - If the main subject does not fit any category clearly, output "General".
 
         News text:
         \"\"\"{text.strip()}\"\"\"

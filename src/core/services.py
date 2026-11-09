@@ -1508,17 +1508,116 @@ def _matches_user_category_filter(
     return False
 
 
+def _high_confidence_category_from_text(title: str, summary: str | None) -> str | None:
+    """
+    Return a category only when the title contains an unambiguous signal.
+    This runs before the LLM to avoid obvious misclassifications like
+    cybersecurity -> Politics or solar power -> Emergency.
+    """
+    title_lower = (title or "").lower()
+    combined_lower = f"{title_lower} {(summary or '').lower()}"
+
+    # Technology: very strong, specific signals.
+    tech_signals = [
+        "cybersecurity",
+        "cyber security",
+        "digital economy",
+        "artificial intelligence",
+        "smart school",
+        "smart city",
+        "e-commerce",
+        "fintech",
+        "ict",
+        "blockchain",
+        "data centre",
+        "data center",
+    ]
+    if any(signal in title_lower for signal in tech_signals):
+        return "Technology"
+
+    # Environment: strong, specific signals.
+    env_signals = [
+        "solar",
+        "floating solar",
+        "renewable energy",
+        "hydro power",
+        "hydropower",
+        "green energy",
+        "carbon",
+        "climate change",
+        "deforestation",
+        "recycling",
+        "pollution",
+        "conservation",
+        "wildlife",
+    ]
+    if any(signal in title_lower for signal in env_signals):
+        return "Environment"
+
+    # Infrastructure: unambiguous public-works signals (but not generic "project").
+    infra_signals = [
+        "road",
+        "bridge",
+        "water supply",
+        "power supply",
+        "electricity",
+        "utilities",
+        "sewage",
+        "drainage",
+        "resurfacing",
+        "bypass",
+        "flyover",
+        "flood mitigation",
+    ]
+    if any(signal in title_lower for signal in infra_signals):
+        # Avoid overriding real emergencies (e.g., "road accident").
+        emergency_signals = ["accident", "crash", "collision", "fire", "flood", "emergency"]
+        if not any(sig in combined_lower for sig in emergency_signals):
+            return "Infrastructure"
+
+    return None
+
+
+def _llm_category_is_plausible(category: str, title: str, summary: str | None) -> bool:
+    """
+    Sanity-check an LLM category against the text. If the LLM claims Emergency
+    but no emergency-related words are present, reject it and let keyword rules run.
+    """
+    if category != "Emergency":
+        return True
+    text = (title + " " + (summary or "")).lower()
+    emergency_signals = [
+        "flood",
+        "accident",
+        "crash",
+        "collision",
+        "fire",
+        "emergency",
+        "disaster",
+        "explosion",
+        "evacuation",
+        "landslide",
+    ]
+    return any(sig in text for sig in emergency_signals)
+
+
 def _get_category_with_llm_fallback(title: str, summary: str | None) -> str:
     """
-    Prefer LLM-based classification (more accurate), fallback to keyword rules.
+    Prefer high-confidence keyword rules, then LLM, then general keyword fallback.
     Skips Ollama when the item fails the local keyword pre-filter (if enabled).
     """
+    high_conf = _high_confidence_category_from_text(title, summary)
+    if high_conf:
+        return high_conf
+
     if not matches_local_interest(title, summary):
         return _extract_category(title, summary)
+
     llm_text = (title + "\n" + (summary or "")).strip()
     llm_category = classify_category(llm_text)
-    if llm_category:
+    if llm_category and _llm_category_is_plausible(llm_category, title, summary):
         return llm_category
+
     return _extract_category(title, summary)
 
 

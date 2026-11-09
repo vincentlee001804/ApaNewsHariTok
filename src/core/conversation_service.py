@@ -344,12 +344,16 @@ def expand_followup_query(
         return query, None
 
     prev_content = last_assistant.get("content", "")
+    prev_user_content = last_user.get("content", "")
+    # Prefer the topic from the user's previous question. Assistant prose can
+    # contain category words in unrelated contexts (e.g., "learning environment"),
+    # which confuses generic topic extraction.
     prev_topic = (
-        _extract_failed_topic_from_response(prev_content)
+        _extract_topic(prev_user_content)
+        or _extract_failed_topic_from_response(prev_content)
         or _extract_topic(prev_content)
-        or _extract_topic(last_user.get("content", ""))
     )
-    prev_locations = _extract_locations(prev_content)
+    prev_locations = _extract_locations(prev_content) | _extract_locations(prev_user_content)
 
     current_locations = _extract_locations(query)
     current_topic = _extract_topic(query)

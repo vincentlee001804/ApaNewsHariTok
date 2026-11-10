@@ -625,6 +625,33 @@ def migrate_create_conversation_messages_table() -> None:
         print(f"Migration warning (conversation_messages): {e}")
 
 
+def migrate_add_conversation_message_shown_links_column() -> None:
+    """
+    Add `shown_article_links` (JSON) to `conversation_messages` so assistant
+    turns remember which article links were displayed. Later turns in the same
+    conversation exclude those links to avoid repeating the same news.
+    Idempotent for Postgres and SQLite.
+    """
+    try:
+        insp = inspect(engine)
+        if "conversation_messages" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("conversation_messages")}
+        if "shown_article_links" in cols:
+            return
+        with SessionLocal() as session:
+            session.execute(
+                text(
+                    "ALTER TABLE conversation_messages "
+                    "ADD COLUMN shown_article_links JSON NULL"
+                )
+            )
+            session.commit()
+            print("✓ Added shown_article_links to conversation_messages.")
+    except Exception as e:
+        print(f"Migration warning (conversation_messages shown_article_links): {e}")
+
+
 if __name__ == "__main__":
     migrate_users_telegram_id_to_bigint()
     migrate_add_locations_column()
@@ -639,3 +666,4 @@ if __name__ == "__main__":
     backfill_news_article_location_and_state()
     backfill_news_article_category()
     migrate_create_conversation_messages_table()
+    migrate_add_conversation_message_shown_links_column()

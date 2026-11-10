@@ -116,10 +116,14 @@ def save_conversation_turn(
     role: str,
     content: str,
     interaction_type: str | None = None,
+    shown_article_links: list[str] | None = None,
 ) -> None:
     """
     Persist one conversation turn. Does nothing when conversation memory is disabled.
     Also prunes old rows for this user so the table stays small.
+
+    shown_article_links: article links displayed in this turn (assistant turns
+    only); later turns in the same conversation exclude them to avoid repeats.
     """
     if not CONVERSATION_MEMORY_ENABLED:
         return
@@ -128,6 +132,17 @@ def save_conversation_turn(
     role = (role or "").strip().lower()
     if role not in {"user", "assistant"}:
         return
+
+    cleaned_links: list[str] | None = None
+    if shown_article_links:
+        seen: set[str] = set()
+        cleaned_links = []
+        for link in shown_article_links:
+            link = (link or "").strip()
+            if link and link not in seen:
+                seen.add(link)
+                cleaned_links.append(link)
+        cleaned_links = cleaned_links[:50] or None
 
     try:
         with SessionLocal() as session:
@@ -143,6 +158,7 @@ def save_conversation_turn(
                     role=role,
                     content=content.strip()[:4000],
                     interaction_type=(interaction_type or "")[:32] or None,
+                    shown_article_links=cleaned_links,
                     created_at=datetime.utcnow(),
                 )
             )
@@ -224,6 +240,7 @@ def get_recent_conversation_turns(
                     "role": row.role,
                     "content": row.content,
                     "interaction_type": row.interaction_type or "",
+                    "shown_article_links": list(row.shown_article_links or []),
                 }
                 for row in reversed(rows)
             ]

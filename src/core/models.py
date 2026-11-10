@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -246,5 +247,10 @@ class ConversationMessage(Base):
     interaction_type = Column(
         String(32), nullable=True
     )  # qa | latest | digest_summary
+    shown_article_links = Column(
+        JSON,
+        nullable=True,
+        default=list,
+    )  # Article links shown in this turn; used to avoid repeats in conversation
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

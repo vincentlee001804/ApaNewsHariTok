@@ -3045,10 +3045,9 @@ def _format_no_topic_match_html(
     topic_display = topic.strip().lower()
     location_label = ", ".join(loc.title() for loc in query_locations) or "Sarawak"
 
-    lines: list[str] = ["<b>🗞️ News agent</b>"]
-    lines.append(
+    lines: list[str] = [
         f"I couldn't find {topic_display} news in {location_label} right now."
-    )
+    ]
     if suggestions:
         lines.append("")
         lines.append("You could ask:")
@@ -3059,8 +3058,9 @@ def _format_no_topic_match_html(
 
 def _format_temporal_no_related_news_html(
     articles: list[NewsArticle], user_text: str
-) -> str:
-    """Build the 'no related news' response, respecting any time window the user asked for."""
+) -> tuple[str, list[str]]:
+    """Build the 'no related news' response, respecting any time window the user asked for.
+    Returns (html, shown_article_links)."""
     cutoff = _fallback_temporal_cutoff(user_text)
     filtered = articles
     if cutoff:
@@ -3068,9 +3068,11 @@ def _format_temporal_no_related_news_html(
     if not filtered:
         label = _fallback_time_label(cutoff) if cutoff else "the current window"
         return (
-            "<b>🗞️ News agent</b>\n"
-            "I couldn't find related news for your question, "
-            f"and no articles from {label} either."
+            (
+                "I couldn't find related news for your question, "
+                f"and no articles from {label} either."
+            ),
+            [],
         )
     fallback_rows: list[dict[str, str]] = []
     for art in filtered[:2]:
@@ -3090,14 +3092,14 @@ def _format_news_agent_html(
     *,
     answer: str,
     evidence_rows: list[dict[str, str]],
-) -> str:
+) -> tuple[str, list[str]]:
     def escape_html(text: str) -> str:
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     lines: list[str] = [
-        "<b>🗞️ News agent</b>",
         escape_html(strip_markdown_artifacts_for_plain_text(answer)),
     ]
+    shown_links: list[str] = []
     if evidence_rows:
         lines.append("")
         lines.append("<b>Relevant news:</b>")
@@ -3114,6 +3116,8 @@ def _format_news_agent_html(
             category = escape_html((row.get("category") or "Local").strip() or "Local")
             if not title:
                 continue
+            if link:
+                shown_links.append(link)
             lines.append(f"<blockquote>[{category}] <b>{title}</b></blockquote>")
             if summary:
                 lines.append(summary)
@@ -3125,20 +3129,20 @@ def _format_news_agent_html(
             lines.append("────────────")
         if lines and lines[-1] == "────────────":
             lines.pop()
-    return "\n".join(lines).strip()
+    return "\n".join(lines).strip(), shown_links
 
 
 def _format_no_related_news_html(
     *,
     fallback_rows: list[dict[str, str]],
-) -> str:
+) -> tuple[str, list[str]]:
     def escape_html(text: str) -> str:
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     lines = [
-        "<b>🗞️ News agent</b>",
         "I couldn't find related news for your question in the current database.",
     ]
+    shown_links: list[str] = []
     if fallback_rows:
         lines.append("")
         lines.append("<b>Other recent news (optional):</b>")
@@ -3155,6 +3159,8 @@ def _format_no_related_news_html(
             category = escape_html((row.get("category") or "Local").strip() or "Local")
             if not title:
                 continue
+            if link:
+                shown_links.append(link)
             lines.append(f"<blockquote>[{category}] <b>{title}</b></blockquote>")
             if summary:
                 lines.append(summary)
@@ -3166,20 +3172,27 @@ def _format_no_related_news_html(
             lines.append("────────────")
         if lines and lines[-1] == "────────────":
             lines.pop()
-    return "\n".join(lines).strip()
+    return "\n".join(lines).strip(), shown_links
 
 
 def get_news_agent_response_for_user(
     telegram_id: int,
     user_text: str,
     conversation_history: list[dict[str, str]] | None = None,
-) -> str:
+    exclude_article_links: list[str] | None = None,
+) -> tuple[str, list[str]]:
     """
     "News agent" mode:
     - Uses DB (configurable NEWS_AGENT_WINDOW_HOURS, default 30d) to build the evidence set.
     - Uses Ollama to answer the user's question strictly from those items.
     - When conversation_history is provided, vague follow-ups are expanded using the
       previous assistant response and the history is included in the answer prompt.
+    - exclude_article_links: links already shown earlier in this conversation; they
+      are skipped so answers do not repeat the same stories. Falls back to the full
+      set when exclusion would leave nothing (follow-up "tell me more" still works).
+
+    Returns (html_response, shown_article_links): links actually displayed, so the
+    caller can persist them on the assistant turn for later exclusion.
     """
     from src.core.user_service import get_user_preference
     from src.ai.retriever import semantic_rank_articles
@@ -3232,6 +3245,17 @@ def get_news_agent_response_for_user(
             time.perf_counter() - t_rss_0,
             len(items),
         )
+        # Per-conversation dedup (graceful: keep full set if nothing remains).
+        if exclude_article_links:
+            exclude_set = {
+                link.strip() for link in exclude_article_links if link and link.strip()
+            }
+            if exclude_set:
+                remaining_items = [
+                    it for it in items if (it.link or "").strip() not in exclude_set
+                ]
+                if remaining_items:
+                    items = remaining_items
         # Use title+snippet for evidence set.
         evidence_lines: List[str] = []
         for it in items[:12]:
@@ -3321,9 +3345,11 @@ def get_news_agent_response_for_user(
                         time.perf_counter() - t_start,
                     )
                     return (
-                        "<b>🗞️ News agent</b>\n"
-                        "I couldn't find related news for your question, "
-                        f"and no articles from {_fallback_time_label(cutoff)} either."
+                        (
+                            "I couldn't find related news for your question, "
+                            f"and no articles from {_fallback_time_label(cutoff)} either."
+                        ),
+                        [],
                     )
                 fallback_rows = []
                 for it in filtered_items[:2]:
@@ -3373,30 +3399,54 @@ def get_news_agent_response_for_user(
     intent_filtered = [t for t in ranked if _article_matches_question_intent(t[2], expanded_query)]
     if intent_filtered:
         ranked = intent_filtered
+
+    # Per-conversation dedup: drop articles already shown earlier in this
+    # conversation. Graceful fallback: if exclusion would leave nothing, keep
+    # the full set so follow-ups like "tell me more about that news" still work.
+    unfiltered_ranked = ranked
+    exclusion_applied = False
+    if exclude_article_links:
+        exclude_set = {
+            link.strip() for link in exclude_article_links if link and link.strip()
+        }
+        if exclude_set:
+            remaining = [
+                t for t in ranked if (t[2].link or "").strip() not in exclude_set
+            ]
+            if remaining:
+                exclusion_applied = len(remaining) < len(ranked)
+                ranked = remaining
+
     logger.info(
         "[rag-time] filter_rank: %.3fs, ranked=%d",
         time.perf_counter() - t_filter_0,
         len(ranked),
     )
 
-    fallback_chosen = [t[2] for t in ranked[:10]]
-    candidate_pool = [t[2] for t in ranked[:RAG_AGENT_POOL_SIZE]]
-    chosen = fallback_chosen
-    if RAG_ENABLED and candidate_pool:
-        t_retrieve_0 = time.perf_counter()
-        semantic_hits = semantic_rank_articles(
-            query=expanded_query,
-            articles=candidate_pool,
-            top_k=RAG_NEWS_TOP_K,
-        )
-        logger.info(
-            "[rag-time] semantic_retrieve: %.3fs, hits=%d, pool=%d",
-            time.perf_counter() - t_retrieve_0,
-            len(semantic_hits) if semantic_hits else 0,
-            len(candidate_pool),
-        )
-        if semantic_hits:
-            chosen = semantic_hits
+    def _pick_chosen(
+        pool: list[tuple[int, datetime, NewsArticle]],
+    ) -> tuple[list[NewsArticle], list[NewsArticle]]:
+        fb = [t[2] for t in pool[:10]]
+        cand = [t[2] for t in pool[:RAG_AGENT_POOL_SIZE]]
+        ch = fb
+        if RAG_ENABLED and cand:
+            hits = semantic_rank_articles(
+                query=expanded_query,
+                articles=cand,
+                top_k=RAG_NEWS_TOP_K,
+            )
+            if hits:
+                ch = hits
+        return fb, ch
+
+    t_retrieve_0 = time.perf_counter()
+    fallback_chosen, chosen = _pick_chosen(ranked)
+    logger.info(
+        "[rag-time] semantic_retrieve: %.3fs, hits=%d, pool=%d",
+        time.perf_counter() - t_retrieve_0,
+        len(chosen),
+        min(len(ranked), RAG_AGENT_POOL_SIZE),
+    )
     if not chosen:
         logger.info(
             "[rag-time] total: %.3fs (db path, no chosen)",
@@ -3413,6 +3463,24 @@ def get_news_agent_response_for_user(
             _topic_appears_in_article(art, expanded_topic)
             for art in chosen[:RAG_NEWS_TOP_K]
         )
+        if not topic_present_in_hits and exclusion_applied:
+            # The on-topic article may be one already shown earlier (the user is
+            # asking follow-up details about it); re-check without exclusion.
+            if any(
+                _topic_appears_in_article(t[2], expanded_topic)
+                for t in unfiltered_ranked[:RAG_NEWS_TOP_K]
+            ):
+                logger.info(
+                    "[rag-time] shown-links exclusion reverted "
+                    "(topic gate needs shown article)"
+                )
+                ranked = unfiltered_ranked
+                exclusion_applied = False
+                fallback_chosen, chosen = _pick_chosen(ranked)
+                topic_present_in_hits = any(
+                    _topic_appears_in_article(art, expanded_topic)
+                    for art in chosen[:RAG_NEWS_TOP_K]
+                )
         if not topic_present_in_hits:
             query_locations = _question_location_keywords(expanded_query)
             suggestions = _generate_suggested_followups(
@@ -3425,7 +3493,7 @@ def get_news_agent_response_for_user(
             )
             return _format_no_topic_match_html(
                 expanded_topic, query_locations, suggestions
-            )
+            ), []
 
     evidence_lines: List[str] = []
     for art in chosen:

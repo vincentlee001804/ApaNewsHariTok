@@ -215,6 +215,8 @@ def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
             options["num_predict"] = max(curr_limit, 1024)
             body["options"] = options
 
+        is_deepseek = model_lower.startswith("deepseek")
+
         if is_openai:
             openai_payload = {
                 "model": model,
@@ -226,6 +228,10 @@ def _ollama_post(json_body: dict, timeout: int) -> requests.Response:
             num_predict = body.get("options", {}).get("num_predict")
             if num_predict:
                 openai_payload["max_tokens"] = num_predict
+            # DeepSeek models default to thinking mode, which burns output tokens on
+            # chain-of-thought before emitting the answer. News tasks don't need CoT.
+            if is_deepseek:
+                openai_payload["thinking"] = {"type": "disabled"}
             payload = openai_payload
         else:
             payload = {**body, "model": model}

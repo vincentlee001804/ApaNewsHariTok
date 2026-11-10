@@ -2259,15 +2259,30 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
     # Default: "news agent" Q&A mode (also used for follow-ups after /latest or digest).
     from src.core.services import get_news_agent_response_for_user
 
+    # Collect article links already shown earlier in this conversation so the
+    # news agent does not repeat the same stories across questions.
+    shown_links: list[str] = []
+    for turn in history:
+        for link in turn.get("shown_article_links") or []:
+            if link and link not in shown_links:
+                shown_links.append(link)
+
     async with _typing_indicator(context.bot, chat_id):
-        response = await asyncio.to_thread(
+        response, newly_shown_links = await asyncio.to_thread(
             get_news_agent_response_for_user,
             telegram_id,
             expanded_query,
             conversation_history=history,
+            exclude_article_links=shown_links or None,
         )
     await update.message.reply_text(response, parse_mode=ParseMode.HTML)
-    save_conversation_turn(telegram_id, "assistant", _plain_text_from_html(response), interaction_type="qa")
+    save_conversation_turn(
+        telegram_id,
+        "assistant",
+        _plain_text_from_html(response),
+        interaction_type="qa",
+        shown_article_links=newly_shown_links or None,
+    )
 
 
 async def cancel_awaiting_area_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

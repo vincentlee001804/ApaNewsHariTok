@@ -67,6 +67,7 @@ def init_db() -> None:
             migrate_add_news_articles_created_at_index,
             migrate_create_article_embeddings_table,
             migrate_create_conversation_messages_table,
+            migrate_add_conversation_message_shown_links_column,
             migrate_create_utility_alert_shadow_log_table,
             migrate_create_utility_alert_tables,
             migrate_create_user_article_delivery_table,
@@ -92,6 +93,7 @@ def init_db() -> None:
         migrate_create_utility_alert_shadow_log_table()
         migrate_user_fk_on_delete_cascade()
         migrate_create_conversation_messages_table()
+        migrate_add_conversation_message_shown_links_column()
         backfill_news_article_location_and_state()
         backfill_news_article_category()
     except Exception as e:

@@ -72,7 +72,32 @@ _TOPIC_KEYWORDS: set[str] = {
     "budget",
     "subsidy",
     "grant",
+    "tech",
 }
+
+# Leading greetings to strip before extracting a topic from user text.
+_GREETING_PATTERNS: tuple[str, ...] = (
+    r"^hello[,.!?]?\s+",
+    r"^hi[,.!?]?\s+",
+    r"^hey[,.!?]?\s+",
+    r"^hai[,.!?]?\s+",
+    r"^good morning[,.!?]?\s+",
+    r"^good afternoon[,.!?]?\s+",
+    r"^good evening[,.!?]?\s+",
+    r"^good night[,.!?]?\s+",
+)
+
+
+def _strip_leading_greetings(text: str) -> str:
+    """Remove common greeting prefixes so they are not mistaken for topics."""
+    cleaned = (text or "").strip()
+    lowered = cleaned.lower()
+    for pattern in _GREETING_PATTERNS:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+    # If nothing left after stripping, return original so follow-up logic still works.
+    if not cleaned.strip():
+        return (text or "").strip()
+    return cleaned.strip()
 
 
 def _lowercase_set(items: Iterable[str]) -> set[str]:
@@ -242,8 +267,9 @@ def _extract_topic(text: str) -> str | None:
     """
     Best-effort topic extraction from user query or assistant response.
     Prefers category labels / common news topic keywords. Ignores location names.
+    Strips leading greetings so "Hello. Any tech news" does not become topic "hello".
     """
-    text = (text or "").strip()
+    text = _strip_leading_greetings(text or "").strip()
     if not text:
         return None
 
@@ -255,7 +281,8 @@ def _extract_topic(text: str) -> str | None:
             return token
 
     # Fallback: take the first substantive phrase by dropping common question words
-    # and any location aliases.
+    # and any location aliases. Only return a topic if at least one remaining word
+    # is a known topic/category keyword or a reasonably specific noun.
     location_tokens: set[str] = set()
     for aliases in SARAWAK_LOCATION_ALIASES.values():
         location_tokens.update(a.strip().lower() for a in aliases if a.strip())
@@ -266,15 +293,28 @@ def _extract_topic(text: str) -> str | None:
         "of", "with", "to", "from", "and", "or", "is", "are", "was", "were",
         "there", "here", "today", "latest", "news", "summary", "ringkasan", "berita",
         "tell", "me", "give", "show", "what", "how", "when", "where", "who", "why",
+        "this", "that", "these", "those", "it", "they", "them",
     }
     words = [
         w
         for w in cleaned.split()
         if w and w not in stop_words and w not in location_tokens
     ]
-    if words:
-        # Return up to first 3 meaningful words as a compact topic phrase.
-        return " ".join(words[:3])
+    if not words:
+        return None
+
+    # If the only remaining word is a single generic word, ignore it.
+    if len(words) == 1 and len(words[0]) <= 3:
+        return None
+
+    # If the phrase contains a known topic/category word, use the whole phrase.
+    phrase = " ".join(words[:3])
+    if any(token in phrase for token in _TOPIC_TOKENS):
+        return phrase
+
+    # Otherwise, only return a topic if it looks like a specific multi-word phrase.
+    if len(words) >= 2:
+        return phrase
     return None
 
 
@@ -285,7 +325,7 @@ def is_followup_query(query: str, history: list[dict[str, str]]) -> bool:
     if not history:
         return False
 
-    query = (query or "").strip().lower()
+    query = _strip_leading_greetings(query or "").strip().lower()
     if not query:
         return False
 
@@ -323,7 +363,7 @@ def expand_followup_query(
     Expand a vague follow-up using the previous assistant response.
     Returns (expanded_query, inferred_interaction_type).
     """
-    query = (query or "").strip()
+    query = _strip_leading_greetings(query or "").strip()
     if not query or not history:
         return query, None
 

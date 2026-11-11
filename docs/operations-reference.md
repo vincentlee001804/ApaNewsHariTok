@@ -26,14 +26,16 @@ deeper reference. (Consolidated from the former `AGENT.md` on 2026-10-06.)
 src/
   bot/
     bot_main.py          # ENTRYPOINT `python -m src.bot.bot_main`; handlers + repeating jobs
-    handlers.py          # all command/callback/message handlers (~2300 lines)
+    handlers.py          # all command/callback/message handlers (~2500 lines)
   core/
     config.py            # ALL configuration constants, env parsing, source-file loaders
     models.py            # SQLAlchemy models
-    services.py          # selection, filtering, dedup, digest/Q&A builders (~2600 lines)
+    services.py          # selection, filtering, dedup, digest/Q&A builders (~3500 lines)
     user_service.py      # user/preference CRUD helpers
+    conversation_service.py  # conversation memory: turn save/load, follow-up heuristics
     prefetch_service.py  # RSS + Telegram ingestion job
     cleanup_service.py   # retention-based deletion of old articles/deliveries
+    summary_health_service.py  # AI-summary outage watchdog (private alert to owner)
     news_categories.py   # category taxonomy (labels <-> slugs)
     location_extractor.py# rule-based Sarawak location extraction
     local_keywords.py    # LOCAL_INTEREST_KEYWORDS matching helpers
@@ -84,7 +86,12 @@ logs/  tools/            # local-only, gitignored
 Non-command private text -> `conversational_message`: pending area-keyword input, greetings,
 "latest…"/"today summary", then news-agent Q&A (`services.get_news_agent_response_for_user`)
 using RAG over recent articles (`RAG_NEWS_TOP_K` / `RAG_NEWS_CANDIDATE_POOL`) — answers from
-the local DB only.
+the local DB only. Conversation memory (`conversation_service.py`, FYP2 doc 13) keeps recent
+turns per user; short follow-ups ("how about Sibu?", "macam mana pula di Miri?") are expanded
+into self-contained queries (EN/BM markers, topic/location swap, greeting stripping), and
+article links already shown in the conversation are excluded from later answers. A
+topic-relevance gate with synonym matching avoids false "no news" refusals; refusals suggest
+real, recent follow-up questions.
 
 ## 4. Configuration catalog (`.env`, parsed in `src/core/config.py`)
 
@@ -99,6 +106,8 @@ the local DB only.
   `TELEGRAM_SESSION_STRING` (preferred on servers) or `TELEGRAM_PHONE` + session file
 - **Toggles:** `PREFETCH_ENABLED`, `PREFETCH_AI_SUMMARY`, `DEDUPLICATION_ENABLED`,
   `CROSS_SOURCE_DEDUP_*`, `RAG_ENABLED`, quiet/digest hours, `DB_*`, `WAZE_*`, `TEST_PUSH_*`,
+  `CONVERSATION_MEMORY_ENABLED` (default true; `CONVERSATION_MAX_TURNS` 3,
+  `CONVERSATION_MAX_AGE_HOURS` 24 — see `docs/fyp2/13-conversation-memory.md`),
   `UTILITY_ALERT_*` (FYP2 — see `docs/fyp2/04-utility-alerts.md`)
 - **AI-summary watchdog:** `AI_SUMMARY_ALERT_ENABLED` (default true),
   `AI_SUMMARY_ALERT_TELEGRAM_ID` (numeric private recipient; required to activate),

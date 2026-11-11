@@ -2267,6 +2267,7 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
             if link and link not in shown_links:
                 shown_links.append(link)
 
+    suggestions_out: list[str] = []
     async with _typing_indicator(context.bot, chat_id):
         response, newly_shown_links = await asyncio.to_thread(
             get_news_agent_response_for_user,
@@ -2274,8 +2275,89 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
             expanded_query,
             conversation_history=history,
             exclude_article_links=shown_links or None,
+            suggestions_out=suggestions_out,
         )
-    await update.message.reply_text(response, parse_mode=ParseMode.HTML)
+    await update.message.reply_text(
+        response,
+        parse_mode=ParseMode.HTML,
+        reply_markup=_suggestion_keyboard(suggestions_out),
+    )
+    save_conversation_turn(
+        telegram_id,
+        "assistant",
+        _plain_text_from_html(response),
+        interaction_type="qa",
+        shown_article_links=newly_shown_links or None,
+    )
+
+
+_SUGGESTION_CALLBACK_PREFIX = "qa:"
+
+
+def _suggestion_keyboard(suggestions: list[str]) -> InlineKeyboardMarkup | None:
+    """One-tap inline buttons for news-agent follow-up suggestions.
+
+    Telegram callback_data is limited to 64 bytes; suggestions that don't fit
+    stay as plain text (the message already lists them as bullets).
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    for suggestion in (suggestions or [])[:3]:
+        data = f"{_SUGGESTION_CALLBACK_PREFIX}{suggestion}"
+        if len(data.encode("utf-8")) > 64:
+            continue
+        rows.append([InlineKeyboardButton(suggestion[:80], callback_data=data)])
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+async def suggested_question_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """A follow-up suggestion button was tapped: run it through the news agent,
+    exactly as if the user had typed it."""
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    suggestion = query.data[len(_SUGGESTION_CALLBACK_PREFIX):].strip()
+    await query.answer()
+    if not suggestion:
+        return
+    user = update.effective_user
+    if not user:
+        return
+    telegram_id = user.id
+
+    from src.core.conversation_service import (
+        get_recent_conversation_turns,
+        save_conversation_turn,
+    )
+
+    history = get_recent_conversation_turns(telegram_id)
+    save_conversation_turn(telegram_id, "user", suggestion)
+
+    # Same per-conversation shown-link exclusion as conversational_message.
+    shown_links: list[str] = []
+    for turn in history:
+        for link in turn.get("shown_article_links") or []:
+            if link and link not in shown_links:
+                shown_links.append(link)
+
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    suggestions_out: list[str] = []
+    async with _typing_indicator(context.bot, chat_id):
+        response, newly_shown_links = await asyncio.to_thread(
+            get_news_agent_response_for_user,
+            telegram_id,
+            suggestion,
+            conversation_history=history,
+            exclude_article_links=shown_links or None,
+            suggestions_out=suggestions_out,
+        )
+    if not chat_id:
+        return
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=response,
+        parse_mode=ParseMode.HTML,
+        reply_markup=_suggestion_keyboard(suggestions_out),
+    )
     save_conversation_turn(
         telegram_id,
         "assistant",

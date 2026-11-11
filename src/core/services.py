@@ -63,6 +63,12 @@ from src.scrapers.telegram_reader import (
 )
 from src.scrapers.waze_client import WazeGeoRssError, list_alerts_in_bbox
 from src.storage.database import SessionLocal
+from src.core.news_categories import (
+    NEWS_ARTICLE_CATEGORY_LABELS,
+    canonical_topic_for,
+    replace_topic_forms_in_text,
+    topic_surface_forms,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -2793,10 +2799,11 @@ def get_todays_news_digest_for_user(
 def _question_intent_keywords(user_text: str) -> list[str]:
     text = (user_text or "").lower()
     intent_map = {
-        "crime": ["crime", "rob", "theft", "murder", "assault", "police"],
-        "weather": ["weather", "rain", "storm", "flood", "hot", "temperature"],
-        "politics": ["politic", "election", "minister", "policy", "government"],
-        "transport": ["traffic", "road", "jam", "accident", "transport", "closure"],
+        "crime": ["crime", "rob", "robbery", "theft", "murder", "assault", "police", "curi", "rompak", "bunuh"],
+        "weather": ["weather", "rain", "storm", "flood", "floods", "flooding", "banjir", "hot", "temperature", "cuaca", "hujan"],
+        "politics": ["politic", "politics", "election", "minister", "policy", "government", "politik", "pilihan raya", "kerajaan"],
+        "transport": ["traffic", "road", "jam", "accident", "accidents", "crash", "collision", "transport", "closure", "kemalangan", "jalan"],
+        "fire": ["fire", "kebakaran", "terbakar", "burning"],
     }
     out: list[str] = []
     for _, keys in intent_map.items():
@@ -2946,16 +2953,20 @@ def _fallback_time_label(cutoff: datetime) -> str:
 
 
 def _topic_appears_in_article(art: NewsArticle, topic: str) -> bool:
-    """Best-effort check whether a topic word/phrase appears in an article."""
+    """Best-effort check whether a topic word/phrase appears in an article.
+
+    Matches any known surface form (synonyms + Bahasa Malaysia), so a query
+    about "accidents" also matches a "collision" headline.
+    """
     if not topic:
         return False
     blob = (
         f"{art.title or ''} {art.ai_summary or ''} {art.raw_summary or ''} {art.category or ''}"
     ).lower()
-    topic = topic.strip().lower()
-    if topic in blob:
-        return True
-    words = topic.split()
+    for form in topic_surface_forms(topic):
+        if form and form in blob:
+            return True
+    words = topic.strip().lower().split()
     if len(words) > 1:
         return all(w in blob for w in words)
     return False
@@ -2985,15 +2996,57 @@ _TOPIC_RELATED_CATEGORIES: dict[str, list[str]] = {
 }
 
 
+def _live_category_suggestions(
+    query_locations: list[str], exclude_topic: str, limit: int = 3
+) -> list[str]:
+    """Categories with the most real articles in the last 48h for the asked
+    location (Sarawak-wide when no location was named). Suggestions built from
+    this list always point at fresh, existing stories."""
+    try:
+        cutoff = datetime.utcnow() - timedelta(hours=48)
+        locs = [loc.strip().lower() for loc in query_locations if loc and loc.strip()]
+        with SessionLocal() as session:
+            q = (
+                select(NewsArticle.category, func.count())
+                .where(NewsArticle.created_at >= cutoff)
+                .where(NewsArticle.category.isnot(None))
+                .where(NewsArticle.category != "")
+            )
+            if locs:
+                q = q.where(func.lower(NewsArticle.location).in_(locs))
+            else:
+                q = q.where(NewsArticle.state == "sarawak")
+            rows = session.execute(
+                q.group_by(NewsArticle.category)
+                .order_by(func.count().desc())
+                .limit(8)
+            ).all()
+        exclude_forms = set(topic_surface_forms(exclude_topic)) if exclude_topic else set()
+        out: list[str] = []
+        for cat, _n in rows:
+            label = (cat or "").strip()
+            if not label or label.lower() in exclude_forms:
+                continue
+            if label.lower() in {"local", "general"}:
+                continue
+            out.append(label)
+            if len(out) >= limit:
+                break
+        return out
+    except Exception:
+        logger.exception("[suggest] live category suggestions failed")
+        return []
+
+
 def _generate_suggested_followups(
     articles: list[NewsArticle],
     query_locations: list[str],
     exclude_topic: str,
 ) -> list[str]:
-    """
-    Build 2-3 follow-up suggestions. Prefer categories related to the missed
-    topic, then fill with categories derived from the fallback articles.
-    Example: ['Any Transport news in Kuching?', 'Any Health news in Kuching?']
+    """Build 2-3 follow-up suggestions. Prefer categories that have real fresh
+    stories in the asked location, then categories related to the missed topic,
+    then categories derived from the fallback articles.
+    Example: ['Any Emergency news in Sibu?', 'Any Transport news in Sibu?']
     """
     exclude = exclude_topic.strip().lower()
     seen: set[str] = set()
@@ -3001,7 +3054,17 @@ def _generate_suggested_followups(
 
     location_label = ", ".join(loc.title() for loc in query_locations) or "Sarawak"
 
-    # 1. Suggest categories semantically related to the missed topic first.
+    # 1. Suggest categories backed by real recent articles in this location.
+    for topic_label in _live_category_suggestions(query_locations, exclude):
+        if len(suggestions) >= 3:
+            break
+        key = topic_label.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        suggestions.append(f"Any {topic_label} news in {location_label}?")
+
+    # 2. Suggest categories semantically related to the missed topic.
     for related_topic in _TOPIC_RELATED_CATEGORIES.get(exclude, []):
         if len(suggestions) >= 3:
             break
@@ -3010,7 +3073,7 @@ def _generate_suggested_followups(
         seen.add(related_topic)
         suggestions.append(f"Any {related_topic.title()} news in {location_label}?")
 
-    # 2. Fill remaining slots with categories from the actual fallback articles.
+    # 3. Fill remaining slots with categories from the actual fallback articles.
     for art in articles:
         if len(suggestions) >= 3:
             break
@@ -3034,6 +3097,33 @@ def _generate_suggested_followups(
     return suggestions[:3]
 
 
+_NO_MATCH_TEMPLATES: tuple[str, ...] = (
+    "I couldn't find {topic} news in {location} right now.",
+    "Nothing on {topic} in {location} at the moment.",
+    "No {topic} stories from {location} in the current news window.",
+)
+_NO_MATCH_LEADINS: tuple[str, ...] = (
+    "You could ask:",
+    "Meanwhile, these topics have fresh stories:",
+)
+
+
+def _clean_topic_display(topic: str) -> str:
+    """Topic string shown in refusal messages: canonical when known, junk words
+    dropped, long extracted phrases trimmed (never echoes raw query slop like
+    'developments sarawak renewable news')."""
+    t = " ".join((topic or "").split()).lower()
+    if not t:
+        return "that"
+    canonical = canonical_topic_for(t)
+    if canonical:
+        return canonical
+    words = t.split()
+    if len(words) > 3:
+        t = " ".join(words[:3])
+    return t
+
+
 def _format_no_topic_match_html(
     topic: str,
     query_locations: list[str],
@@ -3041,16 +3131,19 @@ def _format_no_topic_match_html(
 ) -> str:
     """
     'I couldn't find <topic> news in <location>, but you could ask...'
+    Phrasing rotates deterministically per topic so repeated refusals in one
+    conversation don't read like a broken record.
     """
-    topic_display = topic.strip().lower()
+    topic_display = _clean_topic_display(topic)
     location_label = ", ".join(loc.title() for loc in query_locations) or "Sarawak"
 
+    seed = sum(ord(c) for c in topic_display) % len(_NO_MATCH_TEMPLATES)
     lines: list[str] = [
-        f"I couldn't find {topic_display} news in {location_label} right now."
+        _NO_MATCH_TEMPLATES[seed].format(topic=topic_display, location=location_label)
     ]
     if suggestions:
         lines.append("")
-        lines.append("You could ask:")
+        lines.append(_NO_MATCH_LEADINS[seed % len(_NO_MATCH_LEADINS)])
         for suggestion in suggestions:
             lines.append(f"• {suggestion}")
     return "\n".join(lines)
@@ -3180,6 +3273,7 @@ def get_news_agent_response_for_user(
     user_text: str,
     conversation_history: list[dict[str, str]] | None = None,
     exclude_article_links: list[str] | None = None,
+    suggestions_out: list[str] | None = None,
 ) -> tuple[str, list[str]]:
     """
     "News agent" mode:
@@ -3193,6 +3287,8 @@ def get_news_agent_response_for_user(
 
     Returns (html_response, shown_article_links): links actually displayed, so the
     caller can persist them on the assistant turn for later exclusion.
+    suggestions_out: optional list the topic-gate path extends with its
+    follow-up suggestions, so callers can render them as inline buttons.
     """
     from src.core.user_service import get_user_preference
     from src.ai.retriever import semantic_rank_articles
@@ -3202,6 +3298,9 @@ def get_news_agent_response_for_user(
     expanded_query, _ = expand_followup_query(user_text, history)
     if not expanded_query:
         expanded_query = user_text
+    # Rewrite known BM/synonym surface forms to canonical English so retrieval,
+    # the topic gate, and the answering LLM all see e.g. 'flood' for 'banjir'.
+    expanded_query = replace_topic_forms_in_text(expanded_query)
 
     preference = get_user_preference(telegram_id)
     categories_filter = preference.categories if preference else ""
@@ -3439,6 +3538,17 @@ def get_news_agent_response_for_user(
                 ch = hits
         return fb, ch
 
+    # The fallback "other recent news" display must also honor the per-conversation
+    # shown-link exclusion (graceful: keep the full set if nothing remains).
+    def _exclude_shown_articles(articles: List[NewsArticle]) -> List[NewsArticle]:
+        if not exclude_article_links:
+            return articles
+        exclude_set = {lk.strip() for lk in exclude_article_links if lk and lk.strip()}
+        if not exclude_set:
+            return articles
+        remaining = [a for a in articles if (a.link or "").strip() not in exclude_set]
+        return remaining or articles
+
     t_retrieve_0 = time.perf_counter()
     fallback_chosen, chosen = _pick_chosen(ranked)
     logger.info(
@@ -3452,15 +3562,20 @@ def get_news_agent_response_for_user(
             "[rag-time] total: %.3fs (db path, no chosen)",
             time.perf_counter() - t_start,
         )
-        return _format_temporal_no_related_news_html(fallback_chosen, expanded_query)
+        return _format_temporal_no_related_news_html(
+            _exclude_shown_articles(fallback_chosen), expanded_query
+        )
 
     # Topic-relevance gate: if the expanded query has a clear topic but the top
     # retrieved articles do not mention it, say no and suggest related questions
     # instead of forcing the LLM to hallucinate an answer.
     expanded_topic = _extract_topic(expanded_query)
     if expanded_topic and chosen:
+        # A hit only counts when it also matches the asked location, otherwise
+        # "tech in Sibu" would pass on Kuching tech articles.
         topic_present_in_hits = any(
             _topic_appears_in_article(art, expanded_topic)
+            and _article_matches_question_location(art, expanded_query)
             for art in chosen[:RAG_NEWS_TOP_K]
         )
         if not topic_present_in_hits and exclusion_applied:
@@ -3468,6 +3583,7 @@ def get_news_agent_response_for_user(
             # asking follow-up details about it); re-check without exclusion.
             if any(
                 _topic_appears_in_article(t[2], expanded_topic)
+                and _article_matches_question_location(t[2], expanded_query)
                 for t in unfiltered_ranked[:RAG_NEWS_TOP_K]
             ):
                 logger.info(
@@ -3479,13 +3595,35 @@ def get_news_agent_response_for_user(
                 fallback_chosen, chosen = _pick_chosen(ranked)
                 topic_present_in_hits = any(
                     _topic_appears_in_article(art, expanded_topic)
+                    and _article_matches_question_location(art, expanded_query)
                     for art in chosen[:RAG_NEWS_TOP_K]
                 )
+        if not topic_present_in_hits:
+            # The semantic top-k can miss synonym wordings ("accident" vs
+            # "collision"); surface matching pool articles instead of refusing.
+            # Location must match too: an accident warning for another town is
+            # not an answer to "accidents in Sibu".
+            topic_pool = [
+                t
+                for t in unfiltered_ranked
+                if _topic_appears_in_article(t[2], expanded_topic)
+                and _article_matches_question_location(t[2], expanded_query)
+            ]
+            if topic_pool:
+                logger.info(
+                    "[rag-time] topic gate: answering from %d topic-matching pool articles",
+                    len(topic_pool),
+                )
+                fallback_chosen = [t[2] for t in topic_pool[:10]]
+                chosen = [t[2] for t in topic_pool[:RAG_NEWS_TOP_K]]
+                topic_present_in_hits = True
         if not topic_present_in_hits:
             query_locations = _question_location_keywords(expanded_query)
             suggestions = _generate_suggested_followups(
                 fallback_chosen, query_locations, expanded_topic
             )
+            if suggestions_out is not None:
+                suggestions_out.extend(suggestions)
             logger.info(
                 "[rag-time] total: %.3fs (db path, topic_gate: %s not in hits)",
                 time.perf_counter() - t_start,
@@ -3534,7 +3672,9 @@ def get_news_agent_response_for_user(
             "[rag-time] total: %.3fs (db path, no answer/evidence)",
             time.perf_counter() - t_start,
         )
-        return _format_temporal_no_related_news_html(chosen, expanded_query)
+        return _format_temporal_no_related_news_html(
+            _exclude_shown_articles(chosen), expanded_query
+        )
     logger.info(
         "[rag-time] total: %.3fs (db path, answered)",
         time.perf_counter() - t_start,

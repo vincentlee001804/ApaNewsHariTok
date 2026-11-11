@@ -99,3 +99,58 @@ def slug_for_callback(label: str) -> str:
 
 def label_from_slug(slug: str) -> str | None:
     return _LABEL_LOWER.get((slug or "").strip().lower())
+
+
+# Canonical topic -> equivalent surface forms (English synonyms + Bahasa Malaysia).
+# Used by the news agent to match user phrasing against article text so that
+# e.g. "accident" matches a "collision" headline and "banjir" matches "flood".
+TOPIC_SYNONYMS: Final[dict[str, tuple[str, ...]]] = {
+    "accident": ("accident", "accidents", "crash", "crashed", "collision", "wreck", "overturn", "overturned", "kemalangan", "terbabas"),
+    "flood": ("flood", "floods", "flooding", "banjir", "kebanjiran"),
+    "fire": ("fire", "kebakaran", "terbakar", "burning"),
+    "renewable energy": ("renewable energy", "renewable", "green energy", "hydrogen", "hidrogen", "solar", "tenaga boleh baharu"),
+    "tech": ("tech", "technology", "teknologi", "digital", "AI", "ICT"),
+}
+
+# Flattened reverse lookup: surface form (lowercase) -> canonical topic.
+_TOPIC_FORM_TO_CANONICAL: Final[dict[str, str]] = {
+    form.lower(): canonical
+    for canonical, forms in TOPIC_SYNONYMS.items()
+    for form in forms
+}
+
+
+def canonical_topic_for(form: str) -> str | None:
+    """Return the canonical topic for a surface form (e.g. 'banjir' -> 'flood')."""
+    if not form:
+        return None
+    return _TOPIC_FORM_TO_CANONICAL.get(form.strip().lower())
+
+
+def topic_surface_forms(topic: str) -> tuple[str, ...]:
+    """All surface forms for a topic (canonical + synonyms); unknown topics return themselves."""
+    if not topic:
+        return ()
+    canonical = canonical_topic_for(topic)
+    if canonical:
+        return TOPIC_SYNONYMS[canonical]
+    return (topic.strip().lower(),)
+
+
+def replace_topic_forms_in_text(text: str) -> str:
+    """Rewrite known BM/synonym surface forms in a query to the canonical English form.
+
+    Only whole words are replaced, so retrieval, the topic gate, and the LLM all
+    see e.g. 'flood' even when the user typed 'banjir'. Unknown text passes through.
+    """
+    import re
+
+    if not text:
+        return text
+    lowered = text.lower()
+
+    def _repl(m: re.Match) -> str:
+        return _TOPIC_FORM_TO_CANONICAL[m.group(0).lower()]
+
+    pattern = r"\b(" + "|".join(re.escape(f) for f in sorted(_TOPIC_FORM_TO_CANONICAL, key=len, reverse=True)) + r")\b"
+    return re.sub(pattern, _repl, text, flags=re.IGNORECASE)

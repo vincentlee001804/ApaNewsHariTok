@@ -42,6 +42,14 @@ _FOLLOWUP_MARKERS: set[str] = {
     "it",
     "this",
     "that",
+    # Bahasa Malaysia continuation markers
+    "macam mana",
+    "bagaimana",
+    "apa kata",
+    "kenapa",
+    "bila",
+    "di mana",
+    "pula",
 }
 
 # Additional topic words not covered by category labels (common Sarawak news subjects).
@@ -73,6 +81,31 @@ _TOPIC_KEYWORDS: set[str] = {
     "subsidy",
     "grant",
     "tech",
+    "renewable energy",
+    "green energy",
+    # Bahasa Malaysia topic words
+    "banjir",
+    "kebakaran",
+    "kemalangan",
+    "kesihatan",
+    "politik",
+    "sukan",
+    "teknologi",
+    "cuaca",
+    "pendidikan",
+}
+
+# Words that never constitute a topic even when nothing else remains
+# (auxiliary verbs, pronouns, BM question words, greeting filler).
+_NON_TOPIC_WORDS: set[str] = {
+    "did", "does", "do", "done", "happen", "happened", "happens",
+    "one", "ones", "going", "got", "get", "getting", "please",
+    "macam", "mana", "pula", "apakah", "yang", "untuk", "dengan",
+    "ada", "boleh", "sudah", "akan",
+    "related", "stories", "story", "window", "current", "optional",
+    "hello", "hi", "hey", "hai", "there",
+    "morning", "afternoon", "evening", "night",
+    "selamat", "pagi", "petang", "malam",
 }
 
 # Leading greetings to strip before extracting a topic from user text.
@@ -275,7 +308,11 @@ def _extract_failed_topic_from_response(text: str) -> str | None:
     m = re.search(r"i couldn't find ([\w\s]+?) news\b", lowered)
     if m:
         topic = m.group(1).strip()
-        if topic:
+        # Refusal boilerplate is not a topic ("I couldn't find related news..."),
+        # and a long match means the phrase ran into LLM answer prose
+        # ("...any relevant information about an accident in Bintulu in the
+        # provided news") — real missed topics are 1-4 words.
+        if topic and topic not in {"related", "any", "some", "other"} and len(topic.split()) <= 4:
             return topic
     return None
 
@@ -290,6 +327,14 @@ def _extract_topic(text: str) -> str | None:
     if not text:
         return None
 
+    # Strip echoed "[Category]" tags from formatted bot messages so they are
+    # not mistaken for the user's topic when mining assistant history.
+    text = re.sub(
+        r"\[\s*(?:" + "|".join(re.escape(c) for c in NEWS_ARTICLE_CATEGORY_LABELS) + r")\s*\]",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
     lowered = text.lower()
 
     # Prefer explicit category / topic keywords.
@@ -311,7 +356,7 @@ def _extract_topic(text: str) -> str | None:
         "there", "here", "today", "latest", "news", "summary", "ringkasan", "berita",
         "tell", "me", "give", "show", "what", "how", "when", "where", "who", "why",
         "this", "that", "these", "those", "it", "they", "them",
-    }
+    } | _NON_TOPIC_WORDS
     words = [
         w
         for w in cleaned.split()
@@ -335,6 +380,18 @@ def _extract_topic(text: str) -> str | None:
     return None
 
 
+def _is_greeting_only(text: str) -> bool:
+    """True when the text is just greeting filler with no content words
+    (e.g. 'hello there', 'selamat petang'). Such messages are handled by the
+    handler's greeting shortcut, or should fall through — never expanded as
+    follow-ups that inherit a stale topic."""
+    cleaned = re.sub(r"[?!.,;:]", " ", (text or "").lower())
+    words = [w for w in cleaned.split() if w]
+    if not words:
+        return False
+    return all(w in _NON_TOPIC_WORDS for w in words)
+
+
 def is_followup_query(query: str, history: list[dict[str, str]]) -> bool:
     """
     Heuristic: is this query likely a continuation of the previous turn?
@@ -344,6 +401,9 @@ def is_followup_query(query: str, history: list[dict[str, str]]) -> bool:
 
     query = _strip_leading_greetings(query or "").strip().lower()
     if not query:
+        return False
+
+    if _is_greeting_only(query):
         return False
 
     # Explicitly self-contained queries are not follow-ups.

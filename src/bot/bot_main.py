@@ -26,6 +26,7 @@ from src.bot.handlers import (
     settings_callback,
     settings_command,
     start,
+    suggested_question_callback,
     test_digest_push_command,
     test_push_command,
     dev_waze_command,
@@ -148,6 +149,7 @@ def main() -> None:
     application.add_handler(CommandHandler("deletedemo", delete_demo_command))
     application.add_handler(CommandHandler("deleteaccount", delete_account_command))
     application.add_handler(CallbackQueryHandler(delete_account_callback, pattern="^delacc_"))
+    application.add_handler(CallbackQueryHandler(suggested_question_callback, pattern="^qa:"))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, ingest_channel_post))
     application.add_handler(
         MessageHandler(

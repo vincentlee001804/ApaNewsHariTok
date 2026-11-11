@@ -3582,6 +3582,10 @@ def get_news_agent_response_for_user(
                 evidence_rows.append(row)
         if answer:
             evidence_rows = _filter_evidence_rows_by_answer(answer, evidence_rows)
+        if answer and not evidence_rows:
+            # LLM answered but nothing supports it (typically out-of-scope
+            # questions): show the answer alone, no unrelated fallback cards.
+            return _format_news_agent_html(answer=answer, evidence_rows=[])
         if not answer or not evidence_rows:
             cutoff = _fallback_temporal_cutoff(expanded_query)
             if cutoff:
@@ -3843,6 +3847,10 @@ def get_news_agent_response_for_user(
         )
     if answer:
         evidence_rows = _filter_evidence_rows_by_answer(answer, evidence_rows)
+    if answer and not evidence_rows:
+        # LLM answered but nothing supports it (typically out-of-scope
+        # questions): show the answer alone, no unrelated fallback cards.
+        return _format_news_agent_html(answer=answer, evidence_rows=[])
     if not answer or not evidence_rows:
         logger.info(
             "[rag-time] total: %.3fs (db path, no answer/evidence)",

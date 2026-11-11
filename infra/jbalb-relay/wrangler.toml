@@ -1,0 +1,7 @@
+name = "jbalb-relay"
+main = "src/worker.js"
+compatibility_date = "2026-11-11"
+
+# Fetch relay investigation artifact — NOT usable from Fly.io (CF edge 1010).
+# See src comments; production uses scripts/jbalb_local_relay.py instead.
+# Secret:  npx wrangler secret put RELAY_SECRET

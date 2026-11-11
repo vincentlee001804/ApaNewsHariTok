@@ -793,7 +793,7 @@ UTILITY_ALERT_JBALB_URLS: Final[List[str]] = [
     ).split(",")
     if x.strip()
 ]
-# Optional Cloudflare Worker relay for JBALB pages (tools/jbalb-relay, investigation
+# Optional Cloudflare Worker relay for JBALB pages (infra/jbalb-relay, investigation
 # artifact). The .gov.my firewall drops datacenter-ASN connections at TCP level, and
 # Cloudflare's edge also blocks requests to workers.dev from Fly.io (error 1010), so
 # this relay is NOT usable from the production host. Production solution:

@@ -457,6 +457,10 @@ TIER2_CONVERSATIONS: list[dict] = [
         "turns": [
             "Explain more about the first news?",
             "how about the second one?",
+            # REGRESSION: right after a 1-card ordinal answer, "the first news"
+            # must fall through to the digest item 1, NOT re-answer the 1-card
+            # turn (single-card answers are not ordinal lists).
+            "How about the first news?",
         ],
     },
     {

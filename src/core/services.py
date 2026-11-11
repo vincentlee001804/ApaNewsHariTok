@@ -3356,6 +3356,15 @@ def resolve_ordinal_article(
         links = [
             lk.strip() for lk in (turn.get("shown_article_links") or []) if lk and lk.strip()
         ]
+        # A single-card answer is not a list the user ordinally refers
+        # to: "how about the first news?" right after a 1-card follow-up
+        # must fall through to the digest, not re-answer the same article.
+        # Real digest turns (even 1-item /latest) always stay resolvable.
+        if len(links) < 2 and (turn.get("interaction_type") or "") not in {
+            "latest",
+            "digest_summary",
+        }:
+            continue
         if not links:
             continue
         if idx == -1:

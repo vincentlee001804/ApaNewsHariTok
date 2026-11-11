@@ -1,0 +1,11 @@
+{
+  "generated_utc": "20261111T012628Z",
+  "rubric": "1-5 per thesis dimensions (relevance, coherence, factual consistency); evidence verified against production DB",
+  "turns": 13,
+  "mean_relevance": 2.31,
+  "mean_coherence": 4.08,
+  "mean_factual": 3.31,
+  "false_negatives": 3,
+  "correct_abstentions": 2,
+  "judge": "AI assistant with direct DB fact-checking of evidence articles (single rater; documented as limitation)"
+}

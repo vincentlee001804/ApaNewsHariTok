@@ -1,0 +1,115 @@
+conversation,turn,user_text,expanded_query,response_html,shown_links,shown_count,novelty,abstained,elapsed_s,relevance,coherence,factual,scoring_notes
+tech_location_thread,1,Any tech news in Kuching?,Any tech news in Kuching?,"There is a mention of ""digital technology"" that could be related to tech news in Kuching. Sarawak must create better jobs to attract young graduates, suggesting industries such as renewable energy and digital technology can provide opportunities. However, no specific tech news is reported in the given items.
+
+<b>Relevant news:</b>
+<blockquote>[Politics] <b>Sarawak Must Create Better Jobs to Attract Young Graduates</b></blockquote>
+Kuching South City Council Councillor Eric Tay Tze Kok says Sarawak must create better jobs to attract young graduates to return home, suggesting industries such as renewable energy and digital technology can provide opportunities.
+
+Sources: <a href=""https://www.sarawaktribune.com/tay-build-better-jobs-to-draw-graduates-home/"">Sarawak Tribune</a>
+────────────
+<blockquote>[Politics] <b>Sarawak Needs More Legal Experts for Cybersecurity and Digital Economy</b></blockquote>
+Sarawak needs more legal professionals to handle cybersecurity and digital transactions as it develops its technology-driven economy, said Premier Datuk Patinggi Tan Sri Abang Johari Tun Openg in Kuching.
+
+Sources: <a href=""https://www.sarawaktribune.com/legal-expertise-must-keep-pace-with-technology/"">Sarawak Tribune</a>",https://www.sarawaktribune.com/tay-build-better-jobs-to-draw-graduates-home/ | https://www.sarawaktribune.com/legal-expertise-must-keep-pace-with-technology/,2,1.0,False,11.01,3,5,5,"Honest partial answer: says no specific tech news, shows 2 tangential Politics articles; claims supported."
+tech_location_thread,2,how about Sibu?,tech in sibu,"There is a news item about Sibu's shipbuilding industry, which is mentioned as the ""heartland of Malaysia's shipbuilding industry"". The Gimhwak Group of Companies, a Sibu firm, has expanded from charcoal production to shipbuilding over three generations.
+
+<b>Relevant news:</b>
+<blockquote>[Emergency] <b>Sibu Firm Expands from Charcoal to Shipbuilding in Three Generations</b></blockquote>
+In Sibu, the heartland of Malaysia's shipbuilding industry, the Gimhwak Group of Companies, founded in 1976, has grown from charcoal production to shipbuilding, with the third generation now leading the business.
+
+Sources: <a href=""https://www.sarawaktribune.com/sibu-the-heartland-of-malaysias-shipbuilding-industry/"">Sarawak Tribune</a>
+────────────
+<blockquote>[Health] <b>Sibu Police Detain Nine Suspects over 19-Year-Old's Murder</b></blockquote>
+Police in Sibu detained nine suspects aged 16 to 42 in connection with the murder of a 19-year-old who was stabbed in a public park fight. The suspects were rounded up at various locations in Sibu.
+
+Sources: <a href=""https://www.malaymail.com/news/malaysia/2026/11/08/police-round-up-nine-suspects-after-19-year-old-killed-in-sibu/242407"">Malaymail</a>",https://www.sarawaktribune.com/sibu-the-heartland-of-malaysias-shipbuilding-industry/ | https://www.malaymail.com/news/malaysia/2026/11/08/police-round-up-nine-suspects-after-19-year-old-killed-in-sibu/242407,2,1.0,False,10.11,2,5,5,Shipbuilding article borderline-relevant to tech; murder case is not tech. Facts verified vs DB.
+tech_location_thread,3,tell me more,more details about emergency in sibu,"Police in Sibu remanded nine suspects, aged 16-42, for seven days to assist in the investigation into the death of a 19-year-old male who was stabbed during a brawl yesterday. The case is being investigated under Section 302 of the Penal Code.
+
+<b>Relevant news:</b>
+<blockquote>[Education] <b>Nine Sibu suspects remanded for seven days over fatal fight case.</b></blockquote>
+Nine individuals suspected of being involved in a fatal fight in Sibu have been remanded for seven days. The court granted the police's application, and the case is being investigated under Section 302 of the Penal Code.
+
+Sources: <a href=""https://www.sarawaktribune.com/nine-suspects-remanded-for-seven-days-over-fatal-fight/"">Sarawak Tribune</a>
+────────────
+<blockquote>[Health] <b>Man Dies After Attack, Nine Detained in Sibu</b></blockquote>
+A man died after being attacked and nine people were detained in Sibu.
+
+Sources: <a href=""https://www.tvsarawak.my/2026/11/07/lelaki-maut-ditikam-sembilan-ditahan-di-sibu/?utm_source=rss&amp;utm_medium=rss&amp;utm_campaign=lelaki-maut-ditikam-sembilan-ditahan-di-sibu"">Tvsarawak</a>",https://www.sarawaktribune.com/nine-suspects-remanded-for-seven-days-over-fatal-fight/ | https://www.tvsarawak.my/2026/11/07/lelaki-maut-ditikam-sembilan-ditahan-di-sibu/?utm_source=rss&amp;utm_medium=rss&amp;utm_campaign=lelaki-maut-ditikam-sembilan-ditahan-di-sibu,2,1.0,False,9.55,3,5,4,Topic drift: followed murder/emergency thread instead of tech. Remand/S302 claims verified; 'yesterday' unverifiable.
+incident_wh_thread,1,Any accident news in Sibu?,Any accident news in Sibu?,"I couldn't find accident news in Sibu right now.
+
+You could ask:
+• Any Transport news in Sibu?
+• Any Health news in Sibu?
+• Any Infrastructure news in Sibu?",,0,,True,6.36,1,4,2,FALSE NEGATIVE: 'Motorist killed in head-on collision' (Sibu) existed. Gate misses accident~collision synonyms.
+incident_wh_thread,2,why did it happen?,why about did happen in sibu,"I couldn't find did happen news in Sibu right now.
+
+You could ask:
+• Any Weather news in Sibu?
+• Any Business news in Sibu?
+• Any Education news in Sibu?",,0,,True,5.54,1,2,2,Junk expansion 'did happen news' (pronoun topic bug from tier 1).
+incident_wh_thread,3,when was the latest one?,when about did happen in sibu,"I couldn't find did happen news in Sibu right now.
+
+You could ask:
+• Any Weather news in Sibu?
+• Any Business news in Sibu?
+• Any Education news in Sibu?",,0,,True,5.56,1,2,2,Same junk expansion as turn 2.
+topic_gate_abstention,1,Any news about the Kuching aquarium expansion?,Any news about the Kuching aquarium expansion?,"I couldn't find aquarium expansion news in Kuching right now.
+
+You could ask:
+• Any Weather news in Kuching?
+• Any Business news in Kuching?
+• Any Education news in Kuching?",,0,,True,5.5,4,5,5,Correct abstention: no aquarium news exists. Suggestions appropriate.
+topic_gate_abstention,2,how about Miri?,aquarium expansion in miri,"I couldn't find aquarium expansion news in Miri right now.
+
+You could ask:
+• Any Weather news in Miri?
+• Any Business news in Miri?
+• Any Education news in Miri?",,0,,True,5.51,4,5,5,Correct abstention with location carry-over to Miri.
+malay_single_shot,1,banjir di Miri,banjir di Miri,"I couldn't find banjir di news in Miri right now.
+
+You could ask:
+• Any Weather news in Miri?
+• Any Business news in Miri?
+• Any Education news in Miri?",,0,,True,5.55,1,4,2,FALSE NEGATIVE: multiple Miri flood articles existed. Malay query 'banjir' not mapped to English 'flood'.
+temporal_thread,1,any flood news today?,any flood news today?,"There is a decrease in flood victims in Sarawak, with 1,210 victims as of 8.30 am today, down from 4,731 recorded the previous evening. They are accommodated in 13 temporary relief centers.
+
+<b>Relevant news:</b>
+<blockquote>[Technology] <b>Flood Victims in Sarawak Decrease to 1,210</b></blockquote>
+The number of flood victims in Selangor, Perak, and Sarawak has decreased to 1,210 as of 8.30 am today, down from 4,731 recorded the previous evening, with all victims accommodated in 13 temporary relief centers.
+
+Sources: <a href=""https://www.buletintv3.my/nasional/mangsa-banjir-di-selangor-perak-sarawak-semakin-berkurangan/"">Buletin TV3</a>
+────────────
+<blockquote>[Technology] <b>Flood victims in Sarawak decrease to 1,210.</b></blockquote>
+The number of flood victims in Selangor, Perak, and Sarawak has decreased to 1,210 from 4,731 reported yesterday.
+
+Sources: <a href=""https://www.hmetro.com.my/mutakhir/2026/11/1433593/mangsa-banjir-menurun-13-pps-masih-beroperasi-di-selangor-perak-dan-sarawak"">Hmetro</a>",https://www.buletintv3.my/nasional/mangsa-banjir-di-selangor-perak-sarawak-semakin-berkurangan/ | https://www.hmetro.com.my/mutakhir/2026/11/1433593/mangsa-banjir-menurun-13-pps-masih-beroperasi-di-selangor-perak-dan-sarawak,2,1.0,False,9.16,4,5,2,"Topically right but misattributes 3-state figure (Selangor+Perak+Sarawak=1,210) as Sarawak-only."
+temporal_thread,2,what about yesterday?,flood,"There is an update on flood situation in Sarawak. As of 1 pm today, 1,135 flood victims from 321 families are being sheltered at 11 temporary relief centers in Sarawak, along with Selangor and Perak.
+
+<b>Relevant news:</b>
+<blockquote>[Technology] <b>Selangor and Perak Floods Worsen with Over 4,000 Victims.</b></blockquote>
+The flood situation in Selangor and Perak has worsened with over 4,000 flood victims being placed in temporary relief centers, with 4,234 in Selangor and 270 in Perak.
+
+Sources: <a href=""https://www.astroawani.com/berita-malaysia/banjir-situasi-memburuk-lebih-4000-mangsa-ditempatkan-di-pps"">Astroawani</a>
+────────────
+<blockquote>[Emergency] <b>Flood Evacuees Top 1,404 in Selangor and Perak</b></blockquote>
+A total of 1,404 people from 374 families were housed at temporary relief centres in Selangor and Perak due to flooding, with the numbers rising from 1,269 people the previous day.
+
+Sources: <a href=""https://www.malaymail.com/news/malaysia/2026/11/07/flood-evacuees-rise-to-1404-across-selangor-and-perak-this-morning/242302"">Malaymail</a>",https://www.astroawani.com/berita-malaysia/banjir-situasi-memburuk-lebih-4000-mangsa-ditempatkan-di-pps | https://www.malaymail.com/news/malaysia/2026/11/07/flood-evacuees-rise-to-1404-across-selangor-and-perak-this-morning/242302,2,1.0,False,10.28,2,4,2,"Ignored 'yesterday' (lost in expansion). Numbers 1,135/321 families/11 PPS not in either shown article - unsupported."
+long_selfcontained_after_thread,1,Any tech news in Kuching?,Any tech news in Kuching?,"There is a mention of Sarawak developing its technology-driven economy, and a need for more legal professionals to handle cybersecurity and digital transactions.
+
+<b>Relevant news:</b>
+<blockquote>[Politics] <b>Sarawak Must Create Better Jobs to Attract Young Graduates</b></blockquote>
+Kuching South City Council Councillor Eric Tay Tze Kok says Sarawak must create better jobs to attract young graduates to return home, suggesting industries such as renewable energy and digital technology can provide opportunities.
+
+Sources: <a href=""https://www.sarawaktribune.com/tay-build-better-jobs-to-draw-graduates-home/"">Sarawak Tribune</a>
+────────────
+<blockquote>[Politics] <b>Sarawak Needs More Legal Experts for Cybersecurity and Digital Economy</b></blockquote>
+Sarawak needs more legal professionals to handle cybersecurity and digital transactions as it develops its technology-driven economy, said Premier Datuk Patinggi Tan Sri Abang Johari Tun Openg in Kuching.
+
+Sources: <a href=""https://www.sarawaktribune.com/legal-expertise-must-keep-pace-with-technology/"">Sarawak Tribune</a>",https://www.sarawaktribune.com/tay-build-better-jobs-to-draw-graduates-home/ | https://www.sarawaktribune.com/legal-expertise-must-keep-pace-with-technology/,2,1.0,False,6.68,3,5,5,Same content as tech_location turn 1; honest partial answer.
+long_selfcontained_after_thread,2,What are the latest developments in the Sarawak renewable energy sector?,What are the latest developments in the Sarawak renewable energy sector?,"I couldn't find developments sarawak renewable news in Sarawak right now.
+
+You could ask:
+• Any Weather news in Sarawak?
+• Any Business news in Sarawak?
+• Any Education news in Sarawak?",,0,,True,6.14,1,2,2,FALSE NEGATIVE: 'Sarawak targets 60pc renewable power by 2035' existed. Garbled echo of query in refusal text.

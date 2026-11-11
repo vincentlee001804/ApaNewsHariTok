@@ -1,0 +1,45 @@
+{
+  "generated_utc": "20261111T095301Z",
+  "rubric": "1-5 per thesis dimensions; evidence verified against production DB article snippets (single AI rater, documented limitation)",
+  "run_csv": "conversation_e2e_20261111T095301Z.csv",
+  "fixes_in_this_run": [
+    "link previews: /latest digest keeps Telegram web page preview; all RAG/LLM answer paths (QA replies, ordinal answers, suggestion buttons) pass disable_web_page_preview=True so the raw preview no longer looks like a duplicate news card",
+    "abstaining LLM answers ('couldn't find relevant information...') return the refusal text only; no 'Relevant news' cards attached (DB path + RSS fallback + out-of-scope questions)",
+    "'explain more' answers use the full stored raw article text (summary + raw body, 1800 chars) with a 120-word budget instead of the short summary only",
+    "meta/system questions ('how many users are in your system?') no longer produce garbage topic-gate refusals: system/user/api/key words added to the non-topic filter so they reach the answering LLM, which declines gracefully"
+  ],
+  "per_turn_scores": [
+    {"conversation": "tech_location_thread", "turn": 1, "relevance": 4, "coherence": 5, "factual": 5, "note": "honest no-specific-tech hedge + related industries item"},
+    {"conversation": "tech_location_thread", "turn": 2, "relevance": 2, "coherence": 4, "factual": 4, "note": "marathon rationalization again; figures match snippet"},
+    {"conversation": "tech_location_thread", "turn": 3, "relevance": 3, "coherence": 2, "factual": 4, "note": "answer references marathon but evidence card is the murder story (card mismatch)"},
+    {"conversation": "incident_wh_thread", "turn": 1, "relevance": 5, "coherence": 5, "factual": 5, "note": "topic-gate DB rescue keeps finding the Nov 3 lorry accident"},
+    {"conversation": "incident_wh_thread", "turn": 2, "relevance": 2, "coherence": 3, "factual": 3, "note": "location-drift to Bintulu helicopter (known follow-up expansion weakness)"},
+    {"conversation": "incident_wh_thread", "turn": 3, "relevance": 1, "coherence": 4, "factual": 5, "note": "drift to Bintulu growth story (known weakness)"},
+    {"conversation": "topic_gate_abstention", "turn": 1, "relevance": 5, "coherence": 5, "factual": 5, "note": "correct abstention + live suggestions"},
+    {"conversation": "topic_gate_abstention", "turn": 2, "relevance": 5, "coherence": 5, "factual": 5, "note": "correct abstention for location swap"},
+    {"conversation": "malay_single_shot", "turn": 1, "relevance": 3, "coherence": 3, "factual": 2, "note": "REGRESSION via LLM variance: invented 453 victims/7 PPS/Perak 414 figures not in evidence cards (1,084). Prompt guard lowered but did not eliminate figure invention - deterministic numeric post-filter is the next hardening step."},
+    {"conversation": "temporal_thread", "turn": 1, "relevance": 4, "coherence": 4, "factual": 5, "note": "honest 'no current numbers' framing; 4,000 figure attributed to Selangor+Perak correctly"},
+    {"conversation": "temporal_thread", "turn": 2, "relevance": 3, "coherence": 4, "factual": 3, "note": "1,404/374 matches card; Sarawak 1,135/321/11 unverifiable from snippets; temporal word still lost (known bug)"},
+    {"conversation": "long_selfcontained_after_thread", "turn": 1, "relevance": 4, "coherence": 5, "factual": 5, "note": "honest hedge + related item"},
+    {"conversation": "long_selfcontained_after_thread", "turn": 2, "relevance": 4, "coherence": 5, "factual": 5, "note": "'not mentioned' + adjacent energy-supply items; clean"},
+    {"conversation": "digest_ordinal_thread", "turn": 1, "relevance": 5, "coherence": 5, "factual": 5, "note": "ordinal resolved to digest item 1; richer raw-text answer lists the five relief schools (new evidence depth working)"},
+    {"conversation": "digest_ordinal_thread", "turn": 2, "relevance": 5, "coherence": 5, "factual": 4, "note": "second item resolved; 'signed on a certain date' is awkward but honest (guard effect)"},
+    {"conversation": "out_of_scope_thread", "turn": 1, "relevance": 5, "coherence": 5, "factual": 5, "note": "NEW: API-key request resisted with clean no-card refusal"},
+    {"conversation": "out_of_scope_thread", "turn": 2, "relevance": 5, "coherence": 5, "factual": 5, "note": "NEW: user-count question declined cleanly after the meta-question topic fix (was a garbage template refusal before)"}
+  ],
+  "after": {
+    "mean_relevance": 3.82,
+    "mean_coherence": 4.35,
+    "mean_factual": 4.41,
+    "false_negative_turns": 0,
+    "no_repeat_novelty": 0.85,
+    "tier1_pass": "19/19"
+  },
+  "comparison": {
+    "baseline_fyp1": {"mean_relevance": 2.31, "mean_coherence": 4.08, "mean_factual": 3.31, "false_negative_turns": 3, "tier1_pass": "9/10 (+2 documented limitations)"},
+    "conversation_fixes_20261111T0233": {"mean_relevance": 3.62, "mean_coherence": 4.38, "mean_factual": 4.0, "false_negative_turns": 0, "tier1_pass": "12/12"},
+    "ordinal_hallucination_rescue_20261111T0725": {"mean_relevance": 3.8, "mean_coherence": 4.33, "mean_factual": 4.47, "false_negative_turns": 0, "tier1_pass": "18/18"},
+    "preview_abstain_meta_20261111T0953": {"mean_relevance": 3.81, "mean_coherence": 4.35, "mean_factual": 4.41, "false_negative_turns": 0, "tier1_pass": "19/19"}
+  },
+  "scoring_note": "Per-run means move +/-0.3-0.5 with LLM answer variance (DeepSeek regenerates each run); the malay_single_shot figure invention reappeared this run after being absent in the 0725 run. Trend across fixes is stable: false negatives 0 since the conversation fixes, factual ~4.4 vs 3.31 baseline."
+}

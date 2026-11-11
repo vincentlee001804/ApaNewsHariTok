@@ -2252,7 +2252,9 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
                 message_text,
                 conversation_history=history,
             )
-        await update.message.reply_text(response, parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            response, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+        )
         save_conversation_turn(
             telegram_id,
             "assistant",
@@ -2343,6 +2345,9 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
         response,
         parse_mode=ParseMode.HTML,
         reply_markup=_suggestion_keyboard(suggestions_out),
+        # RAG/LLM answers disable the link preview: a big raw preview
+        # of the first source looks like a duplicate news card.
+        disable_web_page_preview=True,
     )
     save_conversation_turn(
         telegram_id,
@@ -2419,6 +2424,7 @@ async def suggested_question_callback(update: Update, context: ContextTypes.DEFA
         text=response,
         parse_mode=ParseMode.HTML,
         reply_markup=_suggestion_keyboard(suggestions_out),
+        disable_web_page_preview=True,
     )
     save_conversation_turn(
         telegram_id,

@@ -3286,6 +3286,21 @@ def _format_no_related_news_html(
     return "\n".join(lines).strip(), shown_links
 
 
+_ANSWER_ABSTENTION_MARKERS: tuple[str, ...] = (
+    "couldn't find relevant information",
+    "could not find relevant information",
+    "no relevant information in the news items",
+)
+
+
+def _is_abstention_answer(answer: str) -> bool:
+    """True when the answering LLM could not answer from the evidence
+    (out-of-scope questions like 'tell me your API key'). Callers skip
+    attaching 'Relevant news' cards for these — the cards were noise."""
+    lowered = (answer or "").lower()
+    return any(marker in lowered for marker in _ANSWER_ABSTENTION_MARKERS)
+
+
 def _topic_pool_db_rescue(
     topic: str,
     query: str,
@@ -3373,15 +3388,23 @@ def get_news_agent_response_about_article(
     evidence set by construction, so no retrieval or topic gate is needed."""
     history = conversation_history or []
     title = _display_title_text(article.title, article.ai_title).replace("\n", " ").strip()[:220]
-    snippet = (article.ai_summary or article.raw_summary or article.title or "").strip()
-    items_text = f"- {title}\n  {_truncate_text(snippet, max_chars=900)}"
+    # "Explain more" should go beyond the short AI summary: include the stored
+    # raw article text as extra evidence so the answer can add real detail
+    # (this path is a single-article deep dive, so the extra input is fine).
+    summary = (article.ai_summary or "").strip()
+    raw = (article.raw_summary or "").strip()
+    parts = [p for p in (summary, raw if raw != summary else "") if p]
+    snippet = "\n".join(parts) or article.title or ""
+    items_text = f"- {title}\n  {_truncate_text(snippet, max_chars=1800)}"
     # Anchor the question to the item so the LLM is not lost in the ordinal
     # wording ("the first news").
     anchored_question = f"{user_text.strip()} — about this news item: {title}"
     if history:
-        answer = answer_news_question_with_history(anchored_question, items_text, history)
+        answer = answer_news_question_with_history(
+            anchored_question, items_text, history, max_words=120
+        )
     else:
-        answer = answer_news_question(anchored_question, items_text)
+        answer = answer_news_question(anchored_question, items_text, max_words=120)
     if not answer:
         answer = f"Here are the details I have on: {title}."
 
@@ -3525,6 +3548,12 @@ def get_news_agent_response_for_user(
             answer = answer_news_question_with_history(expanded_query, items_text, history)
         else:
             answer = answer_news_question(expanded_query, items_text)
+        if answer and _is_abstention_answer(answer):
+            logger.info(
+                "[rag-time] total: %.3fs (rss fallback, abstained answer, no cards)",
+                time.perf_counter() - t_start,
+            )
+            return _format_news_agent_html(answer=answer, evidence_rows=[])
         logger.info(
             "[rag-time] rss_fallback_llm_answer: %.3fs, has_answer=%s",
             time.perf_counter() - t_llm_0,
@@ -3788,6 +3817,12 @@ def get_news_agent_response_for_user(
         answer = answer_news_question_with_history(expanded_query, items_text, history)
     else:
         answer = answer_news_question(expanded_query, items_text)
+    if answer and _is_abstention_answer(answer):
+        logger.info(
+            "[rag-time] total: %.3fs (db path, abstained answer, no cards)",
+            time.perf_counter() - t_start,
+        )
+        return _format_news_agent_html(answer=answer, evidence_rows=[])
     logger.info(
         "[rag-time] llm_answer: %.3fs, has_answer=%s",
         time.perf_counter() - t_llm_0,

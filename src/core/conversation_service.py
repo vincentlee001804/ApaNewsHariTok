@@ -96,7 +96,9 @@ _TOPIC_KEYWORDS: set[str] = {
 }
 
 # Words that never constitute a topic even when nothing else remains
-# (auxiliary verbs, pronouns, BM question words, greeting filler).
+# (auxiliary verbs, pronouns, BM question words, greeting filler, and
+# meta/system words so 'how many users are in your system?' is not treated
+# as a news topic and reaches the answering LLM instead of the topic gate).
 _NON_TOPIC_WORDS: set[str] = {
     "did", "does", "do", "done", "happen", "happened", "happens",
     "one", "ones", "going", "got", "get", "getting", "please",
@@ -106,6 +108,8 @@ _NON_TOPIC_WORDS: set[str] = {
     "hello", "hi", "hey", "hai", "there",
     "morning", "afternoon", "evening", "night",
     "selamat", "pagi", "petang", "malam",
+    "many", "much", "user", "users", "your", "yours", "ur",
+    "system", "api", "key", "keys", "password", "token",
 }
 
 # Leading greetings to strip before extracting a topic from user text.

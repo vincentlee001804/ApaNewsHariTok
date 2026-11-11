@@ -793,6 +793,14 @@ UTILITY_ALERT_JBALB_URLS: Final[List[str]] = [
     ).split(",")
     if x.strip()
 ]
+# Optional Cloudflare Worker relay for JBALB pages (tools/jbalb-relay, investigation
+# artifact). The .gov.my firewall drops datacenter-ASN connections at TCP level, and
+# Cloudflare's edge also blocks requests to workers.dev from Fly.io (error 1010), so
+# this relay is NOT usable from the production host. Production solution:
+# scripts/jbalb_local_relay.py fetches JBALB from a non-blocked (Malaysian) network
+# and inserts into the shared DB. Empty = direct fetch only (dev machines).
+JBALB_RELAY_URL: Final[str] = os.getenv("JBALB_RELAY_URL", "").strip()
+JBALB_RELAY_SECRET: Final[str] = os.getenv("JBALB_RELAY_SECRET", "").strip()
 # Plain-language queries; URL-encoded at fetch time. Google News RSS is free, no API key.
 UTILITY_ALERT_NEWS_QUERIES: Final[List[str]] = [
     x.strip()

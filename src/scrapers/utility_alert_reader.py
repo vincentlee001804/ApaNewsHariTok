@@ -27,7 +27,11 @@ from urllib.parse import quote_plus
 import requests
 from bs4 import BeautifulSoup
 
-from src.core.config import RSS_FETCH_TIMEOUT_SEC
+from src.core.config import (
+    JBALB_RELAY_SECRET,
+    JBALB_RELAY_URL,
+    RSS_FETCH_TIMEOUT_SEC,
+)
 from src.core.location_extractor import SARAWAK_AREA_TO_TOWN, SARAWAK_LOCATION_ALIASES
 
 logger = logging.getLogger(__name__)
@@ -214,6 +218,34 @@ def extract_alert_locations(text: str) -> tuple[list[str], str]:
 
 
 def _get(url: str, timeout: int = RSS_FETCH_TIMEOUT_SEC) -> requests.Response | None:
+    """GET with browser-like headers. JBALB pages prefer the Cloudflare Worker
+    relay when configured: the .gov.my firewall drops Fly.io datacenter IPs at
+    connect time, while Cloudflare egress is reachable (tools/jbalb-relay)."""
+    from urllib.parse import urlparse
+
+    if (
+        JBALB_RELAY_URL
+        and JBALB_RELAY_SECRET
+        and (urlparse(url).hostname or "") == "jbalb.sarawak.gov.my"
+    ):
+        try:
+            r = requests.get(
+                JBALB_RELAY_URL,
+                params={"u": url},
+                headers={**_BROWSER_HEADERS, "x-relay-secret": JBALB_RELAY_SECRET},
+                timeout=timeout,
+            )
+            if r.status_code == 200:
+                return r
+            logger.warning(
+                "[utility-alert] relay GET %s -> HTTP %s; trying direct",
+                url,
+                r.status_code,
+            )
+        except requests.RequestException as e:
+            logger.warning(
+                "[utility-alert] relay GET %s failed: %s; trying direct", url, e
+            )
     try:
         r = requests.get(url, headers=_BROWSER_HEADERS, timeout=timeout)
         if r.status_code != 200:

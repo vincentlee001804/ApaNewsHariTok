@@ -137,6 +137,16 @@ Post, Free Malaysia Today) block Fly.io's datacenter IP range regardless of UA; 
 from local/dev networks only unless proxied. The dead rss.app feed is commented out in
 `RSS_Sources.txt`.
 
+**JBALB IP block (2026-11-11):** `jbalb.sarawak.gov.my` drops TCP connections from
+datacenter ASNs (Fly.io connect-timeout since ~Nov 10; Cloudflare workers.dev returns
+error 1010 for requests coming from Fly; public proxies time out too) but accepts
+Malaysian residential/office connections. The relay worker in `tools/jbalb-relay` is a
+documented dead end for this reason. Production workaround: `scripts/jbalb_local_relay.py`
+(--once / --loop N / Task Scheduler) fetches JBALB from a non-blocked machine and inserts
+notices through `utility_alert_service.ingest_raw_alerts` into the shared DB; the bot's
+delivery job picks them up on its next cycle. The bot's own jbalb poll leg stays in place
+and simply returns [] while the block persists.
+
 ## 5. Data model notes
 
 - `User.telegram_id` is **BigInteger** — never shrink (32-bit overflow).

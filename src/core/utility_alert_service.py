@@ -145,6 +145,28 @@ def poll_utility_alerts() -> dict:
         summary["fetched"] += len(items)
         raw.extend(items)
 
+    ingest_raw_alerts(raw, summary)
+    _cleanup_old_utility_alerts()
+    log_shadow_event("poll", payload=json.dumps(summary, sort_keys=True))
+    return summary
+
+
+def ingest_raw_alerts(raw: list[RawAlert], summary: dict | None = None) -> dict:
+    """
+    Classify, dedupe and insert already-fetched raw alerts. Shared by
+    poll_utility_alerts (all sources) and scripts/jbalb_local_relay.py, which
+    fetches JBALB from a network the .gov.my firewall does not block (datacenter
+    ASNs get connect timeouts) and feeds the rows into the same pipeline.
+    Reruns are safe: exact source_ref and 48h title-Jaccard dedup apply.
+    """
+    if summary is None:
+        summary = {
+            "fetched": 0,
+            "classified": 0,
+            "new": 0,
+            "duplicates": 0,
+            "rejected": 0,
+        }
     with SessionLocal() as session:
         for item in raw:
             c = _classify_raw(item)
@@ -195,8 +217,6 @@ def poll_utility_alerts() -> dict:
                 row.title[:140],
             )
 
-    _cleanup_old_utility_alerts()
-    log_shadow_event("poll", payload=json.dumps(summary, sort_keys=True))
     return summary
 
 

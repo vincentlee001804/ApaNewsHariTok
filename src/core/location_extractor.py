@@ -25,6 +25,16 @@ SARAWAK_LOCATION_ALIASES: dict[str, list[str]] = {
     "belaga": ["belaga"],
 }
 
+# Street/landmark/area fragments that imply a town when the notice text itself
+# never names one (street-level notices would otherwise broadcast statewide).
+# Extend as new unlocated notices are observed in /devutility.
+SARAWAK_AREA_TO_TOWN: dict[str, str] = {
+    "pasai siong": "sibu",
+    "jln. ding lik kong": "sibu",
+    "jalan ding lik kong": "sibu",
+    "swsb pasai siong": "sibu",
+}
+
 
 def _starts_with_any_alias(title_lower: str) -> Optional[str]:
     """

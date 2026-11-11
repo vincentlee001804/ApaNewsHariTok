@@ -246,11 +246,15 @@ class ConversationMessage(Base):
     content = Column(Text, nullable=False)
     interaction_type = Column(
         String(32), nullable=True
-    )  # qa | latest | digest_summary
+    )  # qa | latest | digest_summary | utility_alert
     shown_article_links = Column(
         JSON,
         nullable=True,
         default=list,
     )  # Article links shown in this turn; used to avoid repeats in conversation
+    utility_alert_id = Column(
+        Integer,
+        nullable=True,
+    )  # UtilityAlert.id for utility_alert turns; powers alert follow-up Q&A
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

@@ -275,6 +275,87 @@ TIER1_CASES: list[dict] = [
     },
 ]
 
+# History shape: the assistant's last turn pushed a utility alert.
+WATER_ALERT_HISTORY = [
+    {"role": "user", "content": "hi", "interaction_type": ""},
+    {
+        "role": "assistant",
+        "content": (
+            "Water alert - Unscheduled disruption\n"
+            "Unscheduled Water Supply Interruption Notice."
+        ),
+        "interaction_type": "utility_alert",
+        "utility_alert_id": 139,
+    },
+]
+
+TIER1_CASES += [
+    {
+        "id": "alert_followup_duration",
+        "category": "utility-alert follow-up",
+        "history": WATER_ALERT_HISTORY,
+        "query": "how long will it last?",
+        "alert_expect": 139,
+        "note": "duration follow-up right after an alert push resolves to that alert",
+    },
+    {
+        "id": "alert_followup_restore_bm",
+        "category": "utility-alert follow-up",
+        "history": WATER_ALERT_HISTORY,
+        "query": "sudah pulih ke air?",
+        "alert_expect": 139,
+        "note": "BM restoration-status follow-up resolves to the alert",
+    },
+    {
+        "id": "alert_followup_area",
+        "category": "utility-alert follow-up",
+        "history": WATER_ALERT_HISTORY,
+        "query": "which areas are affected?",
+        "alert_expect": 139,
+        "note": "area follow-up resolves to the alert",
+    },
+    {
+        "id": "alert_followup_fresh_news_topic",
+        "category": "utility-alert follow-up",
+        "history": WATER_ALERT_HISTORY,
+        "query": "any flood news?",
+        "alert_expect": None,
+        "note": "fresh news topic after an alert still goes to news Q&A",
+    },
+    {
+        "id": "alert_followup_location_swap",
+        "category": "utility-alert follow-up",
+        "history": WATER_ALERT_HISTORY,
+        "query": "how about Miri?",
+        "alert_expect": None,
+        "note": "location-swap follow-up goes to news Q&A, not the alert",
+    },
+    {
+        "id": "alert_followup_no_alert_history",
+        "category": "utility-alert follow-up",
+        "history": TECH_KUCHING_HISTORY,
+        "query": "how long will it last?",
+        "alert_expect": None,
+        "note": "alert-intent question without a prior alert push stays in news Q&A",
+    },
+    {
+        "id": "alert_followup_superseded_by_qa",
+        "category": "utility-alert follow-up",
+        "history": WATER_ALERT_HISTORY
+        + [
+            {"role": "user", "content": "any flood news?", "interaction_type": ""},
+            {
+                "role": "assistant",
+                "content": "Here are the latest flood stories.",
+                "interaction_type": "qa",
+            },
+        ],
+        "query": "how long will it last?",
+        "alert_expect": None,
+        "note": "a newer QA turn supersedes the alert; no alert follow-up",
+    },
+]
+
 
 def run_tier1() -> dict:
     from src.core.conversation_service import (
@@ -344,6 +425,37 @@ def run_tier1() -> dict:
             )
             status = "ok" if ok else "FAIL"
             print(f"  [{status}] {case['id']}: {case['query']!r} -> {got_ordinal}")
+            continue
+
+        if "alert_expect" in case:
+            # Utility-alert follow-up resolution; pure history heuristic.
+            from src.core.conversation_service import resolve_utility_alert_followup
+
+            got_alert = resolve_utility_alert_followup(case["query"], case["history"])
+            problems = []
+            if got_alert != case["alert_expect"]:
+                problems.append(
+                    f"alert_followup: expected {case['alert_expect']}, got {got_alert}"
+                )
+            ok = not problems
+            if ok:
+                passed += 1
+            else:
+                failed += 1
+            results.append(
+                {
+                    "id": case["id"],
+                    "category": case["category"],
+                    "query": case["query"],
+                    "alert_expect": case["alert_expect"],
+                    "got_alert": got_alert,
+                    "ok": ok,
+                    "problems": problems,
+                    "note": case["note"],
+                }
+            )
+            status = "ok" if ok else "FAIL"
+            print(f"  [{status}] {case['id']}: {case['query']!r} -> {got_alert}")
             continue
 
         history = case["history"]

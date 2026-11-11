@@ -371,17 +371,38 @@ def _user_location_tokens(preference: UserPreference) -> set[str]:
 
 
 def _matching_user_ids(session, alert: UtilityAlert) -> list[int]:
-    """Users who should receive this alert (opted in + location match)."""
+    """
+    Users who should receive this alert (opted in + location/area match).
+
+    Match layers:
+    - alert locations (canonical towns) vs user preference locations — either
+      side empty means "no preference" and matches statewide;
+    - alert area_text/title/text vs user area_keywords — catches street-level
+      notices ("Pasai Siong") that town-level matching misses.
+    """
     rows = session.execute(
-        select(User.telegram_id, UserPreference.locations)
+        select(
+            User.telegram_id,
+            UserPreference.locations,
+            UserPreference.area_keywords,
+        )
         .join(UserPreference, UserPreference.user_id == User.id)
         .where(User.is_active.is_(True), UserPreference.wants_urgent_alerts.is_(True))
     ).all()
     alert_locs = {x.strip().lower() for x in (alert.locations or "").split(",") if x.strip()}
+    haystack = f"{alert.area_text or ''} {alert.title or ''} {alert.text or ''}".lower()
     out: list[int] = []
-    for telegram_id, locations in rows:
+    for telegram_id, locations, area_keywords in rows:
         user_locs = {x.strip().lower() for x in (locations or "").split(",") if x.strip()}
         if not alert_locs or not user_locs or (alert_locs & user_locs):
+            out.append(int(telegram_id))
+            continue
+        user_areas = [
+            x.strip().lower()
+            for x in (area_keywords or "").split(",")
+            if x.strip()
+        ]
+        if any(area in haystack for area in user_areas):
             out.append(int(telegram_id))
     return out
 
@@ -469,6 +490,124 @@ def format_utility_alert_html(alert: UtilityAlert) -> str:
         lines.append(f"<b>Window:</b> {start} – {end}")
     if alert.source_ref:
         lines.append(f'<a href="{html.escape(alert.source_ref, quote=True)}">Official notice</a>')
+    return "\n".join(lines)
+
+
+def format_utility_alert_plaintext(alert: UtilityAlert) -> str:
+    """Plain-text twin of format_utility_alert_html for conversation memory."""
+    kind = _KIND_LABEL.get(alert.kind, "Utility notice")
+    utility = alert.utility_type.capitalize() if alert.utility_type != "other" else "Utility"
+    lines = [f"{utility} alert - {kind}", alert.title or "Utility notice"]
+    area = (alert.area_text or alert.locations or "").strip()
+    if area:
+        lines.append(f"Affected: {area}")
+    if alert.window_start or alert.window_end:
+        start = alert.window_start.strftime("%d %b %H:%M") if alert.window_start else "?"
+        end = alert.window_end.strftime("%d %b %H:%M") if alert.window_end else "?"
+        lines.append(f"Window: {start} - {end}")
+    if alert.source_ref:
+        lines.append(f"Official notice: {alert.source_ref}")
+    return "\n".join(lines)
+
+
+def get_utility_alert_snapshot(alert_id: int) -> dict | None:
+    """Detached field snapshot of one alert for deterministic follow-up answers."""
+    with SessionLocal() as session:
+        row = session.execute(
+            select(UtilityAlert).where(UtilityAlert.id == alert_id)
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "utility_type": row.utility_type or "",
+            "kind": row.kind or "",
+            "locations": row.locations or "",
+            "area_text": row.area_text or "",
+            "title": row.title or "",
+            "text": row.text or "",
+            "window_start": row.window_start,
+            "window_end": row.window_end,
+            "announced_at": row.announced_at,
+            "status": row.status or "",
+            "source_ref": row.source_ref or "",
+        }
+
+
+def answer_utility_alert_followup(alert: dict, question: str) -> str:
+    """
+    Deterministic HTML answer about a pushed alert (no LLM, no hallucination).
+    Intent buckets: duration/timing, restoration status, affected area; anything
+    else gets the full notice text again.
+    """
+    lowered = (question or "").lower()
+    utility = (alert.get("utility_type") or "utility").capitalize()
+    link = (alert.get("source_ref") or "").strip()
+
+    def with_link(ans: str) -> str:
+        if link:
+            ans += "\n" + f'<a href="{html.escape(link, quote=True)}">Official notice</a>'
+        return ans
+
+    if any(
+        m in lowered
+        for m in ("how long", "when", "until", "till", "what time", "bila",
+                  "berapa lama", "sehingga")
+    ):
+        ws = alert.get("window_start")
+        we = alert.get("window_end")
+        if ws or we:
+            start = ws.strftime("%d %b %H:%M") if ws else "?"
+            end = we.strftime("%d %b %H:%M") if we else "?"
+            return with_link(
+                f"The announced window for this {utility.lower()} disruption is "
+                f"<b>{start} – {end}</b>."
+            )
+        if alert.get("kind") == "restored":
+            return with_link(
+                f"Supply has been restored according to the official notice."
+            )
+        return with_link(
+            f"No end time has been announced yet for this {utility.lower()} "
+            "disruption. I will send an update here when restoration is announced."
+        )
+
+    if any(
+        m in lowered
+        for m in ("restored", "restore", "resume", "back to normal", "still no",
+                  "status", "pulih", "sudah", "ok now", "back on")
+    ):
+        if alert.get("kind") == "restored" or alert.get("status") == "restored":
+            return with_link(
+                f"Yes — the official notice says {utility.lower()} supply has "
+                "been restored."
+            )
+        announced = alert.get("announced_at")
+        when = announced.strftime("%d %b %H:%M") if announced else "recently"
+        return with_link(
+            f"Not yet — as of the latest official notice ({when}), the "
+            f"{utility.lower()} disruption is still active with no restoration "
+            "announcement."
+        )
+
+    if any(
+        m in lowered
+        for m in ("which area", "where", "kawasan", "di mana", "lokasi",
+                  "affected", "area", "location")
+    ):
+        area = (alert.get("area_text") or alert.get("locations") or "").strip()
+        if area:
+            return with_link(f"Affected areas: {html.escape(area.rstrip('.'))}.")
+        return with_link("The notice does not list specific affected areas.")
+
+    # Default: replay the full notice (truncated) with its official link.
+    title = html.escape((alert.get("title") or "Utility notice").strip())
+    body = html.escape((alert.get("text") or "").strip()[:1200])
+    lines = [f"<b>{title}</b>"]
+    if body:
+        lines.append(body)
+    if link:
+        lines.append(f'<a href="{html.escape(link, quote=True)}">Official notice</a>')
     return "\n".join(lines)
 
 

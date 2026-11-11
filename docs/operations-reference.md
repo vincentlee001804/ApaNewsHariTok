@@ -68,7 +68,7 @@ logs/  tools/            # local-only, gitignored
 | `scheduled_push` | 60 s | per-user digest (evening-only) or frequent-mode sends; skips quiet hours 00:00–06:00 Asia/Kuching |
 | `db_cleanup` | `DB_CLEANUP_INTERVAL_HOURS` (24) | delete articles/deliveries older than `DB_RETENTION_DAYS` (30) |
 | `ai_summary_watchdog` | startup + `AI_SUMMARY_ALERT_INTERVAL_HOURS` (6) | if recent new articles have zero AI summaries, send one private outage alert per incident to `AI_SUMMARY_ALERT_TELEGRAM_ID` |
-| `utility_alert` | `UTILITY_ALERT_POLL_MINUTES` (10) | FYP2: official disruption sources -> classify -> store -> stage deliveries. **Stage 1 = shadow mode (no pushes)** until `UTILITY_ALERT_SHADOW_MODE=false` |
+| `utility_alert` | `UTILITY_ALERT_POLL_MINUTES` (10) | FYP2: official disruption sources -> classify -> store -> deliver to opted-in, location-matched users. LIVE since 2026-10-12 (`UTILITY_ALERT_SHADOW_MODE=false` in production; shadow flag remains for staging). Pushes are saved as `utility_alert` conversation turns so follow-ups ("how long will it last?") get deterministic answers from the notice |
 
 ### Delivery modes (per `UserPreference`)
 
@@ -92,6 +92,15 @@ into self-contained queries (EN/BM markers, topic/location swap, greeting stripp
 article links already shown in the conversation are excluded from later answers. A
 topic-relevance gate with synonym matching avoids false "no news" refusals; refusals suggest
 real, recent follow-up questions.
+Utility-alert pushes are also conversation turns (`interaction_type="utility_alert"` +
+`utility_alert_id` on `conversation_messages`): a follow-up scoped to the notice ("how long
+will it last?", "sudah pulih ke air?", "which areas are affected?") is answered
+deterministically from the alert row (`utility_alert_service.answer_utility_alert_followup`)
+instead of news retrieval — alerts are not news articles, so news Q&A cannot see them.
+Alert recipients match `utility_alerts.locations` against user locations, and user
+`area_keywords` against the notice text (street-level notices); street/landmark fragments
+with no town name resolve via `SARAWAK_AREA_TO_TOWN` (location_extractor.py) instead of
+broadcasting statewide.
 
 ## 4. Configuration catalog (`.env`, parsed in `src/core/config.py`)
 

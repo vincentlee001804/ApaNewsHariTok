@@ -28,7 +28,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from src.core.config import RSS_FETCH_TIMEOUT_SEC
-from src.core.location_extractor import SARAWAK_LOCATION_ALIASES
+from src.core.location_extractor import SARAWAK_AREA_TO_TOWN, SARAWAK_LOCATION_ALIASES
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +185,8 @@ def extract_alert_locations(text: str) -> tuple[list[str], str]:
     """
     Canonical Sarawak locations mentioned anywhere in the notice + the raw affected-areas
     line for display. Reuses the shared alias map (single taxonomy, AGENTS.md rule #4).
+    Falls back to street/landmark hints (SARAWAK_AREA_TO_TOWN) so a street-level
+    notice still targets one town instead of broadcasting statewide.
     """
     low = (text or "").lower()
     found: list[str] = []
@@ -193,6 +195,10 @@ def extract_alert_locations(text: str) -> tuple[list[str], str]:
             if re.search(rf"\b{re.escape(alias)}\b", low):
                 found.append(canonical)
                 break
+    if not found:
+        for fragment, town in SARAWAK_AREA_TO_TOWN.items():
+            if fragment in low and town not in found:
+                found.append(town)
     area_text = ""
     m = re.search(
         r"affected\s*areas?\s*[:：](.{5,400})", text or "", re.IGNORECASE | re.DOTALL

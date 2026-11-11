@@ -78,6 +78,7 @@ The bot requires `TELEGRAM_BOT_TOKEN`. Ollama is optional for a basic run but ne
 - Digest delivery is evening-only by product policy, even if legacy preference data indicates otherwise.
 - Scheduled jobs are registered in `bot_main.py`: prefetch, per-user scheduled delivery, database cleanup, the private AI-summary outage watchdog, and the FYP2 utility-alert poll.
 - The FYP2 utility-alert module runs in shadow mode by default (`UTILITY_ALERT_SHADOW_MODE=true`): alerts are stored and would-be deliveries computed, but nothing is pushed until the owner explicitly flips it to `false` (see `docs/fyp2/04-utility-alerts.md`).
+- Alert pushes are saved as `utility_alert` conversation turns (`conversation_messages.utility_alert_id`); follow-ups scoped to a pushed notice are answered deterministically from the alert row, not via news retrieval.
 - User-facing scheduled notifications should remain quiet when no qualifying new content exists.
 - Telegram IDs use `BigInteger`; never reduce them to a 32-bit integer type.
 - Location aliases are maintained in both `location_extractor.py` and `ai/summarizer.py`; update both when changing the supported location set.

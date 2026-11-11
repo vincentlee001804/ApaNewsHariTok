@@ -652,6 +652,33 @@ def migrate_add_conversation_message_shown_links_column() -> None:
         print(f"Migration warning (conversation_messages shown_article_links): {e}")
 
 
+def migrate_add_conversation_message_utility_alert_id_column() -> None:
+    """
+    Add `utility_alert_id` (Integer, NULL) to `conversation_messages` so pushed
+    utility-alert turns remember which alert they were about. Follow-up questions
+    ("how long will it last?") resolve against this alert instead of the news DB.
+    Idempotent for Postgres and SQLite.
+    """
+    try:
+        insp = inspect(engine)
+        if "conversation_messages" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("conversation_messages")}
+        if "utility_alert_id" in cols:
+            return
+        with SessionLocal() as session:
+            session.execute(
+                text(
+                    "ALTER TABLE conversation_messages "
+                    "ADD COLUMN utility_alert_id INTEGER NULL"
+                )
+            )
+            session.commit()
+            print("✓ Added utility_alert_id to conversation_messages.")
+    except Exception as e:
+        print(f"Migration warning (conversation_messages utility_alert_id): {e}")
+
+
 if __name__ == "__main__":
     migrate_users_telegram_id_to_bigint()
     migrate_add_locations_column()
@@ -667,3 +694,4 @@ if __name__ == "__main__":
     backfill_news_article_category()
     migrate_create_conversation_messages_table()
     migrate_add_conversation_message_shown_links_column()
+    migrate_add_conversation_message_utility_alert_id_column()

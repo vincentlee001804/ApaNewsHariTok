@@ -2282,6 +2282,35 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
 
+    # Utility-alert follow-ups ("how long will it last?"): when the last push was
+    # an alert and the question is scoped to it, answer deterministically from the
+    # notice — alerts are not news_articles rows, so news Q&A cannot see them.
+    from src.core.conversation_service import resolve_utility_alert_followup
+
+    alert_followup_id = resolve_utility_alert_followup(message_text, history)
+    if alert_followup_id is not None:
+        from src.core.utility_alert_service import (
+            answer_utility_alert_followup,
+            get_utility_alert_snapshot,
+        )
+
+        alert_snapshot = await asyncio.to_thread(
+            get_utility_alert_snapshot, alert_followup_id
+        )
+        if alert_snapshot is not None:
+            response = answer_utility_alert_followup(alert_snapshot, message_text)
+            await update.message.reply_text(
+                response, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+            )
+            save_conversation_turn(
+                telegram_id,
+                "assistant",
+                _plain_text_from_html(response),
+                interaction_type="utility_alert",
+                utility_alert_id=alert_followup_id,
+            )
+            return
+
     if not is_followup and "latest" in lowered:
         from src.core.services import get_latest_news_text_for_user
 

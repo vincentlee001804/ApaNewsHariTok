@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from zoneinfo import ZoneInfo
 
 from telegram.constants import ParseMode
-from telegram.error import Forbidden
+from telegram.error import BadRequest, Forbidden
 
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
@@ -67,10 +67,12 @@ from src.core.summary_health_service import count_recent_summary_activity
 from src.core.utility_alert_service import (
     compute_pending_deliveries,
     format_utility_alert_html,
+    format_utility_alert_plaintext,
     poll_utility_alerts,
     record_delivery,
     record_shadow_would_delivers,
 )
+from src.core.conversation_service import save_conversation_turn
 from src.core.services import (
     SCHEDULED_PUSH_SUMMARY_PENDING_SKIP_MARKER,
     get_latest_news_text_for_user,
@@ -448,9 +450,32 @@ def main() -> None:
                         disable_web_page_preview=True,
                     )
                     await asyncio.to_thread(record_delivery, telegram_id, alert.id)
+                    # Remember the push in conversation memory so follow-ups
+                    # ("how long will it last?") resolve against this alert.
+                    await asyncio.to_thread(
+                        save_conversation_turn,
+                        telegram_id,
+                        "assistant",
+                        format_utility_alert_plaintext(alert),
+                        interaction_type="utility_alert",
+                        utility_alert_id=alert.id,
+                    )
                 except Forbidden as e:
                     await asyncio.to_thread(set_user_active, telegram_id, False)
                     print(f"[utility-alert] deactivated user {telegram_id} ({e})")
+                except BadRequest as e:
+                    msg = str(e).lower()
+                    if (
+                        "chat not found" in msg
+                        or "user not found" in msg
+                        or "bot was blocked" in msg
+                    ):
+                        # Deleted/never-started chats: deactivating stops the
+                        # every-cycle retry storm seen in Fly logs.
+                        await asyncio.to_thread(set_user_active, telegram_id, False)
+                        print(f"[utility-alert] deactivated user {telegram_id} ({e})")
+                    else:
+                        print(f"[utility-alert] user {telegram_id} failed: {e}")
                 except Exception as e:
                     print(f"[utility-alert] user {telegram_id} failed: {e}")
         except Exception as e:

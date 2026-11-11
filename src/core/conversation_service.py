@@ -154,6 +154,7 @@ def save_conversation_turn(
     content: str,
     interaction_type: str | None = None,
     shown_article_links: list[str] | None = None,
+    utility_alert_id: int | None = None,
 ) -> None:
     """
     Persist one conversation turn. Does nothing when conversation memory is disabled.
@@ -161,6 +162,7 @@ def save_conversation_turn(
 
     shown_article_links: article links displayed in this turn (assistant turns
     only); later turns in the same conversation exclude them to avoid repeats.
+    utility_alert_id: for utility_alert turns, the UtilityAlert this turn pushed.
     """
     if not CONVERSATION_MEMORY_ENABLED:
         return
@@ -196,6 +198,7 @@ def save_conversation_turn(
                     content=content.strip()[:4000],
                     interaction_type=(interaction_type or "")[:32] or None,
                     shown_article_links=cleaned_links,
+                    utility_alert_id=utility_alert_id,
                     created_at=datetime.utcnow(),
                 )
             )
@@ -278,6 +281,7 @@ def get_recent_conversation_turns(
                     "content": row.content,
                     "interaction_type": row.interaction_type or "",
                     "shown_article_links": list(row.shown_article_links or []),
+                    "utility_alert_id": row.utility_alert_id,
                 }
                 for row in reversed(rows)
             ]
@@ -584,4 +588,61 @@ def get_last_interaction_type(history: list[dict[str, str]]) -> str | None:
     for turn in reversed(history):
         if turn.get("role") == "assistant":
             return turn.get("interaction_type") or None
+    return None
+
+
+# Words that scope a follow-up to the pushed utility alert rather than to the
+# news database (English + Bahasa Malaysia alert-intent vocabulary).
+_ALERT_SCOPE_MARKERS: tuple[str, ...] = (
+    # duration / timing
+    "how long", "when", "until", "till", "what time", "bila",
+    "berapa lama", "sehingga",
+    # affected area
+    "which area", "where", "kawasan", "di mana", "lokasi",
+    "affected", "area", "location",
+    # restoration status
+    "restored", "restore", "resume", "back to normal", "still no",
+    "status", "pulih", "sudah", "ok now",
+    # more details
+    "more", "detail", "details", "full notice", "lagi", "maklumat",
+)
+
+
+def resolve_utility_alert_followup(
+    query: str, history: list[dict[str, str]]
+) -> int | None:
+    """
+    If the most recent assistant turn pushed a utility alert and this query is
+    scoped to that alert, return the UtilityAlert id so the handler can answer
+    deterministically from the notice instead of searching news.
+
+    Queries carrying a fresh news topic or a location are left to normal news Q&A.
+    """
+    if not history:
+        return None
+    lowered = (query or "").strip().lower()
+    if not lowered:
+        return None
+
+    alert_id: int | None = None
+    for turn in reversed(history):
+        if turn.get("role") == "assistant":
+            if turn.get("interaction_type") == "utility_alert":
+                alert_id = turn.get("utility_alert_id")
+            break
+    if not alert_id:
+        return None
+
+    # Alert-intent wording wins — "how long will the water disruption last?"
+    # must not fall through to news search just because it says "disruption".
+    if any(marker in lowered for marker in _ALERT_SCOPE_MARKERS):
+        return alert_id
+    # Fresh news topic or a location swap ("how about Miri?") -> news Q&A.
+    if _extract_topic(query):
+        return None
+    if _extract_locations(query):
+        return None
+    # Vague short follow-up right after an alert push ("tell me more") -> alert.
+    if is_followup_query(query, history):
+        return alert_id
     return None

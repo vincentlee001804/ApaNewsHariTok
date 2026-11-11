@@ -1,0 +1,47 @@
+{
+  "generated_utc": "20261111T072528Z",
+  "rubric": "1-5 per thesis dimensions; evidence verified against production DB article snippets (single AI rater, documented limitation)",
+  "run_csv": "conversation_e2e_20261111T072528Z.csv",
+  "fixes_in_this_run": [
+    "digest ordinal references: 'explain more about the first news?' resolves against the last displayed digest/answer (handlers.py + conversation_service.extract_ordinal_reference + services.resolve_ordinal_article/get_news_agent_response_about_article)",
+    "answer-prompt hallucination guard: forbid numbers/dates/names not present in the evidence items (answer_news_question, answer_news_question_with_history)",
+    "topic-gate DB rescue: when the gate is about to refuse, one targeted full-window scan rescues older relevant stories cut off by NEWS_AGENT_MAX_CANDIDATES (new false-negative class found during re-benchmark)"
+  ],
+  "per_turn_scores": [
+    {"conversation": "tech_location_thread", "turn": 1, "relevance": 4, "coherence": 5, "factual": 5, "note": "honest no-specific-tech hedge + 2 tech-adjacent items, claims match snippets"},
+    {"conversation": "tech_location_thread", "turn": 2, "relevance": 2, "coherence": 4, "factual": 3, "note": "marathon is not tech; 'might involve technical aspects' is a rationalization; figures match snippet"},
+    {"conversation": "tech_location_thread", "turn": 3, "relevance": 3, "coherence": 2, "factual": 4, "note": "answer text repeats marathon line but displayed evidence card is the murder story (evidence-card mismatch)"},
+    {"conversation": "incident_wh_thread", "turn": 1, "relevance": 5, "coherence": 5, "factual": 5, "note": "rescued by DB fallback: correct Nov 3 lorry accident on Jalan Sibu-Bintulu (was a false negative before the rescue fix)"},
+    {"conversation": "incident_wh_thread", "turn": 2, "relevance": 2, "coherence": 3, "factual": 3, "note": "location-drift expansion (bintulu,sibu) pulls in Bintulu helicopter story instead of the accident cause"},
+    {"conversation": "incident_wh_thread", "turn": 3, "relevance": 1, "coherence": 4, "factual": 5, "note": "'when was the latest one' drifts to transport-in-bintulu and answers about economic growth (known follow-up expansion weakness)"},
+    {"conversation": "topic_gate_abstention", "turn": 1, "relevance": 5, "coherence": 5, "factual": 5, "note": "correct abstention (topic does not exist) + live DB-backed suggestions"},
+    {"conversation": "topic_gate_abstention", "turn": 2, "relevance": 5, "coherence": 5, "factual": 5, "note": "correct abstention for location swap"},
+    {"conversation": "malay_single_shot", "turn": 1, "relevance": 5, "coherence": 4, "factual": 5, "note": "BM abstention + related item; hallucination guard removed the invented '453 victims/7 relief centres' figure seen in the previous run"},
+    {"conversation": "temporal_thread", "turn": 1, "relevance": 4, "coherence": 4, "factual": 5, "note": "honest 'items only mention decreases' instead of invented figures; 1,210 figure stays attributed to the 3-state pool"},
+    {"conversation": "temporal_thread", "turn": 2, "relevance": 3, "coherence": 4, "factual": 3, "note": "1,135 victims/321 families/11 centres not visible in shown snippets (unverifiable, likely from a pool article summary); temporal word still lost in expansion (known bug)"},
+    {"conversation": "long_selfcontained_after_thread", "turn": 1, "relevance": 4, "coherence": 5, "factual": 5, "note": "honest hedge + tech-adjacent politics items"},
+    {"conversation": "long_selfcontained_after_thread", "turn": 2, "relevance": 4, "coherence": 5, "factual": 4, "note": "renewable-energy answer is investment/tariff adjacent; mild extrapolation on hybrid financing"},
+    {"conversation": "digest_ordinal_thread", "turn": 1, "relevance": 5, "coherence": 5, "factual": 5, "note": "NEW: ordinal resolved to digest item 1 (cyber-threat polling story) and answered accurately from that article"},
+    {"conversation": "digest_ordinal_thread", "turn": 2, "relevance": 5, "coherence": 5, "factual": 5, "note": "NEW: 'the second one' chains past the 1-link QA turn back to the 3-item digest (TTG Bintulu/Miri story)"}
+  ],
+  "after": {
+    "mean_relevance": 3.8,
+    "mean_coherence": 4.33,
+    "mean_factual": 4.47,
+    "false_negative_turns": 0,
+    "no_repeat_novelty": 0.92,
+    "tier1_pass": "18/18"
+  },
+  "comparison": {
+    "baseline_fyp1": {"mean_relevance": 2.31, "mean_coherence": 4.08, "mean_factual": 3.31, "false_negative_turns": 3, "tier1_pass": "9/10 (+2 documented limitations)"},
+    "after_conversation_fixes_20261111T0233": {"mean_relevance": 3.62, "mean_coherence": 4.38, "mean_factual": 4.0, "false_negative_turns": 0, "tier1_pass": "12/12"},
+    "after_ordinal_hallucination_rescue_20261111T0725": {"mean_relevance": 3.8, "mean_coherence": 4.33, "mean_factual": 4.47, "false_negative_turns": 0, "tier1_pass": "18/18"}
+  },
+  "notes": [
+    "digest_ordinal_thread is a new capability: no baseline exists for those 2 turns; they are included in the means.",
+    "novelty 0.92: the 0.0 dip is the ordinal turn re-showing the referenced article by design (same as 'tell me more').",
+    "incident_wh_thread turn 1 was a false negative until the topic-gate DB rescue was added during this re-benchmark: the newest-1500 candidate cap silently aged the Nov 3 accident story out of the pool even though it is inside the 30-day window.",
+    "Remaining weak turns are follow-up expansion drift (wh-questions inheriting wrong locations/topics from suggestion lists) - separate from this fix set.",
+    "New refusal templates do not contain 'couldn't find', so the abstained auto-metric undercounts correct refusals."
+  ]
+}

@@ -666,8 +666,20 @@ async def latest_demo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
 
     try:
-        text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id)
+        shown_links: list[str] = []
+        text = await asyncio.to_thread(
+            get_latest_news_text_for_user, telegram_id, shown_links_out=shown_links
+        )
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+        # Record the digest (with display order) so ordinal follow-ups like
+        # "explain more about the first news?" can resolve against it.
+        save_conversation_turn(
+            telegram_id,
+            "assistant",
+            _plain_text_from_html(text),
+            interaction_type="latest",
+            shown_article_links=shown_links or None,
+        )
     except OperationalError:
         logger.exception("Database busy while serving /latest")
         await update.message.reply_text(
@@ -2220,21 +2232,65 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
 
     chat_id = update.effective_chat.id if update.effective_chat else None
 
+    # Ordinal follow-ups ("explain more about the first news?") resolve against
+    # the articles shown in the assistant's most recent digest/answer instead of
+    # generic retrieval, which cannot know which displayed item was "first".
+    from src.core.services import (
+        get_news_agent_response_about_article,
+        resolve_ordinal_article,
+    )
+
+    ref_article = await asyncio.to_thread(
+        resolve_ordinal_article, telegram_id, message_text, history
+    )
+    if ref_article is not None:
+        async with _typing_indicator(context.bot, chat_id):
+            response, ref_shown_links = await asyncio.to_thread(
+                get_news_agent_response_about_article,
+                telegram_id,
+                ref_article,
+                message_text,
+                conversation_history=history,
+            )
+        await update.message.reply_text(response, parse_mode=ParseMode.HTML)
+        save_conversation_turn(
+            telegram_id,
+            "assistant",
+            _plain_text_from_html(response),
+            interaction_type="qa",
+            shown_article_links=ref_shown_links or None,
+        )
+        return
+
     if not is_followup and "latest" in lowered:
         from src.core.services import get_latest_news_text_for_user
 
         max_items = _requested_latest_count(message_text)
+        digest_links: list[str] = []
         async with _typing_indicator(context.bot, chat_id):
-            text = await asyncio.to_thread(get_latest_news_text_for_user, telegram_id, max_items)
+            text = await asyncio.to_thread(
+                get_latest_news_text_for_user, telegram_id, max_items,
+                shown_links_out=digest_links,
+            )
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-        save_conversation_turn(telegram_id, "assistant", _plain_text_from_html(text), interaction_type="latest")
+        save_conversation_turn(
+            telegram_id,
+            "assistant",
+            _plain_text_from_html(text),
+            interaction_type="latest",
+            shown_article_links=digest_links or None,
+        )
         return
 
     if not is_followup and _looks_like_todays_summary_request(message_text):
         from src.core.services import get_todays_news_digest_for_user
 
+        digest_links = []
         async with _typing_indicator(context.bot, chat_id):
-            digest = await asyncio.to_thread(get_todays_news_digest_for_user, telegram_id, 6)
+            digest = await asyncio.to_thread(
+                get_todays_news_digest_for_user, telegram_id, 6,
+                shown_links_out=digest_links,
+            )
         if not digest:
             await update.message.reply_text(
                 "I couldn't generate today's summary yet. Try `/latest`.",
@@ -2253,7 +2309,13 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
-        save_conversation_turn(telegram_id, "assistant", _plain_text_from_html(digest), interaction_type="digest_summary")
+        save_conversation_turn(
+            telegram_id,
+            "assistant",
+            _plain_text_from_html(digest),
+            interaction_type="digest_summary",
+            shown_article_links=digest_links or None,
+        )
         return
 
     # Default: "news agent" Q&A mode (also used for follow-ups after /latest or digest).

@@ -1,0 +1,53 @@
+{
+  "generated_utc": "20261111T071333Z",
+  "note": "Responses await manual 1-5 rubric scoring (relevance, coherence, factual consistency). novelty/abstained are auto-metrics.",
+  "db_articles": 6449,
+  "db_with_summary": 2564,
+  "mean_novelty": 1.0,
+  "abstention_turns": 1,
+  "total_turns": 16,
+  "conversations": [
+    {
+      "conversation": "tech_location_thread",
+      "turns": 3,
+      "mean_novelty": 1.0,
+      "abstentions": 1
+    },
+    {
+      "conversation": "incident_wh_thread",
+      "turns": 3,
+      "mean_novelty": 1.0,
+      "abstentions": 0
+    },
+    {
+      "conversation": "topic_gate_abstention",
+      "turns": 2,
+      "mean_novelty": null,
+      "abstentions": 0
+    },
+    {
+      "conversation": "malay_single_shot",
+      "turns": 1,
+      "mean_novelty": 1.0,
+      "abstentions": 0
+    },
+    {
+      "conversation": "temporal_thread",
+      "turns": 2,
+      "mean_novelty": 1.0,
+      "abstentions": 0
+    },
+    {
+      "conversation": "long_selfcontained_after_thread",
+      "turns": 2,
+      "mean_novelty": 1.0,
+      "abstentions": 0
+    },
+    {
+      "conversation": "digest_ordinal_thread",
+      "turns": 2,
+      "mean_novelty": 1.0,
+      "abstentions": 0
+    }
+  ]
+}

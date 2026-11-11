@@ -2018,6 +2018,7 @@ def get_latest_news_text_for_user(
     max_items: int = 3,
     *,
     scheduled_push: bool = False,
+    shown_links_out: list[str] | None = None,
 ) -> str:
     """
     Fetch latest items from configured RSS feeds, filtered by user preferences,
@@ -2119,6 +2120,10 @@ def get_latest_news_text_for_user(
             ranked_articles, max_items=max_items, session=session
         )
         chosen: List[NewsArticle] = [primary for primary, _members in chosen_clusters]
+        if shown_links_out is not None:
+            shown_links_out.extend(
+                (a.link or "").strip() for a in chosen if (a.link or "").strip()
+            )
         logger.info(
             "[latest-time] rank_cluster: %.3fs, chosen=%d",
             time.perf_counter() - t_cluster_0,
@@ -2270,6 +2275,10 @@ def get_latest_news_text_for_user(
                     if len(to_display) >= max_items:
                         break
 
+            if shown_links_out is not None:
+                shown_links_out.extend(
+                    (it.link or "").strip() for it in to_display if (it.link or "").strip()
+                )
             if DEDUPLICATION_ENABLED and user_id is not None and displayed_articles:
                 _record_deliveries_for_user(session, user_id, displayed_articles, now)
             session.commit()
@@ -2433,6 +2442,7 @@ def get_todays_news_digest_for_user(
     *,
     scheduled_push: bool = False,
     mark_delivery: bool = False,
+    shown_links_out: list[str] | None = None,
 ) -> str:
     """
     Conversational mode: generate ONE digest for "today's news" from local DB (SQLite).
@@ -2584,6 +2594,10 @@ def get_todays_news_digest_for_user(
             digest = items_text
 
         display_items = chosen_items[:4]
+        if shown_links_out is not None:
+            shown_links_out.extend(
+                (it.link or "").strip() for it in display_items if (it.link or "").strip()
+            )
         overview_lines: list[str] = []
         for it in display_items:
             display_title = (
@@ -2734,6 +2748,10 @@ def get_todays_news_digest_for_user(
         digest = items_text
 
     display_clusters = chosen_clusters[:4]
+    if shown_links_out is not None:
+        shown_links_out.extend(
+            (art.link or "").strip() for art, _m in display_clusters if (art.link or "").strip()
+        )
     overview_lines: list[str] = []
     for art, _members in display_clusters:
         title = _display_title_text(art.title, art.ai_title).replace("\n", " ").strip()[:220]
@@ -3268,6 +3286,115 @@ def _format_no_related_news_html(
     return "\n".join(lines).strip(), shown_links
 
 
+def _topic_pool_db_rescue(
+    topic: str,
+    query: str,
+    cutoff: datetime,
+) -> List[NewsArticle]:
+    """Targeted full-window DB scan for articles matching a topic and the query
+    location. Used only when the topic gate is about to refuse: the bounded
+    candidate fetch (newest NEWS_AGENT_MAX_CANDIDATES) can cut off older
+    relevant stories that are still inside the product window."""
+    if not topic:
+        return []
+    loc_keys = _question_location_keywords(query)
+    with SessionLocal() as session:
+        rows = list(
+            session.execute(
+                select(NewsArticle)
+                .where(NewsArticle.created_at >= cutoff)
+                .order_by(NewsArticle.created_at.desc())
+                .limit(6000)
+            ).scalars().all()
+        )
+    hits: List[NewsArticle] = []
+    for art in rows:
+        if not _topic_appears_in_article(art, topic):
+            continue
+        if loc_keys and not _article_matches_question_location(art, query):
+            continue
+        hits.append(art)
+        if len(hits) >= RAG_NEWS_TOP_K:
+            break
+    return hits
+
+
+def resolve_ordinal_article(
+    telegram_id: int,
+    query: str,
+    history: list[dict[str, str]] | None,
+) -> NewsArticle | None:
+    """Resolve an ordinal reference ("the first news", "berita kedua") to the
+    article at that position in the most recent assistant message that displayed
+    articles (/latest digest, today's digest, or a news-agent answer). Returns
+    None when there is no ordinal or no displayed list to resolve against."""
+    from src.core.conversation_service import extract_ordinal_reference
+
+    idx = extract_ordinal_reference(query)
+    if idx is None:
+        return None
+
+    candidate_link: str | None = None
+    for turn in reversed(history or []):
+        if turn.get("role") != "assistant":
+            continue
+        links = [
+            lk.strip() for lk in (turn.get("shown_article_links") or []) if lk and lk.strip()
+        ]
+        if not links:
+            continue
+        if idx == -1:
+            candidate_link = links[-1]
+            break
+        if idx < len(links):
+            candidate_link = links[idx]
+            break
+    if not candidate_link:
+        return None
+
+    with SessionLocal() as session:
+        art = session.execute(
+            select(NewsArticle).where(NewsArticle.link == candidate_link)
+        ).scalar_one_or_none()
+        if art is None:
+            return None
+        session.expunge(art)
+        return art
+
+
+def get_news_agent_response_about_article(
+    telegram_id: int,
+    article: NewsArticle,
+    user_text: str,
+    conversation_history: list[dict[str, str]] | None = None,
+) -> tuple[str, list[str]]:
+    """Answer a follow-up about one specific, already-displayed article (ordinal
+    references like "explain more about the first news"). The article is the
+    evidence set by construction, so no retrieval or topic gate is needed."""
+    history = conversation_history or []
+    title = _display_title_text(article.title, article.ai_title).replace("\n", " ").strip()[:220]
+    snippet = (article.ai_summary or article.raw_summary or article.title or "").strip()
+    items_text = f"- {title}\n  {_truncate_text(snippet, max_chars=900)}"
+    # Anchor the question to the item so the LLM is not lost in the ordinal
+    # wording ("the first news").
+    anchored_question = f"{user_text.strip()} — about this news item: {title}"
+    if history:
+        answer = answer_news_question_with_history(anchored_question, items_text, history)
+    else:
+        answer = answer_news_question(anchored_question, items_text)
+    if not answer:
+        answer = f"Here are the details I have on: {title}."
+
+    row = {
+        "title": _display_title_text(article.title, article.ai_title),
+        "summary": article.ai_summary or article.raw_summary or article.title or "",
+        "source": _get_source_name(article.source),
+        "link": article.link or "",
+        "category": category_label_for_article(article),
+    }
+    return _format_news_agent_html(answer=answer, evidence_rows=[row])
+
+
 def get_news_agent_response_for_user(
     telegram_id: int,
     user_text: str,
@@ -3616,6 +3743,20 @@ def get_news_agent_response_for_user(
                 )
                 fallback_chosen = [t[2] for t in topic_pool[:10]]
                 chosen = [t[2] for t in topic_pool[:RAG_NEWS_TOP_K]]
+                topic_present_in_hits = True
+        if not topic_present_in_hits:
+            # Last chance: the candidate cap keeps only the newest N
+            # articles, so a relevant story may sit just beyond it while
+            # still inside the product window. One targeted full-window
+            # scan rescues those instead of a false 'no news'.
+            rescued = _topic_pool_db_rescue(expanded_topic, expanded_query, cutoff)
+            if rescued:
+                logger.info(
+                    "[rag-time] topic gate: rescued %d articles beyond candidate cap",
+                    len(rescued),
+                )
+                fallback_chosen = rescued[:10]
+                chosen = rescued[:RAG_NEWS_TOP_K]
                 topic_present_in_hits = True
         if not topic_present_in_hits:
             query_locations = _question_location_keywords(expanded_query)

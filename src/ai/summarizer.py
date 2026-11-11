@@ -1006,6 +1006,7 @@ def answer_news_question(question: str, items_text: str, max_words: int = 90) ->
 
         Rules:
         - Answer the user's question ONLY using the provided items.
+        - Never state numbers, dates, names, or statistics that do not appear in the provided items. Do not estimate or combine figures from different items. If the items do not mention a figure, say it is not mentioned.
         - If the provided items do not contain enough relevant information, say:
           "I couldn't find relevant information in the news items I have."
         - Keep the answer short (<= {max_words} words).
@@ -1102,6 +1103,7 @@ def answer_news_question_with_history(
 
         Rules:
         - Answer the LATEST user question ONLY using the provided news items.
+        - Never state numbers, dates, names, or statistics that do not appear in the provided items. Do not estimate or combine figures from different items. If the items do not mention a figure, say it is not mentioned.
         - You may use the recent conversation to interpret pronouns or follow-ups (e.g., "What about Miri?" or "tell me more").
         - If the provided items do not contain enough relevant information, say:
           "I couldn't find relevant information in the news items I have."

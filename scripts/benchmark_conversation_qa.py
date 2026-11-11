@@ -7,7 +7,9 @@ features added in FYP2 (docs/fyp2 conversation-memory commits):
 Tier 1 — deterministic heuristic tests (no DB, no LLM):
   Feeds crafted histories through is_followup_query / expand_followup_query
   (src/core/conversation_service.py) and asserts follow-up classification and
-  query expansion. This is the "did the bot understand the question" axis.
+  query expansion, plus extract_ordinal_reference for digest ordinal
+  follow-ups ("the first news"). This is the "did the bot understand the
+  question" axis.
   Cases marked expected_fail=True document known heuristic limitations
   (e.g. Bahasa Malaysia follow-up markers are not covered).
 
@@ -199,15 +201,90 @@ TIER1_CASES: list[dict] = [
         "expansion_contains": ["tech", "miri"],
         "note": "Bahasa Malaysia follow-up marker + location swap keeps carried-over topic",
     },
+    {
+        "id": "ordinal_first_news",
+        "category": "ordinal reference",
+        "query": "Explain more about the first news?",
+        "ordinal_expect": 0,
+        "note": "English ordinal + noun maps to digest display index 0",
+    },
+    {
+        "id": "ordinal_second_one",
+        "category": "ordinal reference",
+        "query": "how about the second one?",
+        "ordinal_expect": 1,
+        "note": "'one' noun form maps to digest display index 1",
+    },
+    {
+        "id": "ordinal_last_story",
+        "category": "ordinal reference",
+        "query": "tell me more about the last story",
+        "ordinal_expect": -1,
+        "note": "'last' maps to -1 (final displayed item)",
+    },
+    {
+        "id": "ordinal_bm_kedua",
+        "category": "ordinal reference",
+        "query": "berita kedua apa cerita?",
+        "ordinal_expect": 1,
+        "note": "BM ordinal after noun maps to digest display index 1",
+    },
+    {
+        "id": "ordinal_bm_terakhir",
+        "category": "ordinal reference",
+        "query": "yang terakhir tu apa?",
+        "ordinal_expect": -1,
+        "note": "BM 'terakhir' maps to -1 (final displayed item)",
+    },
+    {
+        "id": "ordinal_none_plain_question",
+        "category": "ordinal reference",
+        "query": "Any tech news in Kuching?",
+        "ordinal_expect": None,
+        "note": "plain question has no ordinal reference",
+    },
 ]
 
 
 def run_tier1() -> dict:
-    from src.core.conversation_service import expand_followup_query, is_followup_query
+    from src.core.conversation_service import (
+        expand_followup_query,
+        extract_ordinal_reference,
+        is_followup_query,
+    )
 
     results = []
     passed = failed = 0
     for case in TIER1_CASES:
+        if "ordinal_expect" in case:
+            # Ordinal-reference extraction (digest follow-ups); no history needed.
+            got_ordinal = extract_ordinal_reference(case["query"])
+            problems = []
+            if got_ordinal != case["ordinal_expect"]:
+                problems.append(
+                    f"ordinal: expected {case['ordinal_expect']}, got {got_ordinal}"
+                )
+            ok = not problems
+            if ok:
+                passed += 1
+            else:
+                failed += 1
+            results.append(
+                {
+                    "id": case["id"],
+                    "category": case["category"],
+                    "query": case["query"],
+                    "ordinal_expect": case["ordinal_expect"],
+                    "got_ordinal": got_ordinal,
+                    "ok": ok,
+                    "problems": problems,
+                    "note": case["note"],
+                }
+            )
+            status = "ok" if ok else "FAIL"
+            print(f"  [{status}] {case['id']}: {case['query']!r} -> {got_ordinal}")
+            continue
+
         history = case["history"]
         got_followup = is_followup_query(case["query"], history)
         expanded, _ = expand_followup_query(case["query"], history)
@@ -311,6 +388,16 @@ TIER2_CONVERSATIONS: list[dict] = [
             "What are the latest developments in the Sarawak renewable energy sector?",
         ],
     },
+    {
+        # Simulates: /latest digest, then ordinal follow-ups against it
+        # (the production handler resolves these before generic retrieval).
+        "id": "digest_ordinal_thread",
+        "digest_first": True,
+        "turns": [
+            "Explain more about the first news?",
+            "how about the second one?",
+        ],
+    },
 ]
 
 
@@ -326,7 +413,11 @@ def run_tier2() -> dict:
 
     from src.core.conversation_service import expand_followup_query
     from src.core.models import NewsArticle
-    from src.core.services import get_news_agent_response_for_user
+    from src.core.services import (
+        get_news_agent_response_about_article,
+        get_news_agent_response_for_user,
+        resolve_ordinal_article,
+    )
     from src.storage.database import SessionLocal
 
     with SessionLocal() as s:
@@ -350,15 +441,71 @@ def run_tier2() -> dict:
         shown_so_far: list[str] = []
         conv_novelty: list[float] = []
         print(f"\n== conversation: {conv['id']} ==")
-        for i, user_text in enumerate(conv["turns"], start=1):
-            expanded, _ = expand_followup_query(user_text, history)
-            t0 = time.time()
-            html, shown = get_news_agent_response_for_user(
-                BENCH_TELEGRAM_ID,
-                expanded or user_text,
-                conversation_history=history,
-                exclude_article_links=shown_so_far or None,
+        if conv.get("digest_first"):
+            # Simulate the /latest digest turn read-only (get_latest_news_text_for_user
+            # would write delivery rows): the newest summarized articles stand in
+            # for the displayed digest, links in display order.
+            with SessionLocal() as s:
+                digest_arts = list(
+                    s.execute(
+                        select(NewsArticle)
+                        .where(NewsArticle.ai_summary.isnot(None))
+                        .order_by(NewsArticle.created_at.desc())
+                        .limit(3)
+                    ).scalars().all()
+                )
+            digest_links = [
+                (a.link or "").strip() for a in digest_arts if (a.link or "").strip()
+            ]
+            digest_text = "\n".join(
+                f"[{i + 1}] {(a.ai_title or a.title or '').strip()}"
+                for i, a in enumerate(digest_arts)
             )
+            rows.append(
+                {
+                    "conversation": conv["id"],
+                    "turn": 0,
+                    "user_text": "[simulated /latest digest]",
+                    "expanded_query": "",
+                    "response_html": digest_text,
+                    "shown_links": " | ".join(digest_links),
+                    "shown_count": len(digest_links),
+                    "novelty": None,
+                    "abstained": False,
+                    "elapsed_s": 0.0,
+                }
+            )
+            history.append(
+                {
+                    "role": "assistant",
+                    "content": digest_text,
+                    "interaction_type": "latest",
+                    "shown_article_links": digest_links,
+                }
+            )
+            shown_so_far.extend(digest_links)
+            print(f"  digest: {len(digest_links)} items (simulated /latest)")
+        for i, user_text in enumerate(conv["turns"], start=1):
+            # Mirror handlers.py: ordinal references resolve against the most
+            # recent displayed list before any generic retrieval.
+            ref_article = resolve_ordinal_article(BENCH_TELEGRAM_ID, user_text, history)
+            t0 = time.time()
+            if ref_article is not None:
+                expanded = ""
+                html, shown = get_news_agent_response_about_article(
+                    BENCH_TELEGRAM_ID,
+                    ref_article,
+                    user_text,
+                    conversation_history=history,
+                )
+            else:
+                expanded, _ = expand_followup_query(user_text, history)
+                html, shown = get_news_agent_response_for_user(
+                    BENCH_TELEGRAM_ID,
+                    expanded or user_text,
+                    conversation_history=history,
+                    exclude_article_links=shown_so_far or None,
+                )
             elapsed = round(time.time() - t0, 2)
 
             prior = set(shown_so_far)

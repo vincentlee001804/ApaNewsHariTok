@@ -317,6 +317,56 @@ def _extract_failed_topic_from_response(text: str) -> str | None:
     return None
 
 
+# Ordinal references to items in the assistant's last displayed list, e.g.
+# "explain more about the first news" or "berita kedua". Value is the 0-based
+# index into that list; -1 means the last item.
+_ORDINAL_INDEX: dict[str, int] = {
+    "first": 0, "1st": 0,
+    "second": 1, "2nd": 1,
+    "third": 2, "3rd": 2,
+    "fourth": 3, "4th": 3,
+    "fifth": 4, "5th": 4,
+    "last": -1,
+}
+
+_BM_ORDINAL_INDEX: dict[str, int] = {
+    "pertama": 0, "kedua": 1, "ketiga": 2, "keempat": 3, "kelima": 4,
+    "terakhir": -1, "akhir": -1,
+}
+
+# English ordinal precedes the noun: "the first news", "the 2nd story".
+_ORDINAL_NOUN_RE = re.compile(
+    r"\b(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th|last)\s+"
+    r"(?:news|one|ones|story|stories|item|items|article|articles|headline|headlines)\b",
+    re.IGNORECASE,
+)
+
+# BM ordinal follows the noun: "berita pertama", "tajuk kedua", "yang terakhir".
+_BM_ORDINAL_RE = re.compile(
+    r"\b(?:berita|tajuk|artikel|yang)\s+"
+    r"(pertama|kedua|ketiga|keempat|kelima|terakhir|akhir)\b",
+    re.IGNORECASE,
+)
+
+
+def extract_ordinal_reference(query: str) -> int | None:
+    """Detect ordinal references like "the first news" / "berita kedua" / "the last one".
+
+    Returns a 0-based index into the last displayed article list, -1 for "last",
+    or None when the query has no ordinal reference.
+    """
+    text = (query or "").strip()
+    if not text:
+        return None
+    m = _ORDINAL_NOUN_RE.search(text)
+    if m:
+        return _ORDINAL_INDEX.get(m.group(1).lower())
+    m = _BM_ORDINAL_RE.search(text)
+    if m:
+        return _BM_ORDINAL_INDEX.get(m.group(1).lower())
+    return None
+
+
 def _extract_topic(text: str) -> str | None:
     """
     Best-effort topic extraction from user query or assistant response.

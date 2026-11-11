@@ -3408,14 +3408,24 @@ def get_news_agent_response_about_article(
     if not answer:
         answer = f"Here are the details I have on: {title}."
 
-    row = {
-        "title": _display_title_text(article.title, article.ai_title),
-        "summary": article.ai_summary or article.raw_summary or article.title or "",
-        "source": _get_source_name(article.source),
-        "link": article.link or "",
-        "category": category_label_for_article(article),
-    }
-    return _format_news_agent_html(answer=answer, evidence_rows=[row])
+    # Compact card: the answer above already covers this exact article, so
+    # repeat only the title + source link, not the stored summary again.
+    def _esc(text: str) -> str:
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    lines = [_esc(strip_markdown_artifacts_for_plain_text(answer)), ""]
+    title = _esc((_display_title_text(article.title, article.ai_title) or "").strip())
+    category = _esc((category_label_for_article(article) or "Local").strip() or "Local")
+    source = _esc((_get_source_name(article.source) or "").strip())
+    link = _esc((article.link or "").strip())
+    if title:
+        lines.append(f"<blockquote>[{category}] <b>{title}</b></blockquote>")
+        if source and link:
+            lines.append(f'Sources: <a href="{link}">{source}</a>')
+        elif link:
+            lines.append(f"URL: {link}")
+    shown = [article.link] if article.link else []
+    return "\n".join(lines).strip(), shown
 
 
 def get_news_agent_response_for_user(

@@ -2264,6 +2264,24 @@ async def conversational_message(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
 
+    # Out-of-scope/meta questions (secrets, system info, bot identity):
+    # fixed refusal, no retrieval, no cards, no LLM call.
+    from src.core.conversation_service import is_out_of_scope_query
+
+    if is_out_of_scope_query(message_text):
+        refusal = (
+            "I am a Sarawak local news assistant - I can only answer "
+            "questions about local news. I can't share system details, "
+            "API keys, or user information."
+        )
+        await update.message.reply_text(
+            refusal, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+        )
+        save_conversation_turn(
+            telegram_id, "assistant", refusal, interaction_type="qa"
+        )
+        return
+
     if not is_followup and "latest" in lowered:
         from src.core.services import get_latest_news_text_for_user
 

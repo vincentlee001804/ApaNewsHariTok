@@ -371,6 +371,24 @@ def extract_ordinal_reference(query: str) -> int | None:
     return None
 
 
+# Meta/out-of-scope questions that should never reach retrieval or the LLM:
+# requests for secrets/credentials/system info and bot-identity questions.
+# The handler answers these with a fixed refusal (no cards, no DB query).
+_OUT_OF_SCOPE_RE = re.compile(
+    r"\b(api[\s-]?key|apikey|password|passwd|secret key|api token|access token|"
+    r"system prompt|your (system|database|server|code|source code)|"
+    r"how many users|number of users|user count|"
+    r"who (made|created|built|developed) you|who are you|about yourself)\b",
+    re.IGNORECASE,
+)
+
+
+def is_out_of_scope_query(query: str) -> bool:
+    """True for questions about the bot itself, its system, or its secrets —
+    these get a fixed refusal instead of a news-database search."""
+    return bool(_OUT_OF_SCOPE_RE.search((query or "").strip()))
+
+
 def _extract_topic(text: str) -> str | None:
     """
     Best-effort topic extraction from user query or assistant response.
